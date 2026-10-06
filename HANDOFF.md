@@ -3,6 +3,23 @@
 For anyone — human or AI agent — picking up Cosmogon. Read this first, then
 [ARCHITECTURE.md](ARCHITECTURE.md) and [BUILDING.md](BUILDING.md).
 
+## Active development directive (2026-10-05)
+
+Read [docs/MASTER_DEVELOPMENT_DIRECTIVE.md](docs/MASTER_DEVELOPMENT_DIRECTIVE.md) for the owner's
+long-term product specification. It supersedes conflicting older high-level plans. Current evidence:
+[CURRENT_STATE_AUDIT](docs/CURRENT_STATE_AUDIT.md); active sequence:
+[MASTER_GAP_ANALYSIS](docs/MASTER_GAP_ANALYSIS.md). Preserve the released features and native architecture.
+
+The active build adds app-only free flight, camera/photo settings, persistent viewpoints and
+performance measurement, configurable sound and a notification inbox; see [AUDIO_SYSTEM](docs/AUDIO_SYSTEM.md),
+[NOTIFICATION_SYSTEM](docs/NOTIFICATION_SYSTEM.md), [NAVIGATION](docs/NAVIGATION.md),
+[PERFORMANCE](docs/PERFORMANCE.md) and [VALIDATION](docs/VALIDATION.md). View → Performance or
+Cmd/Ctrl+K → Performance opens the panel. `--profile /tmp/run.json --quit` records a bounded sample;
+`--panel performance` supports capture QA. View → Camera & Photo opens navigation, photo and
+viewpoint controls. G detaches; F returns to the selected object. No universe schema or golden
+fingerprint change. Current branch verification is in VALIDATION; the 173-test figure below is
+the released baseline.
+
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
   [GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases) with macOS, Windows and Linux builds.
@@ -37,8 +54,11 @@ Map of the 1.0 features (start here when changing one):
 | Throw / Grab tools | — | `interact.rs`, `sim.rs` (`Tool`), `ui/dock.rs` |
 | Guided tours | — | `ui/tour.rs` |
 | Timeline and rewind | — | `timeline.rs` |
-| Photo mode, dev capture | — | `capture.rs` |
-| Sound | — | `audio.rs` (synthesised; no audio files) |
+| Camera, free flight, viewpoints | — | `camera.rs`, `navigation.rs`, `ui/navigation.rs` |
+| Photo mode, lens/colour, dev capture | — | `capture.rs`, `navigation.rs`, `ui/navigation.rs` |
+| Performance recordings | — | `performance.rs`, `ui/performance.rs` |
+| Sound modes/mixer | — | `audio.rs`, `ui/alerts.rs` (synthesised; no audio files) |
+| Notification inbox/routing | — | `notifications.rs`, `ui/alerts.rs`, `sim.rs` |
 
 ## How to verify a change
 1. `cargo test --release --workspace` — must stay green. Run it with output to a file if it seems to hang

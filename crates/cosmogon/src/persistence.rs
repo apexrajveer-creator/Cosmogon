@@ -76,6 +76,13 @@ pub struct UserSettings {
     pub intro: bool,
     /// Master volume for the soundtrack and effects (0 = silent).
     pub sound_volume: f32,
+    /// Opt-in render-pass and process measurements; applied at next launch.
+    pub detailed_profiling: bool,
+    pub camera: crate::navigation::CameraControls,
+    pub presentation: crate::navigation::Presentation,
+    pub photo_metadata: bool,
+    pub audio: crate::audio::SoundMix,
+    pub notifications: crate::notifications::NotificationSettings,
 }
 
 impl Default for UserSettings {
@@ -97,6 +104,12 @@ impl Default for UserSettings {
             show_velocity: false,
             intro: true,
             sound_volume: 0.6,
+            detailed_profiling: false,
+            camera: Default::default(),
+            presentation: Default::default(),
+            photo_metadata: true,
+            audio: Default::default(),
+            notifications: Default::default(),
         }
     }
 }
@@ -115,17 +128,24 @@ fn settings_path() -> PathBuf {
 
 impl UserSettings {
     pub fn load() -> Self {
-        std::fs::read_to_string(settings_path()).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default()
+        let mut settings: Self = std::fs::read_to_string(settings_path()).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default();
+        settings.camera.sanitize();
+        settings.presentation.sanitize();
+        settings.audio.sanitize();
+        settings.notifications.sanitize();
+        settings.sound_volume = if settings.sound_volume.is_finite() { settings.sound_volume.clamp(0.0, 1.0) } else { 0.0 };
+        settings
     }
-    pub fn save(&self) {
+    pub fn try_save(&self) -> Result<(), String> {
         let p = settings_path();
-        if let Some(d) = p.parent() {
-            let _ = std::fs::create_dir_all(d);
-        }
-        if let Ok(s) = toml::to_string_pretty(self) {
-            let _ = std::fs::write(p, s);
-        }
+        let parent = p.parent().ok_or("Invalid settings folder")?;
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        let text = toml::to_string_pretty(self).map_err(|e| e.to_string())?;
+        let tmp = p.with_extension(format!("{}.tmp", std::process::id()));
+        std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, &p).map_err(|e| e.to_string())
     }
+    pub fn save(&self) { if let Err(e) = self.try_save() { log::warn!("Could not save preferences: {e}"); } }
 }
 
 #[derive(Clone, Debug)]

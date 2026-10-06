@@ -35,3 +35,49 @@ Everything the app needs (shaders, data files, fonts) is embedded in the binary.
 ## Where things are stored
 Saves: `~/Library/Application Support/Cosmogon/saves` (macOS), `%APPDATA%\Cosmogon\saves` (Windows),
 `~/.local/share/Cosmogon/saves` (Linux). Settings: the platform config directory, `Cosmogon/settings.toml`.
+
+## Performance reports
+
+Open View → Performance, or use Cmd/Ctrl+K and search Performance. Detailed counters are enabled
+in Settings for the next launch. For an automatic run:
+
+```sh
+./target/release/cosmogon --new lab --focus Saturn --distance 5 --speed 0 \
+  --profile /tmp/saturn-run1.json --profile-warmup 120 --profile-frames 600 --quit
+```
+
+`--panel performance` opens the panel for captures. Choose a new report path each time; export
+refuses to overwrite existing files. See [PERFORMANCE.md](docs/PERFORMANCE.md) for measurement
+meaning, sample bounds, screenshot coordination and GPU/VRAM limitations.
+
+## Camera and photo verification
+
+View → Camera & Photo opens the three native tabs. See [NAVIGATION](docs/NAVIGATION.md) for controls,
+persistence and precision limits. Developer examples:
+
+```sh
+./target/release/cosmogon --new lab --focus Saturn --distance 5 --free-camera --panel camera \
+  --capture /tmp/free-camera.png --capture-metadata --capture-after 240 --quit
+./target/release/cosmogon --new lab --focus Saturn --distance 5 --panel photo --fov 35 --exposure 1.5 \
+  --capture /tmp/photo-controls.png --capture-metadata --capture-after 240 --quit
+```
+
+`--free-camera` detaches after the initial view is established. `--fov` is vertical degrees (10–110);
+`--exposure` is presentation EV (−6…6). `--panel camera|photo|bookmarks` selects a tab.
+`--capture-metadata` writes `<image stem>.png.json` beside the image; a same-stem performance `.json`
+remains separate. Automated `--capture` ignores keyboard input; exercise movement in an ordinary run.
+
+## Sound and notification verification
+
+`--panel alerts|sound|routing` opens the respective Sound & Alerts tab for native captures.
+`--sound-mode realistic|cinematic|hybrid` selects a launch mode; `--quiet` mutes master sound and
+suppresses interruptions for the launch. See [AUDIO_SYSTEM](docs/AUDIO_SYSTEM.md) and
+[NOTIFICATION_SYSTEM](docs/NOTIFICATION_SYSTEM.md) for live mixing, routing and current limits.
+
+The macOS packager assembles/signs the app in a local temporary folder, then creates the disk image
+and keeps a launchable copy in `~/Library/Caches/Cosmogon/builds/<version>/Cosmogon.app`.
+`dist/Cosmogon.app` links to that copy; `COSMOGON_APP_OUTPUT_DIR` can override its directory.
+The disk image contains a standalone app. This avoids Finder metadata being re-added by
+file-provider folders during or after signing. Apple documents the forbidden metadata in
+[QA1940](https://developer.apple.com/library/archive/qa/qa1940/_index.html). Temporary staging is
+removed on success or failure. Local builds are ad-hoc signed unless a Developer ID is supplied.

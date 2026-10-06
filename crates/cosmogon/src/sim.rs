@@ -20,7 +20,7 @@ use crate::persistence::{self, Manifest, Origin, SaveSlot, UserSettings};
 use crate::state::AppState;
 
 /// Something the camera can focus on or the inspector can show.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Target {
     Star(u32),
     Body(BodyRef),
@@ -338,6 +338,7 @@ impl Sim {
 /// A universe being created or loaded off the main thread.
 #[derive(Resource)]
 pub struct PendingUniverse {
+    pub started: std::time::Instant,
     pub task: Task<Result<(Universe, Session), String>>,
     pub label: String,
 }
@@ -364,6 +365,7 @@ pub struct NewSandbox {
 pub fn begin_new(commands: &mut Commands, next: &mut NextState<AppState>, n: NewSandbox) {
     let label = format!("Creating {} — simulating the history before your experiment begins…", n.settings.scenario.label());
     let NewSandbox { settings, advance_years, name, description, template, what_if, persist } = n;
+    let started = std::time::Instant::now();
     let task = AsyncComputeTaskPool::get().spawn(async move {
         let mut u = Universe::new(settings);
         // Experiments start "now"; any fast-forward then shows what follows from them.
@@ -382,36 +384,39 @@ pub fn begin_new(commands: &mut Commands, next: &mut NextState<AppState>, n: New
         }
         Ok((u, Session::Sandbox(m)))
     });
-    commands.insert_resource(PendingUniverse { task, label });
+    commands.insert_resource(PendingUniverse { task, label, started });
     next.set(AppState::Generating);
 }
 
 /// Open the real Solar System (JPL Horizons) as a read-only reference.
 pub fn begin_reference(commands: &mut Commands, next: &mut NextState<AppState>) {
     let label = "Loading the real Solar System from NASA/JPL Horizons data…".to_string();
+    let started = std::time::Instant::now();
     let task = AsyncComputeTaskPool::get().spawn(async move {
         let u = Universe::new(UniverseSettings { seed: 1, scenario: cosmogon_sim::Scenario::SolarSystemLab, ..Default::default() });
         let d = cosmogon_sim::astro::horizons::Dataset::embedded();
         Ok((u, Session::Reference { dataset: d.id(), title: format!("Solar System — real data ({})", d.dataset.epoch) }))
     });
-    commands.insert_resource(PendingUniverse { task, label });
+    commands.insert_resource(PendingUniverse { task, label, started });
     next.set(AppState::Generating);
 }
 
 pub fn begin_open_sandbox(commands: &mut Commands, next: &mut NextState<AppState>, m: Manifest, file: Option<std::path::PathBuf>) {
     let label = format!("Opening “{}”…", m.name);
+    let started = std::time::Instant::now();
     let task = AsyncComputeTaskPool::get().spawn(async move {
         let path = file.or_else(|| persistence::newest_state_file(&m)).ok_or("this sandbox has no saved state")?;
         let u = persistence::load_universe_file(&path)?;
         Ok((u, Session::Sandbox(m)))
     });
-    commands.insert_resource(PendingUniverse { task, label });
+    commands.insert_resource(PendingUniverse { task, label, started });
     next.set(AppState::Generating);
 }
 
 /// Open an old single-file save (0.2–0.3); it becomes a sandbox when first saved.
 pub fn begin_load_legacy(commands: &mut Commands, next: &mut NextState<AppState>, path: std::path::PathBuf) {
     let label = format!("Loading {}…", path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default());
+    let started = std::time::Instant::now();
     let task = AsyncComputeTaskPool::get().spawn(async move {
         let s = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
         let header = cosmogon_sim::save::read_header(&s).map_err(|e| e.to_string())?;
@@ -420,7 +425,7 @@ pub fn begin_load_legacy(commands: &mut Commands, next: &mut NextState<AppState>
         let m = Manifest::new(&header.name, "Imported from an earlier version of Cosmogon.", "imported", Origin { cloned_from: Some(format!("legacy-save:{file}")), ..Default::default() });
         Ok((u, Session::Sandbox(m)))
     });
-    commands.insert_resource(PendingUniverse { task, label });
+    commands.insert_resource(PendingUniverse { task, label, started });
     next.set(AppState::Generating);
 }
 
@@ -436,10 +441,13 @@ impl Plugin for SimPlugin {
     }
 }
 
-fn start_from_args(mut commands: Commands, args: Res<Args>, mut next: ResMut<NextState<AppState>>) {
+fn start_from_args(mut commands: Commands, args: Res<Args>, mut next: ResMut<NextState<AppState>>, mut exit: MessageWriter<AppExit>) {
     if args.continue_latest {
         if let Some(l) = persistence::list_sandboxes().into_iter().next() {
             begin_open_sandbox(&mut commands, &mut next, l.manifest, None);
+        } else if args.quit_after_capture && (args.profile.is_some() || args.capture.is_some()) {
+            error!("Cannot start automated run: no saved sandbox to continue");
+            exit.write(AppExit::error());
         }
     } else if let Some(path) = &args.load {
         begin_load_legacy(&mut commands, &mut next, path.into());
@@ -458,7 +466,8 @@ fn start_from_args(mut commands: Commands, args: Res<Args>, mut next: ResMut<Nex
     }
 }
 
-fn poll_pending(mut commands: Commands, pending: Option<ResMut<PendingUniverse>>, mut next: ResMut<NextState<AppState>>, mut msg: ResMut<MenuMessage>, args: Res<Args>) {
+#[allow(clippy::too_many_arguments)]
+fn poll_pending(mut commands: Commands, pending: Option<ResMut<PendingUniverse>>, mut next: ResMut<NextState<AppState>>, mut msg: ResMut<MenuMessage>, args: Res<Args>, mut perf: ResMut<crate::performance::Performance>, mut exit: MessageWriter<AppExit>) {
     let Some(mut pending) = pending else {
         next.set(AppState::MainMenu);
         return;
@@ -467,6 +476,7 @@ fn poll_pending(mut commands: Commands, pending: Option<ResMut<PendingUniverse>>
         commands.remove_resource::<PendingUniverse>();
         match result {
             Ok((u, session)) => {
+                perf.last_load_ms = Some(pending.started.elapsed().as_secs_f64() * 1000.0);
                 let mut sim = Sim::new(u, session);
                 if let Some(s) = args.speed {
                     sim.speed = s.min(SPEEDS.len() - 1);
@@ -481,6 +491,10 @@ fn poll_pending(mut commands: Commands, pending: Option<ResMut<PendingUniverse>>
                 next.set(AppState::Observing);
             }
             Err(e) => {
+                if args.quit_after_capture && (args.profile.is_some() || args.capture.is_some()) {
+                    error!("Cannot start automated run: {e}");
+                    exit.write(AppExit::error());
+                }
                 msg.0 = Some(format!("Could not open: {e}"));
                 next.set(AppState::MainMenu);
             }
@@ -513,32 +527,9 @@ fn advance(mut sim: ResMut<Sim>, time: Res<Time>, settings: Res<UserSettings>) {
     sim.last = report;
 }
 
-fn collect_toasts(mut sim: ResMut<Sim>, time: Res<Time>) {
-    let now = time.elapsed_secs_f64();
-    let n = sim.universe.history.events.len();
-    if sim.seen_events > n {
-        sim.seen_events = n;
-    }
-    let new: Vec<Toast> = sim.universe.history.events[sim.seen_events..]
-        .iter()
-        .filter(|e| e.importance >= 5)
-        .map(|e| Toast {
-            title: e.title.clone(),
-            detail: e.detail.clone(),
-            target: match (e.system, e.body) {
-                (Some(s), Some(b)) => Some(Target::Body(BodyRef { system: s, body: b })),
-                (Some(s), None) => Some(Target::Star(s)),
-                _ => None,
-            },
-            born: now,
-        })
-        .collect();
-    sim.seen_events = n;
-    sim.toasts.extend(new);
-    sim.toasts.retain(|t| now - t.born < 9.0);
-    let len = sim.toasts.len();
-    if len > 4 {
-        sim.toasts.drain(0..len - 4);
+fn collect_toasts(mut sim: ResMut<Sim>, time: Res<Time>, settings: Res<UserSettings>, ui: Res<crate::ui::UiState>, mut notices: ResMut<crate::notifications::Notifications>, mut cues: MessageWriter<crate::audio::SoundCue>) {
+    if notices.collect(&mut sim, &settings.notifications, time.elapsed_secs_f64(), ui.photo_mode) {
+        cues.write(crate::audio::SoundCue { kind: crate::audio::SynthKind::Bell, intensity: 0.5 });
     }
 }
 
@@ -556,7 +547,7 @@ fn autosave(mut sim: ResMut<Sim>, time: Res<Time>, settings: Res<UserSettings>) 
 }
 
 /// Closing the window or quitting autosaves the open sandbox, so CONTINUE resumes it.
-fn autosave_on_exit(mut exits: MessageReader<AppExit>, mut sim: ResMut<Sim>) {
+pub(crate) fn autosave_on_exit(mut exits: MessageReader<AppExit>, mut sim: ResMut<Sim>) {
     if exits.read().next().is_some() {
         match sim.autosave() {
             Ok(()) => info!("autosaved on exit"),

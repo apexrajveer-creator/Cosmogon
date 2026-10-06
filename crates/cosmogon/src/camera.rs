@@ -7,10 +7,10 @@
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::core_pipeline::Skybox;
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
-use bevy::math::DVec3;
+use bevy::math::{DQuat, DVec3};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
-use bevy::render::view::Hdr;
+use bevy::render::view::{ColorGrading, Hdr};
 use bevy_egui::EguiContexts;
 use cosmogon_sim::astro::{AU, LIGHT_YEAR};
 use cosmogon_sim::BodyRef;
@@ -29,11 +29,17 @@ struct Transition {
     from_dist: f64,
     elapsed: f32,
     duration: f32,
+    from_rotation: DQuat,
 }
 
 #[derive(Resource)]
 pub struct CameraRig {
     pub focus: Option<Target>,
+    pub free: Option<crate::navigation::Flight>,
+    pub rotation: DQuat,
+    pub nearest_surface: Option<BodyRef>,
+    pub clearance: f64,
+    start_free: bool,
     pub target_pos: DVec3,
     pub distance: f64,
     pub desired_distance: f64,
@@ -51,24 +57,41 @@ pub struct CameraRig {
 
 impl Default for CameraRig {
     fn default() -> Self {
-        Self { focus: None, target_pos: DVec3::ZERO, distance: 3.0e7, desired_distance: 3.0e7, yaw: 0.6, pitch: 0.35, focus_radius: 6.4e6, ground_radius: 6.4e6, transition: None, applied_args: false, pivot_shift: DVec3::ZERO }
+        Self { focus: None, free: None, rotation: DQuat::IDENTITY, nearest_surface: None, clearance: 1.0e7, start_free: false, target_pos: DVec3::ZERO, distance: 3.0e7, desired_distance: 3.0e7, yaw: 0.6, pitch: 0.35, focus_radius: 6.4e6, ground_radius: 6.4e6, transition: None, applied_args: false, pivot_shift: DVec3::ZERO }
     }
 }
 
 impl CameraRig {
     /// Fly to a new target. `distance_radii`: how far to end up, in target radii (None = keep a sensible default).
     pub fn focus_on(&mut self, target: Target, sim: &Sim, distance_radii: Option<f64>) {
-        let (_, radius) = target_info(sim, target);
+        let (pos, radius) = target_info(sim, target);
+        if let Some(free) = self.free.take() {
+            let back = free.rotation * DVec3::Z;
+            self.yaw = back.x.atan2(back.z);
+            self.pitch = back.y.clamp(-1.0, 1.0).asin();
+            self.distance = (free.position - pos).length().max(radius * 1.5);
+            self.target_pos = free.position - back * self.distance;
+            self.pivot_shift = DVec3::ZERO;
+            self.rotation = free.rotation;
+        }
         let default_radii = match target {
             Target::Star(_) => system_view_distance(sim, target.system()) / radius,
             Target::Body(_) => 4.0,
         };
-        self.transition = Some(Transition { from_pos: self.target_pos, from_dist: self.distance, elapsed: 0.0, duration: 1.8 });
+        self.transition = Some(Transition { from_pos: self.target_pos, from_dist: self.distance, elapsed: 0.0, duration: 1.8, from_rotation: self.rotation });
         self.focus = Some(target);
         self.desired_distance = radius * distance_radii.unwrap_or(default_radii);
     }
 
+    pub fn detach(&mut self) {
+        if self.free.is_none() {
+            self.free = Some(crate::navigation::Flight::new(self.eye(), self.rotation));
+            self.transition = None;
+        }
+    }
+
     pub fn eye(&self) -> DVec3 {
+        if let Some(free) = &self.free { return free.position; }
         let (sy, cy) = self.yaw.sin_cos();
         let (sp, cp) = self.pitch.sin_cos();
         self.target_pos + self.pivot_shift + DVec3::new(cp * sy, sp, cp * cy) * self.distance
@@ -99,6 +122,7 @@ pub struct CameraPlugin;
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CameraRig>()
+            .init_resource::<crate::navigation::Viewpoints>()
             .add_systems(PostStartup, spawn_camera)
             .add_systems(OnEnter(AppState::Observing), initial_focus)
             .add_systems(Update, (camera_input, update_camera).chain().in_set(Frame::Camera).run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)))
@@ -111,10 +135,11 @@ fn spawn_camera(mut commands: Commands, sky: Res<SkyHandle>, settings: Res<UserS
     commands.spawn((
         Camera3d::default(),
         Hdr,
+        ColorGrading::default(),
         Tonemapping::AgX,
         Bloom { intensity: if settings.graphics.bloom() { 0.22 } else { 0.0 }, ..Bloom::NATURAL },
         msaa_for(&settings),
-        Projection::Perspective(PerspectiveProjection { fov: 50f32.to_radians(), near: 1.0, far: 1.0e27, ..default() }),
+        Projection::Perspective(PerspectiveProjection { fov: settings.presentation.fov_deg.to_radians(), near: 1.0, far: 1.0e27, ..default() }),
         Skybox { image: sky.0.clone(), brightness: 300.0, ..default() },
         Transform::default(),
         MainCamera,
@@ -138,6 +163,9 @@ fn apply_graphics_settings(settings: Res<UserSettings>, mut q: Query<(&mut Bloom
 
 /// Pick something interesting to look at when a universe opens (or obey `--focus`).
 fn initial_focus(mut rig: ResMut<CameraRig>, mut sim: ResMut<Sim>, args: Res<Args>) {
+    rig.free = None;
+    rig.pivot_shift = DVec3::ZERO;
+    rig.start_free = args.free_camera;
     let u = &sim.universe;
     let mut target = Target::Star(0);
     let mut radii = None;
@@ -215,6 +243,7 @@ pub fn find_target(sim: &Sim, name: &str) -> Option<Target> {
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 fn camera_input(
     mut rig: ResMut<CameraRig>,
     mut contexts: EguiContexts,
@@ -224,19 +253,57 @@ fn camera_input(
     keys: Res<ButtonInput<KeyCode>>,
     sim: Res<Sim>,
     args: Res<Args>,
+    time: Res<Time<Real>>,
+    mut settings: ResMut<UserSettings>,
+    ui: Res<crate::ui::UiState>,
 ) {
     // Automated captures must be reproducible: ignore whatever the mouse is doing.
-    if args.capture.is_some() {
+    if args.capture.is_some() || ui.pause_menu {
         return;
     }
     let (wants_pointer, wants_keys) = match contexts.ctx_mut() {
         Ok(ctx) => (ctx.wants_pointer_input() || ctx.is_pointer_over_area(), ctx.wants_keyboard_input()),
         Err(_) => (false, false),
     };
+    let cmd = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight) || keys.pressed(KeyCode::SuperLeft) || keys.pressed(KeyCode::SuperRight);
+    if !wants_keys && !cmd {
+        if keys.just_pressed(KeyCode::KeyG) {
+            if rig.free.is_some() {
+                if let Some(t) = sim.selected.or(rig.focus) { rig.focus_on(t, &sim, None); }
+            } else { rig.detach(); }
+        }
+        if keys.just_pressed(KeyCode::KeyF) {
+            if let Some(t) = sim.selected { rig.focus_on(t, &sim, None); }
+        }
+        if keys.just_pressed(KeyCode::Home) {
+            if let Some(t) = rig.focus { rig.focus_on(Target::Star(t.system()), &sim, None); }
+        }
+    }
+    let clearance = rig.clearance;
+    if let Some(flight) = &mut rig.free {
+        let dt = time.delta_secs_f64().min(0.1);
+        if !wants_pointer {
+            if mouse.pressed(MouseButton::Right) {
+                let sign = if settings.camera.invert_y { -1.0 } else { 1.0 };
+                flight.turn(-motion.delta.x as f64 * 0.003 * settings.camera.sensitivity, -motion.delta.y as f64 * 0.003 * settings.camera.sensitivity * sign, 0.0);
+            }
+            let lines = match scroll.unit { MouseScrollUnit::Line => scroll.delta.y as f64, MouseScrollUnit::Pixel => scroll.delta.y as f64 / 40.0 };
+            if lines != 0.0 { settings.camera.speed_multiplier = (settings.camera.speed_multiplier * (lines * 0.18).exp()).clamp(0.001, 1000.0); }
+        }
+        if wants_keys || cmd { flight.velocity = DVec3::ZERO; return; }
+        let axis = |positive, negative| (keys.pressed(positive) as i32 - keys.pressed(negative) as i32) as f64;
+        flight.turn(axis(KeyCode::ArrowLeft, KeyCode::ArrowRight) * dt, axis(KeyCode::ArrowUp, KeyCode::ArrowDown) * dt, axis(KeyCode::KeyQ, KeyCode::KeyE) * dt);
+        let local = DVec3::new(axis(KeyCode::KeyD, KeyCode::KeyA), axis(KeyCode::KeyR, KeyCode::KeyC), axis(KeyCode::KeyS, KeyCode::KeyW)).normalize_or_zero();
+        let boost = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) { 10.0 } else if keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight) { 0.1 } else { 1.0 };
+        flight.speed_m_s = settings.camera.speed(clearance) * boost;
+        let desired = flight.rotation * local * flight.speed_m_s;
+        flight.advance(desired, dt, settings.camera.inertia, settings.camera.damping);
+        return;
+    }
     // Close to a surface, controls work on altitude and slow down so the ground is navigable.
     let ground = rig.ground_radius;
     let altitude = (rig.desired_distance - ground).max(1.0);
-    let orbit_rate = 0.005 * (altitude / (rig.focus_radius * 0.5)).clamp(0.0005, 1.0);
+    let orbit_rate = 0.005 * settings.camera.sensitivity * (altitude / (rig.focus_radius * 0.5)).clamp(0.0005, 1.0);
     let zoom_by = |rig: &mut CameraRig, factor: f64| {
         rig.desired_distance = ground + (rig.desired_distance - ground).max(1.0) * factor;
     };
@@ -245,7 +312,7 @@ fn camera_input(
     if !wants_pointer {
         if (mouse.pressed(MouseButton::Left) && !tool_owns_left) || mouse.pressed(MouseButton::Right) {
             rig.yaw -= motion.delta.x as f64 * orbit_rate;
-            rig.pitch = (rig.pitch + motion.delta.y as f64 * orbit_rate).clamp(-1.54, 1.54);
+            rig.pitch = (rig.pitch + motion.delta.y as f64 * orbit_rate * if settings.camera.invert_y { -1.0 } else { 1.0 }).clamp(-1.54, 1.54);
         }
         let lines = match scroll.unit {
             MouseScrollUnit::Line => scroll.delta.y as f64,
@@ -255,22 +322,13 @@ fn camera_input(
             zoom_by(&mut rig, (-lines * 0.15).exp());
         }
     }
-    if !wants_keys {
+    if !wants_keys && !cmd {
         let zoom = (keys.pressed(KeyCode::KeyS) as i32 - keys.pressed(KeyCode::KeyW) as i32) as f64;
         if zoom != 0.0 {
-            zoom_by(&mut rig, (zoom * 0.04).exp());
+            zoom_by(&mut rig, (zoom * 2.4 * time.delta_secs_f64().min(0.1)).exp());
         }
-        rig.yaw += (keys.pressed(KeyCode::KeyA) as i32 - keys.pressed(KeyCode::KeyD) as i32) as f64 * 0.02;
-        if keys.just_pressed(KeyCode::KeyF) {
-            if let Some(t) = sim.selected {
-                rig.focus_on(t, &sim, None);
-            }
-        }
-        if keys.just_pressed(KeyCode::Home) {
-            if let Some(f) = rig.focus {
-                rig.focus_on(Target::Star(f.system()), &sim, None);
-            }
-        }
+        rig.yaw += (keys.pressed(KeyCode::KeyA) as i32 - keys.pressed(KeyCode::KeyD) as i32) as f64 * 1.2 * time.delta_secs_f64().min(0.1);
+
     }
 }
 
@@ -282,10 +340,15 @@ fn update_camera(
     time: Res<Time>,
     mut view: ResMut<ViewInfo>,
     windows: Query<&Window>,
-    mut cam: Query<(&mut Transform, &mut Projection, &mut Bloom), With<MainCamera>>,
+    mut cam: Query<(&mut Transform, &mut Projection, &mut Bloom, &mut ColorGrading), With<MainCamera>>,
     settings: Res<UserSettings>,
 ) {
+    if rig.free.is_some() {
+        update_free_camera(&mut rig, &sim, &lod, &mut view, &windows, &mut cam, &settings);
+        return;
+    }
     let dt = time.delta_secs().min(0.1);
+    let mut orientation_blend = None;
     let Some(mut focus) = rig.focus else { return };
     // The focused body may have been destroyed or deleted: fall back to its star.
     if let Target::Body(r) = focus {
@@ -316,6 +379,7 @@ fn update_camera(
         tr.elapsed += dt;
         let s = (tr.elapsed / tr.duration).clamp(0.0, 1.0) as f64;
         let e = s * s * (3.0 - 2.0 * s);
+        orientation_blend = Some((tr.from_rotation, e));
         let (from_pos, from_dist, done) = (tr.from_pos, tr.from_dist, s >= 1.0);
         rig.target_pos = from_pos.lerp(live_pos, e);
         // Logarithmic interpolation: travel feels uniform across scales; pull back mid-flight.
@@ -348,7 +412,7 @@ fn update_camera(
     if let Ok(w) = windows.single() {
         view.viewport_h = w.height();
     }
-    let Ok((mut tf, mut proj, mut bloom)) = cam.single_mut() else { return };
+    let Ok((mut tf, mut proj, mut bloom, mut grading)) = cam.single_mut() else { return };
     // Bloom makes stars glow in space; when a sunlit world fills the view it would only veil
     // the surface, so fade it with proximity.
     if settings.graphics.bloom() {
@@ -371,6 +435,13 @@ fn update_camera(
             *tf = Transform::IDENTITY.looking_to(forward, radial);
         }
     }
+    if let Some((from, mix)) = orientation_blend {
+        tf.rotation = from.slerp(tf.rotation.as_dquat(), mix).as_quat();
+    }
+    rig.rotation = tf.rotation.as_dquat();
+    rig.clearance = altitude;
+    apply_presentation(&settings, &mut proj, &mut grading);
+    if rig.start_free { rig.detach(); rig.start_free = false; }
     if let Projection::Perspective(p) = proj.as_mut() {
         p.near = (altitude * 0.05).clamp(0.5, 1.0e9) as f32;
         view.fov_y = p.fov;
@@ -378,16 +449,118 @@ fn update_camera(
 }
 
 /// Slow drift around the showcase planet on the menu / loading screens.
-fn menu_camera(time: Res<Time>, mut view: ResMut<ViewInfo>, mut cam: Query<(&mut Transform, &mut Projection), With<MainCamera>>) {
+fn menu_camera(time: Res<Time>, mut view: ResMut<ViewInfo>, mut cam: Query<(&mut Transform, &mut Projection, &mut ColorGrading), With<MainCamera>>) {
     let t = time.elapsed_secs_f64() * 0.03;
     let r = 6.371e6 * 2.6;
     let eye = DVec3::new(t.sin() * r, 0.25 * r, t.cos() * r);
     view.origin = eye;
-    let Ok((mut tf, mut proj)) = cam.single_mut() else { return };
+    let Ok((mut tf, mut proj, mut grading)) = cam.single_mut() else { return };
+    *grading = ColorGrading::default();
     // Look slightly past the planet so it sits off-centre, leaving room for the menu.
     let target = DVec3::new(-(t.cos()) * 0.45 * 6.371e6, 0.0, t.sin() * 0.45 * 6.371e6);
     *tf = Transform::IDENTITY.looking_to((target - eye).as_vec3().normalize(), Vec3::Y);
     if let Projection::Perspective(p) = proj.as_mut() {
         p.near = 1000.0;
+        p.fov = 50f32.to_radians();
+        view.fov_y = p.fov;
+    }
+}
+
+fn apply_presentation(settings: &UserSettings, projection: &mut Projection, grading: &mut ColorGrading) {
+    if let Projection::Perspective(p) = projection { p.fov = settings.presentation.fov_deg.to_radians(); }
+    grading.global.exposure = settings.presentation.exposure_ev;
+    grading.global.temperature = settings.presentation.warmth;
+    grading.global.post_saturation = settings.presentation.saturation;
+}
+
+/// Navigation context only: no forces or simulation edits. All distances stay in f64.
+fn surroundings(sim: &Sim, eye: DVec3) -> (Option<BodyRef>, f64) {
+    let mut clearance = f64::MAX;
+    let mut surface = None;
+    let mut surface_clearance = f64::MAX;
+    let u = &sim.universe;
+    for sys in &u.systems {
+        clearance = clearance.min(((eye - to_render(sys.star_position(u.time))).length() - sys.star.current_radius(u.time)).max(1.0));
+        for (i, body) in sys.bodies.iter().enumerate().filter(|(_, b)| b.exists()) {
+            let r = BodyRef { system: sys.id, body: i as u32 };
+            let d = ((eye - to_render(u.body_position(r, u.time))).length() - body.radius).max(0.0);
+            clearance = clearance.min(d.max(1.0));
+            if body.kind.has_surface() && d < surface_clearance { surface_clearance = d; surface = Some(r); }
+        }
+    }
+    (surface, clearance)
+}
+
+fn update_free_camera(
+    rig: &mut CameraRig, sim: &Sim, lod: &crate::render::terrain_lod::TerrainLod,
+    view: &mut ViewInfo, windows: &Query<&Window>,
+    cam: &mut Query<(&mut Transform, &mut Projection, &mut Bloom, &mut ColorGrading), With<MainCamera>>,
+    settings: &UserSettings,
+) {
+    let Some(flight) = &mut rig.free else { return };
+    let (surface, mut clearance) = surroundings(sim, flight.position);
+    rig.nearest_surface = surface;
+    if let Some(r) = surface {
+        let center = to_render(sim.universe.body_position(r, sim.universe.time));
+        let delta = flight.position - center;
+        let rot = crate::render::body_rotation(sim, r, sim.universe.time).as_dquat();
+        let radius = lod.ground_radius(r, rot.inverse() * delta).unwrap_or(sim.universe.body(r).radius);
+        let altitude = delta.length() - radius;
+        // Match orbit mode's clearance: metre-level camera placement exposes the
+        // existing terrain mesh's precision/near-plane limits when a body moves underneath.
+        if altitude < 60.0 {
+            flight.position = center + delta.normalize_or(DVec3::Y) * (radius + 60.0);
+            flight.velocity = DVec3::ZERO;
+            clearance = 60.0;
+        }
+        clearance = clearance.min(altitude.max(60.0));
+    }
+    rig.clearance = clearance;
+    rig.rotation = flight.rotation;
+    view.origin = flight.position;
+    if let Ok(w) = windows.single() { view.viewport_h = w.height(); }
+    let Ok((mut tf, mut proj, mut bloom, mut grading)) = cam.single_mut() else { return };
+    *tf = Transform::from_rotation(flight.rotation.as_quat());
+    let nearby_radius = surface.map(|r| sim.universe.body(r).radius).unwrap_or(1.0);
+    bloom.intensity = if settings.graphics.bloom() { 0.03 + 0.19 * (clearance / (nearby_radius * 4.0)).clamp(0.0, 1.0) as f32 } else { 0.0 };
+    apply_presentation(settings, &mut proj, &mut grading);
+    if let Projection::Perspective(p) = proj.as_mut() {
+        p.near = (clearance * 0.05).clamp(0.5, 1e9) as f32;
+        view.fov_y = p.fov;
+    }
+}
+
+#[cfg(test)]
+mod navigation_tests {
+    use super::*;
+    use crate::navigation::{Flight, Presentation, Viewpoint};
+    #[test]
+    fn detach_and_return_to_orbit_preserve_the_starting_eye() {
+        let u = cosmogon_sim::Universe::new(cosmogon_sim::UniverseSettings { scenario: cosmogon_sim::Scenario::EmptySystem, ..Default::default() });
+        let sim = Sim::new(u, crate::sim::Session::Reference { dataset: "test".into(), title: "Test".into() });
+        let mut rig = CameraRig { focus: Some(Target::Star(0)), rotation: DQuat::from_euler(bevy::math::EulerRot::YXZ, 0.5, 0.3, 0.8), ..Default::default() };
+        let eye = rig.eye();
+        rig.detach();
+        assert_eq!(rig.eye(), eye);
+        rig.focus_on(Target::Star(0), &sim, Some(4.0));
+        assert!((rig.eye() - eye).length() < 1e-5);
+        assert!(rig.free.is_none());
+    }
+    #[test]
+    fn viewpoint_and_presentation_restore_leave_universe_unchanged() {
+        let u = cosmogon_sim::Universe::new(cosmogon_sim::UniverseSettings { scenario: cosmogon_sim::Scenario::SolarSystemLab, ..Default::default() });
+        let sim = Sim::new(u, crate::sim::Session::Reference { dataset: "test".into(), title: "Test".into() });
+        let before = serde_json::to_string(&sim.universe).unwrap();
+        let target = find_target(&sim, "Mars").unwrap();
+        let eye = target_info(&sim, target).0 + DVec3::Z * 1e8;
+        let mut rig = CameraRig { focus: Some(target), free: Some(Flight::new(eye, DQuat::IDENTITY)), ..Default::default() };
+        let mut presentation = Presentation { exposure_ev: 2.0, fov_deg: 32.0, ..Default::default() };
+        let saved = Viewpoint::capture("Mars", &sim, &rig, &presentation);
+        rig.free.as_mut().unwrap().position += DVec3::X * 1e6;
+        presentation.exposure_ev = -5.0;
+        saved.restore(&sim, &mut rig, &mut presentation).unwrap();
+        assert!((rig.eye() - eye).length() < 1e-3);
+        assert_eq!(presentation.exposure_ev, 2.0);
+        assert_eq!(serde_json::to_string(&sim.universe).unwrap(), before);
     }
 }

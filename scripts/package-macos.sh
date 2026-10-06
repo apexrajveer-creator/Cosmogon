@@ -13,7 +13,13 @@ cd "$(dirname "$0")/.."
 
 VERSION=$(cargo metadata --no-deps --format-version 1 | python3 -c "import json,sys; print([p['version'] for p in json.load(sys.stdin)['packages'] if p['name']=='cosmogon'][0])")
 DIST=dist
-APP="$DIST/Cosmogon.app"
+# File-provider folders can immediately restore forbidden Finder metadata after
+# xattr removal. Assemble and sign on the local temporary filesystem (Apple QA1940).
+cosmogon_package_work=$(mktemp -d "${TMPDIR:-/tmp}/cosmogon-package.XXXXXX")
+trap 'rm -rf "$cosmogon_package_work"' EXIT
+STAGE="$cosmogon_package_work/image"
+APP="$STAGE/Cosmogon.app"
+mkdir -p "$DIST" "$STAGE"
 
 echo "==> Building release binary (v$VERSION)"
 if [[ "${UNIVERSAL:-0}" == "1" ]]; then
@@ -31,11 +37,11 @@ fi
 echo "==> Assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/cosmogon"
+cp -X "$BIN" "$APP/Contents/MacOS/cosmogon"
 sed "s/__VERSION__/$VERSION/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
 
 echo "==> Building icon"
-ICONSET=$(mktemp -d)/Cosmogon.iconset
+ICONSET="$cosmogon_package_work/Cosmogon.iconset"
 mkdir -p "$ICONSET"
 SRC=packaging/icons/cosmogon-1024.png
 [[ -f "$SRC" ]] || python3 scripts/make_icon.py
@@ -46,6 +52,7 @@ done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Cosmogon.icns"
 
 echo "==> Signing"
+xattr -cr "$APP"
 if [[ -n "${SIGN_ID:-}" ]]; then
   codesign --force --deep --options runtime --timestamp --sign "$SIGN_ID" "$APP"
 else
@@ -55,16 +62,23 @@ codesign --verify --deep --strict "$APP"
 
 echo "==> Creating disk image"
 DMG="$DIST/Cosmogon-$VERSION-macOS.dmg"
-STAGE=$(mktemp -d)
-cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 rm -f "$DMG"
 hdiutil create -volname "Cosmogon $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
-rm -rf "$STAGE"
 if [[ -n "${SIGN_ID:-}" ]]; then
   codesign --force --sign "$SIGN_ID" "$DMG"
 fi
 
+# Keep the launchable copy outside file-provider folders too: they can attach
+# FinderInfo after a successful verification. The DMG contains a standalone app.
+cosmogon_package_cache="${COSMOGON_APP_OUTPUT_DIR:-$HOME/Library/Caches/Cosmogon/builds/$VERSION}"
+mkdir -p "$cosmogon_package_cache"
+rm -rf "$cosmogon_package_cache/Cosmogon.app"
+ditto --noextattr --norsrc "$APP" "$cosmogon_package_cache/Cosmogon.app"
+rm -rf "$DIST/Cosmogon.app"
+ln -s "$cosmogon_package_cache/Cosmogon.app" "$DIST/Cosmogon.app"
+codesign --verify --deep --strict "$DIST/Cosmogon.app"
+
 echo
 echo "Done:"
-du -sh "$APP" "$DMG"
+du -sh "$cosmogon_package_cache/Cosmogon.app" "$DMG"

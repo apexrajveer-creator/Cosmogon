@@ -1,0 +1,60 @@
+# Source registry
+
+Inventory of existing release inputs, audited 2026-10-05. This file records repository evidence;
+unknown metadata is explicitly unknown. It is not an assertion that missing source/rights evidence
+has been resolved. No new datasets are imported by the performance foundation change.
+Before adding or refreshing release data, record provider terms and redistribution permission.
+
+## jpl-horizons-sol@1
+
+- Source/provider: NASA/JPL Solar System Dynamics, Horizons; `tools/fetch_horizons.py`.
+- Stored file: `crates/cosmogon_sim/data/horizons_sol.toml`.
+- Version: cache 1, API 1.2; per-object ephemerides are recorded in the cache (including DE441).
+- Retrieval: 2026-10-03T11:01:42Z (embedded header).
+- Licence/redistribution evidence: cache header records “NASA/JPL data: not subject to US copyright; attribution requested”; provider terms evidence is not archived here.
+- Attribution: NASA/JPL Horizons On-Line Ephemeris System.
+- Units: km and km/s in cache; converted to SI metres and metres/second by loader.
+- Epoch/frame: 2026-01-01 00:00:00 TDB, JD 2461041.5; ecliptic/equinox J2000 (ICRF), Solar System barycentre.
+- Processing: API vectors normalized/cached by script, validated in simulation; no user runtime network.
+
+## solar-system-physical-parameters
+
+- Source/provider: NASA Goddard planetary fact sheets, JPL approximate orbital elements, IAU rotation parameters (existing docs/headers).
+- Stored file: `crates/cosmogon_sim/data/sol.toml`.
+- Version/retrieval date: not recorded; tracked with application source history.
+- Licence/redistribution evidence: existing DATA_SOURCES.md records NASA public-domain status; precise source snapshots/terms per field remain to be reconciled.
+- Attribution: NASA Goddard / JPL / IAU; per-quantity uncertainty is not comprehensively recorded.
+- Units: file-specific AU/km orbital axes; body masses in kg, stellar mass in solar units, body radii in metres, rotation hours, degrees, kelvin; see loader.
+- Epoch/frame: orbital elements J2000; physical parameters do not share a single observation epoch.
+- Processing: hand-entered reference values; loader constructs planets; climate calibration and generated detail are modelled rather than measurements.
+
+## etopo5-earth@1
+
+- Source/provider: NOAA NCEI ETOPO5; URL and input format in `tools/process_etopo.py`.
+- Stored file: `crates/cosmogon_sim/data/earth_elevation.bin`.
+- Version: derived cache 1; source ETOPO5. Retrieval date: not recorded.
+- Licence/redistribution evidence: ASSETS.md records US Government public-domain work; source evidence is not bundled separately.
+- Attribution: NOAA National Centers for Environmental Information, ETOPO5 global relief.
+- Units: little-endian signed 16-bit metres (land and bathymetry).
+- Epoch/frame: global latitude/longitude; row 0 at 90°N, column 0 at 0°E. Vertical-datum/epoch details are not recorded in this cache.
+- Processing: 4320×2160 source box-filtered to 2048×1024 by development script. Finer terrain/biome detail is generated, not observed.
+
+## cities-2025 / present-day-humanity
+
+- Source/provider: UN World Urbanization Prospects 2018 (2025 projections), national statistics; additional aggregate sources in `docs/DATA_SOURCES.md`.
+- Stored files: `crates/cosmogon_sim/data/cities_2025.toml`, `present_day.rs`.
+- Version/retrieval date: no standalone dataset version or retrieval date recorded.
+- Licence/redistribution evidence: per-source terms and exact derivation records are incomplete; review before importing/replacing tabular datasets in a release.
+- Attribution: UN population/urbanization estimates and listed national/energy/mission sources.
+- Units: city centres in degrees; urban populations in millions. Other aggregate units are stated in source/comments.
+- Epoch/frame: approximate 2025 urban estimates; WGS84 rounded to 0.1°; civilization seeded around 2026.
+- Processing: rounded estimates, merged from heterogeneous definitions; model evolves the resulting initial state. These are not live demographic observations.
+
+## Scientific model parameters and catalogued landmarks
+
+- Files: `science.toml`, `technologies.toml`, constants, `nursery.rs`, `render/galaxy.rs` and model comments.
+- Provider/source: project-authored reduced models with scattered scientific references; some named-object quantities are embedded in code.
+- Version: application source revision; retrieval dates generally not recorded.
+- Units/epoch/frame: model-specific; see code/docs. Do not assume all rendered landmarks are authoritative catalogue objects.
+- Licence/attribution/redistribution: original implementation uses declared project licence; external values require per-source reconciliation in the future PhysicsModelRegistry.
+- Processing: deterministic modelling and/or generated presentation. This group is a known inventory gap, not a fully normalized astronomical catalogue.

@@ -144,6 +144,9 @@ pub fn top_bar(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut si
                 }
                 ui.menu_button(egui::RichText::new(icon::EYE).size(17.0), |ui| {
                     ui.label(egui::RichText::new("SHOW").size(10.0).color(ACCENT));
+                    ui.checkbox(&mut ui_state.performance_open, "Performance");
+                    ui.checkbox(&mut ui_state.camera_open, "Camera & Photo");
+                    ui.checkbox(&mut ui_state.alerts_open, "Sound & Alerts");
                     ui.checkbox(&mut settings.show_orbits, "Orbits");
                     ui.checkbox(&mut settings.show_labels, "Labels");
                     ui.checkbox(&mut settings.show_trails, "Trails (past path)");
@@ -267,12 +270,13 @@ pub fn bottom_bar(mut contexts: EguiContexts, ui_state: Res<UiState>, mut sim: R
     Ok(())
 }
 
-pub fn toasts(mut contexts: EguiContexts, mut sim: ResMut<Sim>, mut rig: ResMut<CameraRig>, time: Res<Time>, ui_state: Res<UiState>) -> Result {
+pub fn toasts(mut contexts: EguiContexts, mut sim: ResMut<Sim>, mut rig: ResMut<CameraRig>, time: Res<Time>, ui_state: Res<UiState>, settings: Res<UserSettings>) -> Result {
     let ctx = contexts.ctx_mut()?;
     if ui_state.hidden {
         return Ok(());
     }
     let now = time.elapsed_secs_f64();
+    if settings.notifications.do_not_disturb || ui_state.photo_mode { return Ok(()); }
     let toasts = sim.toasts.clone();
     let mut go = None;
     egui::Area::new(egui::Id::new("toasts")).anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 54.0)).interactable(true).show(ctx, |ui| {
@@ -321,6 +325,7 @@ pub fn overlays_windows(
     mut exit: MessageWriter<AppExit>,
     time: Res<Time>,
 ) -> Result {
+    if ui_state.hidden || ui_state.photo_mode { return Ok(()); }
     let ctx = contexts.ctx_mut()?;
     let now = time.elapsed_secs_f64();
     if ui_state.debug {
@@ -340,8 +345,8 @@ pub fn overlays_windows(
                 super::kv(ui, "History events", u.history.events.len().to_string());
                 super::kv(ui, "Seed", u.settings.seed.to_string());
                 super::kv(ui, "Sim time (s)", format!("{:.6e}", u.time));
-                super::kv(ui, "Camera distance", super::distance(rig.distance));
-                super::kv(ui, "Altitude above ground", super::distance(rig.distance - rig.ground_radius));
+                super::kv(ui, "Camera mode", if rig.free.is_some() { "Free flight" } else { "Orbit" });
+                super::kv(ui, "Clearance", super::distance(rig.clearance));
                 if let Some(f) = rig.focus {
                     let center = crate::camera::target_info(&sim, f).0;
                     let star = crate::render::to_render(sim.universe.system(f.system()).star_position(sim.universe.time));
@@ -365,6 +370,10 @@ pub fn overlays_windows(
                     ("Click marker / list item", "Select"),
                     ("Double-click · F", "Fly to the selection"),
                     ("Home", "View the whole star system"),
+                    ("G", "Switch orbit / free camera"),
+                    ("Free: W A S D · R / C", "Move · up / down"),
+                    ("Free: right-drag · arrows · Q / E", "Look · roll"),
+                    ("Free: wheel · Shift · Alt/Option", "Speed · boost · fine movement"),
                     ("Space", "Pause / resume"),
                     (", and .", "Slower / faster"),
                     ("Tab", "Hide the interface"),

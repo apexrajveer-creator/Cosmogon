@@ -44,12 +44,26 @@ pub struct Args {
     pub persist: bool,
     /// Open the most recent sandbox (same as CONTINUE).
     pub continue_latest: bool,
+    /// Export a bounded performance recording (native developer tooling).
+    pub profile: Option<String>,
+    pub profile_frames: usize,
+    pub profile_warmup: usize,
+    pub free_camera: bool,
+    pub fov: Option<f32>,
+    pub exposure: Option<f32>,
+    pub capture_metadata: bool,
+    pub sound_mode: Option<crate::audio::SoundMode>,
+    pub quiet: bool,
 }
 
 impl Args {
     pub fn parse() -> Self {
-        let mut a = Args { capture_after: 90, ..Default::default() };
-        let mut it = std::env::args().skip(1);
+        Self::parse_from(std::env::args().skip(1))
+    }
+
+    fn parse_from(args: impl Iterator<Item = String>) -> Self {
+        let mut a = Args { capture_after: 90, profile_frames: 600, profile_warmup: 120, ..Default::default() };
+        let mut it = args;
         while let Some(flag) = it.next() {
             let mut val = || it.next().unwrap_or_default();
             match flag.as_str() {
@@ -72,7 +86,7 @@ impl Args {
                 "--pitch" => a.pitch = val().parse().ok(),
                 "--speed" => a.speed = val().parse().ok(),
                 "--capture" => a.capture = Some(val()),
-                "--capture-after" => a.capture_after = val().parse().unwrap_or(90),
+                "--capture-after" => a.capture_after = val().parse::<u32>().unwrap_or(90).clamp(1, 1_000_000),
                 "--quit" => a.quit_after_capture = true,
                 "--load" => a.load = Some(val()),
                 "--hide-ui" => a.hide_ui = true,
@@ -85,6 +99,20 @@ impl Args {
                 "--menu" => a.menu = Some(val()),
                 "--persist" => a.persist = true,
                 "--continue" => a.continue_latest = true,
+                "--capture-metadata" => a.capture_metadata = true,
+                "--free-camera" => a.free_camera = true,
+                "--fov" => a.fov = val().parse().ok(),
+                "--exposure" => a.exposure = val().parse().ok(),
+                "--quiet" => a.quiet = true,
+                "--sound-mode" => a.sound_mode = match val().as_str() {
+                    "realistic" => Some(crate::audio::SoundMode::Realistic),
+                    "cinematic" => Some(crate::audio::SoundMode::Cinematic),
+                    "hybrid" => Some(crate::audio::SoundMode::Hybrid),
+                    _ => None,
+                },
+                "--profile" => a.profile = Some(val()),
+                "--profile-frames" => a.profile_frames = val().parse::<usize>().unwrap_or(600).clamp(1, 3600),
+                "--profile-warmup" => a.profile_warmup = val().parse::<usize>().unwrap_or(120).min(36_000),
                 "--latlon" => {
                     let v = val();
                     let mut it = v.split(',').map(|x| if x.trim() == "noon" { Ok(f64::NAN) } else { x.trim().parse::<f64>() });
@@ -97,6 +125,25 @@ impl Args {
                 f => eprintln!("ignoring unknown argument {f}"),
             }
         }
+        if a.profile.is_some() && a.new.is_none() && a.load.is_none() && !a.continue_latest {
+            a.new = Some(Scenario::SolarSystemLab);
+        }
         a
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn profile_limits_are_bounded_and_a_scene_is_selected() {
+        let a = Args::parse_from(["--profile", "out.json", "--profile-frames", "0", "--profile-warmup", "999999"].into_iter().map(String::from));
+        assert_eq!(a.profile_frames, 1);
+        assert_eq!(a.profile_warmup, 36_000);
+        assert!(matches!(a.new, Some(Scenario::SolarSystemLab)));
+        let b = Args::parse_from(["--profile", "out.json", "--load", "saved.cosmo", "--profile-frames", "999999"].into_iter().map(String::from));
+        assert!(b.new.is_none());
+        assert_eq!(b.profile_frames, 3600);
     }
 }

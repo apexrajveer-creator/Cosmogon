@@ -1,5 +1,11 @@
 # Roadmap
 
+The active long-term direction is now [the master directive](docs/MASTER_DEVELOPMENT_DIRECTIVE.md).
+Use [the current audit](docs/CURRENT_STATE_AUDIT.md) and [phase gap analysis](docs/MASTER_GAP_ANALYSIS.md)
+for present status and next work. The milestone history below predates that directive and contains
+older checklist entries; it is retained as history, not a fresh completion audit.
+
+
 From the current repository to the target product. Each phase ends with a working, tested,
 packaged application — never a broken tree. Phases overlap; the order reflects dependencies.
 ✅ done · 🟡 partially done in M1 · ⬜ not started.

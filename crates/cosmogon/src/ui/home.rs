@@ -817,7 +817,11 @@ pub fn settings_ui(ui: &mut egui::Ui, settings: &mut UserSettings) {
         ui.label("Intro animation");
         ui.checkbox(&mut settings.intro, "");
         ui.end_row();
+        ui.label("Detailed performance measurements");
+        ui.checkbox(&mut settings.detailed_profiling, "Enable at next launch").on_hover_text("Adds process memory, CPU usage and supported render-pass timings. Basic frame measurements are always available from View → Performance.");
+        ui.end_row();
     });
+    ui.collapsing("Audio mix and quiet controls", |ui| { super::alerts::sound_settings(ui, settings); });
     ui.label(egui::RichText::new("Graphics quality never changes simulation results.").size(11.0).color(MUTED));
 }
 

@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased — native exploration, photography, sound and notifications
+
+* Adopt the owner's master development directive; add current-state audit, evidence/limitations,
+  product vision, source/asset inventories and active phased gap analysis while preserving historical plans.
+* Add an optional Performance panel (View menu and command palette), frame-time chart and
+  bounded average/p50/p95/p99/max recordings, simulation timing and async universe-load timing.
+* Export local versioned JSON with scene/camera/seed/dataset context and raw samples;
+  `--profile`, `--profile-frames`, `--profile-warmup` enable reproducible native runs.
+* Opt-in process/render diagnostics persist as an app preference. Unsupported GPU timings and
+  unmeasured VRAM are explicitly unavailable. Export errors are visible; earlier files are protected.
+* Add six-degree free flight with f64 position/orientation, adaptive/manual travel speed, roll,
+  boost/fine movement, optional inertia, sensitivity and vertical inversion. Preserve orbit/focus
+  transitions; nearby solid bodies drive terrain loading in free flight.
+* Add Camera & Photo controls for presentation-only field of view, exposure, warmth and saturation.
+  Save camera/lens preferences independently of Universe. Pause and hide-interface controls are explicit.
+* Add a persistent, versioned viewpoint library with object-relative positions, stable anchor IDs,
+  lens restoration and protection against overwriting invalid/newer libraries.
+* PNG capture reports actual completion/failure, preserves the original overlay state and optionally
+  writes camera/dataset metadata in a separate `.png.json` sidecar. Developer capture failures exit nonzero.
+* Reject misleading zero fallback process counters and unsupported Metal GPU timestamp diagnostics.
+* Add Realistic/Cinematic/Hybrid audio modes and independent music, cinematic-effects and alert
+  levels. Live mute/mode changes apply to active sounds; leaving a universe stops its audio.
+* Add a searchable recent notification inbox, category/severity/unread filters and object navigation.
+  Per-category popup/inbox/sound/pause routes and priority thresholds persist in app settings.
+  Do Not Disturb/photo suppress interruptions; bell bursts are coalesced, pause defaults off.
+* Preference writes now replace a temporary file and new controls report failures. Older sound
+  preferences retain their released mix. Developer `--sound-mode` and `--quiet` support native QA.
+* Match free-flight ground clearance and near-plane/bloom behavior to orbit mode after native captures
+  exposed close-range terrain precision artifacts.
+* Repair macOS packaging in synced/file-provider folders by assembling/signing on the temporary
+  filesystem; keep the launchable app in the local build cache, link it from `dist`, and clean staging
+  on exit. The disk image remains standalone.
+* Propagate Bevy AppExit from the native entry point so failed developer exports, captures and
+  loads return a nonzero process status. Native verification exposed the previously discarded status.
+* Simulation state and save format unchanged; **golden fingerprint unchanged**.
+
 ## 1.0.0 — The whole universe (2026-10-04)
 Plan and rationale: docs/PRODUCT_PLAN_1_0.md.
 ### Added

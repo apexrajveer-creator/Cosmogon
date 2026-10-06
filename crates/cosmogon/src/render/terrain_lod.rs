@@ -400,7 +400,8 @@ pub fn update_terrain_lod(
     let u = &sim.universe;
     let t = u.time;
     // Which body (if any) deserves close-up terrain?
-    let candidate = match rig.focus {
+    let terrain_focus = if rig.free.is_some() { rig.nearest_surface.map(Target::Body) } else { rig.focus };
+    let candidate = match terrain_focus {
         Some(Target::Body(r)) if u.systems.get(r.system as usize).and_then(|s| s.bodies.get(r.body as usize)).is_some_and(|b| b.exists() && b.kind.has_surface()) => {
             let pos = to_render(u.body_position(r, t));
             let b = u.body(r);

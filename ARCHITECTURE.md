@@ -81,3 +81,39 @@ See [SIMULATION.md](SIMULATION.md#determinism). Enforced by tests and by `cosmog
 `science.toml` (rates and assumptions), `technologies.toml` (the technology graph) and `sol.toml`
 (the real Solar System) are embedded in the binary — the app needs no files beside itself — and
 validated at load (unknown references and dependency cycles are rejected by tests).
+
+## App performance telemetry
+
+`performance.rs` reads `Sim`, camera/view settings and Bevy diagnostics in the app's `Last` schedule.
+It owns a bounded frame window (600 normally, at most 3600 for automated recordings), updates panel
+summaries four times a second, and exports separate versioned JSON. Detailed render/process
+measurement is opt-in at app startup. It never writes `Universe`, `Edit`, saves or the golden state.
+The load task carries an app-only start instant; successful completion records elapsed time.
+See [PERFORMANCE.md](docs/PERFORMANCE.md) for units, sampling limits and unavailable metrics.
+
+## Navigation and presentation
+
+`navigation.rs` owns app-only camera preferences, presentation values, free-flight math and the
+versioned viewpoint library. `CameraRig` selects orbit or an f64 free pose. The camera is the floating
+origin in either mode; free flight chooses the nearest solid body for terrain LOD independently of
+selection. Controls integrate using real frame time; optional inertia uses the analytic exponential
+response. Orbit return blends position and orientation from the detached view.
+
+Presentation values apply to perspective projection and Bevy colour grading. They never issue an
+`Edit` or change stellar output. Viewpoints store object-relative offsets plus stable object IDs and
+universe identity; restoration follows current object position without rewinding simulation time.
+`capture.rs` saves actual GPU readback images and optional versioned request-time metadata. Neither
+photos, viewpoints nor performance telemetry enters the deterministic Universe serialization.
+
+## Event presentation and audio
+
+`notifications.rs` reads authoritative Chronicle events and maintains a bounded 500-entry derived
+inbox. `sim::collect_toasts` routes new events after simulation advancement into inbox, bounded
+popups, optional app pause and coalesced `SoundCue` messages. Universe replacement resets the cursor
+and imports existing events silently. Quiet/photo policy suppresses interruptions while retaining
+routed history. Routing and severity labels do not create a new simulation hazard model.
+
+`audio.rs` tags sources by Music/Cinematic/Alert and applies master × channel × mode gain both at
+spawn and to active sinks. Realistic mode disables external cinematic effects; Hybrid softens them.
+Leaving Observing removes all session audio. Mode/mix/category preferences serialize only in app
+settings. New simulated environment audio will require explicit context/model producers.

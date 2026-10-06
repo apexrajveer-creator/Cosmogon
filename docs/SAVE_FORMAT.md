@@ -85,3 +85,37 @@ time. Snapshots are not saved.
 A single-file export bundling manifest + state + thumbnail. The extension will be chosen
 after registering document types on each platform (`.cosmogon` is the candidate; macOS
 `UTExportedTypeDeclarations`, Windows ProgID via the installer).
+
+## Performance settings and reports (post-1.0)
+
+`detailed_profiling` is an app user-setting boolean, defaults to false for older settings, and is
+applied at the next launch. Reports live outside sandboxes in `Cosmogon/reports` (or at a developer
+`--profile` path). They have their own `cosmogon-performance` format/schema version 1. No simulation
+save fields, save version, physics fingerprint or dataset initial conditions change in this slice.
+
+## Camera, presentation and viewpoints (post-1.0)
+
+User settings add nested `camera` and `presentation` tables, plus `photo_metadata` (default true).
+Older settings receive defaults; nonfinite/out-of-range camera values are sanitized on load. These
+preferences are independent of the universe save format.
+
+`Cosmogon/viewpoints.json` has its own version 1 library (maximum 128 views). Each entry records a
+universe key, optional stable anchor ID/name, relative render-frame metres, quaternion orientation,
+presentation values and simulation time for context. Applying a view does not rewind that time.
+Reference keys use dataset identity; sandboxes use manifest ID; developer runs use scenario/seed.
+Missing anchors fail visibly. Invalid/newer libraries are preserved and disabled for writes. Library
+writes replace a temporary file only after serialization succeeds. This is a per-user library, not yet
+a packaged/shareable camera path or a per-sandbox manifest migration.
+
+Photo sidecars use `cosmogon-photo` schema version 1 and `.png.json`, distinct from performance reports.
+Metadata labels the capture-request simulation time; asynchronous GPU readback is not claimed to be
+an exact synchronized scientific observation.
+
+## Sound and notification preferences
+
+Nested `audio` and `notifications` settings preserve existing defaults on older files. The legacy
+`sound_volume` remains master gain. Category routes normalize to the eight supported Chronicle
+categories; priority thresholds clamp to 1–5. Nonfinite/out-of-range gains are sanitized. Inbox
+entries/read marks are derived app state and reset on load/rewind; Chronicle remains in Universe.
+Preference writes use temporary-file replacement and expose failures in the new panels. No simulation
+save fields or golden fingerprint change.

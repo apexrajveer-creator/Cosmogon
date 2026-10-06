@@ -1,0 +1,20 @@
+# Asset registry
+
+Existing asset inventory, audited 2026-10-05. No new external assets are introduced in this slice.
+Versions/dates that were not recorded are unknown, not inferred from file modification times.
+Dataset entries are maintained separately in `data/SOURCE_REGISTRY`.
+
+| Asset | Source/provider/version | Retrieval | Licence / attribution evidence | Processing / units / epoch / coordinates | Redistribution status |
+|---|---|---|---|---|---|
+| Inter-Regular.ttf | The Inter Project Authors; font release not recorded | Unknown | Bundled `crates/cosmogon/assets/fonts/Inter-LICENSE`, SIL OFL 1.1, copyright 2020 | Private-use cmap entries removed; glyph outlines unchanged. Font units; epoch/frame N/A | Existing bundled licence must accompany font; modification documented in fonts/README.md |
+| Phosphor icons | `egui-phosphor` 0.11 (resolved version in Cargo.lock) | Dependency retrieval date not recorded | MIT per font README/dependency | Embedded icon glyphs; no independent copied icon pack. Epoch/frame N/A | Preserve dependency notices when packaging |
+| Fallback fonts | egui/epaint dependency versions pinned in Cargo.lock | Not recorded | Existing ASSETS.md lists Ubuntu/Hack/Noto/emoji licences; per-bundle notice inventory still needs reconciliation | Font glyphs, epoch/frame N/A | Existing dependency content; verify complete third-party notices before the next public release |
+| Planet/ring/cloud/city textures and skybox | Project-generated at runtime | N/A | Project manifest declares MIT OR Apache-2.0 | Generated from model/view parameters; colors/materials are presentation, not observational imagery | Original code/content; project licence text files still need repository reconciliation |
+| WGSL shaders | Project source under `crates/cosmogon/src/render/shaders` | N/A | Project licence declaration | Render-space coordinates/material values; do not imply numerical scientific validation | Original code |
+| App icon | Project `scripts/make_icon.py` and packaging outputs | N/A | Project licence declaration | Generated raster/icon packaging sizes; epoch/frame N/A | Original artwork |
+| Synthesized sound | Project `crates/cosmogon/src/audio.rs` | N/A | Project licence declaration; no recordings | Synthesized soundtrack/effects, 44.1 kHz; not physical propagation through vacuum | Original synthesis |
+| Documentation captures | Cosmogon app output in docs/images | Per-image original capture dates not consistently recorded | Project-generated output using the above inputs | Screenshots, not measured telescope imagery | Attribution obligations of embedded inputs still apply |
+
+The workspace declares MIT OR Apache-2.0 but root licence text files were not found during this audit.
+This and the incomplete fallback-font notices are release-documentation gaps. This inventory does not
+silently certify them or replace the licence audit required before introducing new assets/data packs.

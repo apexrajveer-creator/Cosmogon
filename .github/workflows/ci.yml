@@ -23,9 +23,9 @@ jobs:
       - name: Linux system dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
-      - name: Simulation tests
-        run: cargo test -p cosmogon_core -p cosmogon_physics -p cosmogon_sim
+      - name: Workspace tests (including native app boundaries)
+        run: cargo test --release --workspace
       - name: Determinism self-check
         run: cargo run --release -p cosmogon_cli -- check --scenario sol --seed 3 --years 20000
       - name: Build application
-        run: cargo build -p cosmogon
+        run: cargo build --release -p cosmogon

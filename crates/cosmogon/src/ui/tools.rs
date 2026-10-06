@@ -54,6 +54,9 @@ pub enum Cmd {
     OpenCreate,
     OpenLaunch,
     OpenPhysics,
+    OpenPerformance,
+    OpenCamera(usize),
+    OpenAlerts(usize),
     Save,
     Undo,
     Redo,
@@ -398,6 +401,13 @@ pub fn tool_windows(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, m
             add("Create object…".into(), Act::Command(Cmd::OpenCreate));
             add("Launch an asteroid / comet…".into(), Act::Command(Cmd::OpenLaunch));
             add("Physics settings".into(), Act::Command(Cmd::OpenPhysics));
+            add("Camera: free flight and navigation controls".into(), Act::Command(Cmd::OpenCamera(0)));
+            add("Photo: exposure, lens and colour".into(), Act::Command(Cmd::OpenCamera(1)));
+            add("Camera: saved viewpoints".into(), Act::Command(Cmd::OpenCamera(2)));
+            add("Notifications: inbox and event history".into(), Act::Command(Cmd::OpenAlerts(0)));
+            add("Sound: mix, audio modes and quiet settings".into(), Act::Command(Cmd::OpenAlerts(1)));
+            add("Notifications: category routing and thresholds".into(), Act::Command(Cmd::OpenAlerts(2)));
+            add("Performance: frame times and export report".into(), Act::Command(Cmd::OpenPerformance));
             add("Save sandbox".into(), Act::Command(Cmd::Save));
             add("Undo".into(), Act::Command(Cmd::Undo));
             add("Redo".into(), Act::Command(Cmd::Redo));
@@ -538,6 +548,9 @@ pub fn run_command(c: Cmd, s: &mut UiState, sim: &mut Sim, settings: &mut UserSe
         Cmd::OpenCreate => s.create_open = true,
         Cmd::OpenLaunch => sim.tool = Tool::Launch(LaunchSpec::default()),
         Cmd::OpenPhysics => s.physics_open = true,
+        Cmd::OpenPerformance => s.performance_open = true,
+        Cmd::OpenCamera(tab) => { s.camera_open = true; s.camera_tab = tab; }
+        Cmd::OpenAlerts(tab) => { s.alerts_open = true; s.alerts_tab = tab; }
         Cmd::Save => {
             if sim.is_reference() {
                 s.clone_dialog = Some("My Solar System experiment".into());

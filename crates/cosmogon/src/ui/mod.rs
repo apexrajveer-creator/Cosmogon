@@ -1,12 +1,15 @@
 //! User interface (egui). The UI only *reads* simulation state and issues commands
 //! (select, focus, speed, save…); it never mutates the simulation model directly.
 
+pub mod alerts;
 mod charts;
 mod dock;
 pub mod home;
 mod hud;
 mod inspect;
 mod markers;
+mod performance;
+mod navigation;
 mod tools;
 pub mod tour;
 pub mod units;
@@ -55,6 +58,17 @@ pub struct UiState {
     pub show_right: bool,
     pub hidden: bool,
     pub debug: bool,
+    pub performance_open: bool,
+    pub alerts_open: bool,
+    pub alerts_tab: usize,
+    pub notification_query: String,
+    pub notice_severity: crate::notifications::Severity,
+    pub notice_category: Option<cosmogon_sim::history::Category>,
+    pub notice_unread: bool,
+    pub camera_open: bool,
+    pub camera_tab: usize,
+    pub viewpoint_name: String,
+    pub remove_viewpoint: Option<usize>,
     pub help: bool,
     pub pause_menu: bool,
     pub left_tab: LeftTab,
@@ -96,6 +110,17 @@ impl Default for UiState {
             show_right: true,
             hidden: false,
             debug: false,
+            performance_open: false,
+            alerts_open: false,
+            alerts_tab: 0,
+            notification_query: String::new(),
+            notice_severity: crate::notifications::Severity::Information,
+            notice_category: None,
+            notice_unread: false,
+            camera_open: false,
+            camera_tab: 0,
+            viewpoint_name: String::new(),
+            remove_viewpoint: None,
             help: false,
             pause_menu: false,
             left_tab: LeftTab::Systems,
@@ -140,7 +165,7 @@ impl Plugin for UiPlugin {
             .add_systems(EguiPrimaryContextPass, (home::generating).after(apply_theme).run_if(in_state(AppState::Generating)))
             .add_systems(
                 EguiPrimaryContextPass,
-                (markers::draw_markers, hud::keyboard, hud::top_bar, hud::bottom_bar, crate::timeline::timeline_strip, dock::tool_dock, inspect::left_panel, inspect::right_panel, tools::tool_windows, hud::toasts, hud::overlays_windows, tour::tour_card)
+                (markers::draw_markers, hud::keyboard, hud::top_bar, hud::bottom_bar, crate::timeline::timeline_strip, dock::tool_dock, inspect::left_panel, inspect::right_panel, tools::tool_windows, hud::toasts, hud::overlays_windows, performance::panel, navigation::panel, alerts::panel, tour::tour_card)
                     .chain()
                     .after(apply_theme)
                     .run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)),
@@ -173,6 +198,13 @@ fn init_ui_state(mut ui: ResMut<UiState>, args: Res<crate::args::Args>) {
     match args.panel.as_deref() {
         Some("create") => ui.create_open = true,
         Some("physics") => ui.physics_open = true,
+        Some("alerts") => ui.alerts_open = true,
+        Some("sound") => { ui.alerts_open = true; ui.alerts_tab = 1; }
+        Some("routing") => { ui.alerts_open = true; ui.alerts_tab = 2; }
+        Some("performance") => ui.performance_open = true,
+        Some("camera") => ui.camera_open = true,
+        Some("photo") => { ui.camera_open = true; ui.camera_tab = 1; }
+        Some("bookmarks") => { ui.camera_open = true; ui.camera_tab = 2; }
         Some("palette") => ui.palette_open = true,
         _ => {}
     }

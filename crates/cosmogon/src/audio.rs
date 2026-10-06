@@ -16,6 +16,32 @@ use crate::persistence::UserSettings;
 use crate::sim::Sim;
 use crate::state::AppState;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SoundMode { Realistic, Cinematic, Hybrid }
+impl SoundMode {
+    pub const ALL: [Self; 3] = [Self::Realistic, Self::Cinematic, Self::Hybrid];
+    pub fn label(self) -> &'static str { match self { Self::Realistic => "Realistic", Self::Cinematic => "Cinematic", Self::Hybrid => "Hybrid" } }
+}
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct SoundMix { pub mode: SoundMode, pub music: f32, pub effects: f32, pub alerts: f32 }
+impl Default for SoundMix { fn default() -> Self { Self { mode: SoundMode::Cinematic, music: 0.5, effects: 1.0, alerts: 0.5 } } }
+impl SoundMix {
+    pub fn sanitize(&mut self) { for v in [&mut self.music, &mut self.effects, &mut self.alerts] { *v = if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 }; } }
+    fn gain(&self, master: f32, channel: SoundChannel, quiet_alerts: bool) -> f32 {
+        let master = if master.is_finite() { master.clamp(0.0, 1.0) } else { 0.0 };
+        let gain = match channel {
+            SoundChannel::Music => self.music,
+            SoundChannel::Cinematic => self.effects * match self.mode { SoundMode::Realistic => 0.0, SoundMode::Cinematic => 1.0, SoundMode::Hybrid => 0.35 },
+            SoundChannel::Alert => if quiet_alerts { 0.0 } else { self.alerts },
+        };
+        master * if gain.is_finite() { gain.clamp(0.0, 1.0) } else { 0.0 }
+    }
+}
+#[derive(Component, Clone, Copy, Debug)]
+enum SoundChannel { Music, Cinematic, Alert }
+fn quiet_alerts(settings: &UserSettings, photo: bool) -> bool { settings.notifications.do_not_disturb || settings.notifications.mute_sounds || photo }
+
 const SR: u32 = 44_100;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -156,9 +182,7 @@ struct AmbientSound;
 
 #[derive(Resource, Default)]
 struct SoundWatch {
-    events: usize,
     blasts: usize,
-    last_bell: f64,
     generation: Option<u64>,
 }
 
@@ -171,40 +195,37 @@ impl Plugin for SoundPlugin {
             .init_resource::<SoundWatch>()
             .add_systems(OnEnter(AppState::Observing), start_ambient)
             .add_systems(OnExit(AppState::Observing), stop_ambient)
-            .add_systems(Update, (watch_events, play_cues, ambient_volume).chain().run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)));
+            .add_systems(Update, (watch_events, play_cues, mix_volume).chain().run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)));
     }
 }
 
-fn start_ambient(mut commands: Commands, mut synths: ResMut<Assets<Synth>>, settings: Res<UserSettings>, args: Res<crate::args::Args>) {
+fn start_ambient(mut commands: Commands, mut synths: ResMut<Assets<Synth>>, settings: Res<UserSettings>, args: Res<crate::args::Args>, mut watch: ResMut<SoundWatch>) {
+    // Different universes may both start at generation zero; imported blasts are silent.
+    *watch = SoundWatch::default();
     if args.capture.is_some() {
         return;
     }
     let h = synths.add(Synth { kind: SynthKind::Ambient, intensity: 1.0, seed: 1 });
-    commands.spawn((AudioPlayer(h), PlaybackSettings::LOOP.with_volume(Volume::Linear(settings.sound_volume * 0.5)), AmbientSound));
+    commands.spawn((AudioPlayer(h), PlaybackSettings::LOOP.with_volume(Volume::Linear(settings.audio.gain(settings.sound_volume, SoundChannel::Music, false))), AmbientSound, SoundChannel::Music));
 }
 
-fn stop_ambient(mut commands: Commands, q: Query<Entity, With<AmbientSound>>) {
+fn stop_ambient(mut commands: Commands, q: Query<Entity, With<SoundChannel>>) {
     for e in &q {
         commands.entity(e).despawn();
     }
 }
 
-fn ambient_volume(settings: Res<UserSettings>, mut q: Query<&mut AudioSink, With<AmbientSound>>) {
-    if !settings.is_changed() {
-        return;
-    }
-    for mut s in &mut q {
-        s.set_volume(Volume::Linear(settings.sound_volume * 0.5));
-    }
+fn mix_volume(settings: Res<UserSettings>, ui: Res<crate::ui::UiState>, mut q: Query<(&mut AudioSink, &SoundChannel)>) {
+    // Existing one-shots must respond immediately to mute/mode changes too.
+    for (mut sink, &channel) in &mut q { sink.set_volume(Volume::Linear(settings.audio.gain(settings.sound_volume, channel, quiet_alerts(&settings, ui.photo_mode)))); }
 }
 
-/// Supernovae and milestones, read from the simulation.
-fn watch_events(sim: Res<Sim>, mut w: ResMut<SoundWatch>, mut cues: MessageWriter<SoundCue>, time: Res<Time>) {
+/// Supernovae are cinematic presentation cues; milestone alerts are routed by notifications.
+fn watch_events(sim: Res<Sim>, mut w: ResMut<SoundWatch>, mut cues: MessageWriter<SoundCue>) {
     let u = &sim.universe;
     // Fresh universe, rewind or undo: start counting from here, silently.
     if w.generation != Some(sim.generation) {
         w.generation = Some(sim.generation);
-        w.events = u.history.events.len();
         w.blasts = u.blasts.len();
         return;
     }
@@ -212,28 +233,21 @@ fn watch_events(sim: Res<Sim>, mut w: ResMut<SoundWatch>, mut cues: MessageWrite
         cues.write(SoundCue { kind: SynthKind::Roar, intensity: 1.0 });
     }
     w.blasts = u.blasts.len();
-    let now = time.elapsed_secs_f64();
-    let n = u.history.events.len();
-    if n > w.events && now - w.last_bell > 4.0 && u.history.events[w.events.min(n)..].iter().any(|e| e.importance >= 5) {
-        w.last_bell = now;
-        cues.write(SoundCue { kind: SynthKind::Bell, intensity: 0.5 });
-    }
-    w.events = n;
+
 }
 
-fn play_cues(mut commands: Commands, mut cues: MessageReader<SoundCue>, mut synths: ResMut<Assets<Synth>>, settings: Res<UserSettings>, args: Res<crate::args::Args>, mut seed: Local<u32>) {
+fn play_cues(mut commands: Commands, mut cues: MessageReader<SoundCue>, mut synths: ResMut<Assets<Synth>>, settings: Res<UserSettings>, args: Res<crate::args::Args>, ui: Res<crate::ui::UiState>, mut seed: Local<u32>) {
     if args.capture.is_some() || settings.sound_volume <= 0.0 {
         cues.clear();
         return;
     }
     for c in cues.read() {
         *seed = seed.wrapping_add(1);
+        let channel = if c.kind == SynthKind::Bell { SoundChannel::Alert } else { SoundChannel::Cinematic };
+        let gain = settings.audio.gain(settings.sound_volume, channel, quiet_alerts(&settings, ui.photo_mode));
+        if gain <= 0.0 { continue; }
         let h = synths.add(Synth { kind: c.kind, intensity: c.intensity, seed: *seed });
-        let gain = match c.kind {
-            SynthKind::Bell => 0.5,
-            _ => 1.0,
-        };
-        commands.spawn((AudioPlayer(h), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(settings.sound_volume * gain))));
+        commands.spawn((AudioPlayer(h), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(gain)), channel));
     }
 }
 
@@ -243,6 +257,33 @@ mod tests {
 
     fn render(kind: SynthKind) -> Vec<f32> {
         Synth { kind, intensity: 1.0, seed: 3 }.decoder().take(SR as usize * 12).collect()
+    }
+
+    #[test]
+    fn mixer_keeps_realistic_space_silent_and_alerts_independent() {
+        let mut mix = SoundMix::default();
+        assert_eq!(mix.gain(0.6, SoundChannel::Music, false), 0.3);
+        assert_eq!(mix.gain(0.6, SoundChannel::Alert, true), 0.0);
+        assert_eq!(mix.gain(0.0, SoundChannel::Cinematic, false), 0.0);
+        mix.mode = SoundMode::Realistic;
+        assert_eq!(mix.gain(1.0, SoundChannel::Cinematic, false), 0.0);
+        assert_eq!(mix.gain(1.0, SoundChannel::Alert, false), 0.5);
+        mix.mode = SoundMode::Hybrid;
+        assert_eq!(mix.gain(1.0, SoundChannel::Cinematic, false), 0.35);
+        mix.effects = f32::NAN; mix.music = f32::INFINITY; mix.alerts = -10.0; mix.sanitize();
+        for c in [SoundChannel::Music, SoundChannel::Cinematic, SoundChannel::Alert] { assert_eq!(mix.gain(1.0, c, false), 0.0); }
+    }
+    #[test]
+    fn old_preferences_preserve_the_mix_and_new_preferences_round_trip() {
+        let mut settings: UserSettings = toml::from_str("sound_volume = 0.4\n").unwrap();
+        assert_eq!(settings.audio.mode, SoundMode::Cinematic);
+        assert_eq!(settings.audio.gain(settings.sound_volume, SoundChannel::Music, false), 0.2);
+        settings.audio.mode = SoundMode::Realistic; settings.audio.music = 0.0;
+        settings.notifications.do_not_disturb = true;
+        settings.notifications.rules[4].pause = true;
+        let restored: UserSettings = toml::from_str(&toml::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored.audio.mode, SoundMode::Realistic); assert_eq!(restored.audio.music, 0.0);
+        assert!(restored.notifications.do_not_disturb); assert!(restored.notifications.rules[4].pause);
     }
 
     #[test]
