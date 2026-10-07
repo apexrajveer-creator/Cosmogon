@@ -30,7 +30,7 @@ through primary-source research and product reasoning across student-to-research
 [RESEARCH_DESIGN](docs/RESEARCH_DESIGN.md). The following slice reopens recorded bundles, compares completed trajectories and persists guidance/favorites/graph choices; `--research-recording` and CLI inspect use the same bounded reader. Keep building successive connected slices. This does not change Universe/save state or the golden fingerprint. Research verification:
 [RESEARCH_VALIDATION](docs/RESEARCH_VALIDATION.md), 208 passed plus 1 existing ignored at checkpoint 6e6da11. The following measured-validation slice adds cross-object studies and actual analytic/JPL reports; see [SCIENTIFIC_VALIDATION](docs/SCIENTIFIC_VALIDATION.md), 212 passed plus 1 existing ignored. Recorded-data verification: [RECORDED_DATA_VALIDATION](docs/RECORDED_DATA_VALIDATION.md).
 
-New Solar System worlds now use observed-derived Mars MOLA relief and coverage metadata; see [MARS_TERRAIN](docs/MARS_TERRAIN.md). This deliberate terrain state change re-pins the golden to `0xf2c4140a45ae509b`; old saves retain their stored terrain.
+New Solar System worlds now use observed-derived Mars MOLA relief and coverage metadata; see [MARS_TERRAIN](docs/MARS_TERRAIN.md). This deliberate terrain state change re-pins the golden to `0xf2c4140a45ae509b`; old saves retain their stored terrain. Next connected work is specified in [MARS_EXPLORATION_DESIGN](docs/MARS_EXPLORATION_DESIGN.md); verified landing references are researched, while markers and surface travel remain unimplemented.
 
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
