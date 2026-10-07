@@ -100,3 +100,6 @@ creating a universe. No additional installation or network service is required.
 
 Measured orbit checks: `./target/release/cosmogon-cli validate --output /tmp/orbit-check-1.json`.
 `--panel validation` opens Models and starts these fixed fixtures for native captures. CLI `--help` documents cross-object sweeps and primary measurements; existing export paths are protected.
+
+Reopen saved numeric data: `./target/release/cosmogon-cli inspect --recording /tmp/earth-research-1`.
+Native QA: `--research-recording /tmp/earth-research-1 --panel plots --research-workspace /tmp/research-choices.json`; the optional choices file is distinct from the simulation save.

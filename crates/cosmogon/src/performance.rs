@@ -201,6 +201,7 @@ fn record(
         "platform": {"os": std::env::consts::OS, "arch": std::env::consts::ARCH,
             "adapter": adapter.as_ref().map(|a| &a.name), "backend": adapter.as_ref().map(|a| format!("{:?}", a.backend))},
         "measurement": {"detailed": perf.detailed, "automatic": automatic, "warmup_frames": warmup,
+            "pipelined_rendering": !(args.research_recording.is_some() && args.quit_after_capture),
             "window_capacity": limit, "percentile_method": "nearest-rank",
             "startup_to_observing_ms": perf.startup_to_observing_ms, "last_load_ms": perf.last_load_ms},
         "scene": {"scenario": u.settings.scenario.label(), "seed": u.settings.seed,
@@ -243,7 +244,7 @@ fn record(
         });
         if ready {
             perf.automatic_done = true;
-            if args.quit_after_capture && (failed || (args.capture.is_none() && (args.research_export.is_none() || research.as_ref().is_some_and(|r| r.automatic_done)) && (args.research_batch.is_none() || batch.as_ref().is_some_and(|b|b.automatic_done)))) {
+            if args.quit_after_capture && (failed || (args.capture.is_none() && (args.research_export.is_none() || research.as_ref().is_some_and(|r| r.automatic_done)) && (args.research_batch.is_none() || batch.as_ref().is_some_and(|b|b.automatic_done)) && (args.research_recording.is_none() || research.as_ref().is_some_and(|r|r.import_automatic_done)))) {
                 exit.write(if failed { AppExit::error() } else { AppExit::Success });
             }
         }

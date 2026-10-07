@@ -35,7 +35,8 @@ endpoint regression is useful but does not prove trajectory accuracy everywhere 
 Physically meaningful significant figures are distinct from double-precision serialization digits.
 
 Analytic/cached endpoint reports and cross-object primary-measurement studies are now implemented.
-Priority next: expand comparative orbital trajectories and sampling diagnostics; improve graph/definition controls
+Completed-trajectory comparison, recorded-data reopening and saved guidance/favorites/graph choices are now built.
+Priority next: expand sampling diagnostics, observed-data ingestion and model-specific acceptance evidence; improve graph/definition controls
 and manual keyboard/assistive-technology checks; then connect observed terrain/catalogue data and
 engineering quantities as their actual authoritative models are built. Never expose a decorative
 control for an unimplemented solver/settlement/spacecraft quantity.

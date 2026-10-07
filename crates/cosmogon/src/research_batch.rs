@@ -1,5 +1,6 @@
 //! A cancellable background experiment branches from frozen state, never the live Sim.
 use bevy::prelude::*;
+use bevy::tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task};
 use cosmogon_sim::research::{
     BatchProgress, BatchRunSummary, ExperimentDefinition, ParameterId, ResearchTarget,
 };
@@ -34,6 +35,9 @@ pub struct ResearchBatch {
     pub status: Option<String>,
     pub progress: Option<BatchProgress>,
     pub results: Vec<BatchRunSummary>,
+    pub trajectories: Vec<cosmogon_sim::research::SavedRecording>,
+    pub trajectory_status: Option<String>,
+    trajectory_task: Option<Task<Result<Vec<cosmogon_sim::research::SavedRecording>, String>>>,
     pub output: Option<PathBuf>,
     pub definition_path: String,
     pub sweep_enabled: bool,
@@ -58,6 +62,9 @@ impl Default for ResearchBatch {
             status: None,
             progress: None,
             results: Vec::new(),
+            trajectories: Vec::new(),
+            trajectory_status: None,
+            trajectory_task: None,
             output: None,
             definition_path: String::new(),
             sweep_enabled: false,
@@ -95,6 +102,9 @@ impl ResearchBatch {
             Some(cosmogon_sim::research::state_fingerprint(u)?);
         self.target_name = name;
         self.results.clear();
+        self.trajectories.clear();
+        self.trajectory_task = None;
+        self.trajectory_status = None;
         self.finished_success = None;
         self.results_mode = false;
         self.output = None;
@@ -159,6 +169,9 @@ impl ResearchBatch {
         });
         self.output = Some(directory);
         self.results.clear();
+        self.trajectories.clear();
+        self.trajectory_task = None;
+        self.trajectory_status = None;
         self.finished_success = None;
         self.progress = None;
         self.status = Some("Running an independent frozen-state experiment…".into());
@@ -172,6 +185,23 @@ impl ResearchBatch {
         }
     }
     pub fn poll(&mut self) {
+        if let Some(result) = self
+            .trajectory_task
+            .as_mut()
+            .and_then(|t| block_on(future::poll_once(t)))
+        {
+            self.trajectory_task = None;
+            match result {
+                Ok(t) => {
+                    self.trajectory_status=Some(format!("{} completed trajectories loaded; plots show recorded states without interpolation.",t.len()));
+                    self.trajectories = t;
+                }
+                Err(e) => {
+                    self.trajectory_status = Some(format!("Trajectory data unavailable: {e}"))
+                }
+            }
+        }
+
         let messages = if let Some(job) = &self.job {
             match job.receiver.lock() {
                 Ok(rx) => rx.try_iter().collect::<Vec<_>>(),
@@ -214,6 +244,28 @@ impl ResearchBatch {
                                     }
                                 }
                             }
+                        }
+                    }
+                    if let Some(directory) = self.output.clone() {
+                        let runs = self
+                            .results
+                            .iter()
+                            .take(8)
+                            .map(|r| r.directory.clone())
+                            .collect::<Vec<_>>();
+                        if !runs.is_empty() {
+                            self.trajectory_status =
+                                Some("Opening completed trajectories in the background…".into());
+                            self.trajectory_task =
+                                Some(AsyncComputeTaskPool::get().spawn(async move {
+                                    runs.iter()
+                                        .map(|r| {
+                                            cosmogon_sim::research::SavedRecording::read(
+                                                &directory.join(r),
+                                            )
+                                        })
+                                        .collect()
+                                }));
                         }
                     }
                 }
@@ -282,7 +334,7 @@ fn automatic(
             return;
         }
     }
-    if !batch.running() && !batch.automatic_done {
+    if !batch.running() && batch.trajectory_task.is_none() && !batch.automatic_done {
         batch.automatic_done = true;
         let failed = batch.finished_success != Some(true);
         if failed {
@@ -292,7 +344,8 @@ fn automatic(
             && (failed
                 || (args.capture.is_none()
                     && (args.profile.is_none() || performance.automatic_done)
-                    && (args.research_export.is_none() || research.automatic_done)))
+                    && (args.research_export.is_none() || research.automatic_done)
+                    && (args.research_recording.is_none() || research.import_automatic_done)))
         {
             exit.write(if failed {
                 AppExit::error()
@@ -353,6 +406,7 @@ mod tests {
             }),
             ..Default::default()
         };
+        AsyncComputeTaskPool::get_or_init(|| bevy::tasks::TaskPool::new());
         batch.poll();
         assert!(!batch.running());
         assert_eq!(batch.results.len(), 1);

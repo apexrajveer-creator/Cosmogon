@@ -59,11 +59,18 @@ pub struct Args {
     pub research_every: usize,
     pub research_plan: Option<String>,
     pub research_batch: Option<String>,
+    pub research_recording: Option<String>,
+    pub research_workspace: Option<String>,
 }
 
 impl Args {
     pub fn parse() -> Self {
-        Self::parse_from(std::env::args().skip(1))
+        let a = Self::parse_from(std::env::args().skip(1));
+        if a.research_recording.is_some() && a.research_export.is_some() {
+            eprintln!("Choose either --research-recording to open saved data or --research-export to record live data");
+            std::process::exit(1);
+        }
+        a
     }
 
     fn parse_from(args: impl Iterator<Item = String>) -> Self {
@@ -116,6 +123,8 @@ impl Args {
                     _ => None,
                 },
                 "--research-export" => a.research_export = Some(val()),
+                "--research-workspace" => a.research_workspace = Some(val()),
+                "--research-recording" => a.research_recording = Some(val()),
                 "--research-plan" => a.research_plan = Some(val()),
                 "--research-batch" => a.research_batch = Some(val()),
                 "--research-samples" => a.research_samples = val().parse::<usize>().unwrap_or(60).clamp(2, 4096),
@@ -135,7 +144,7 @@ impl Args {
                 f => eprintln!("ignoring unknown argument {f}"),
             }
         }
-        if (a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
+        if (a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
             a.new = Some(Scenario::SolarSystemLab);
         }
         a

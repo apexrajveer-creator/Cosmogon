@@ -22,6 +22,8 @@ struct Args {
     target: String,
     output: Option<String>,
     initial: Option<String>,
+    recording: Option<String>,
+    reference: Option<String>,
     definition: Option<String>,
     parameter: String,
     sweep_start: Option<f64>,
@@ -51,6 +53,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         target: "Earth".into(),
         output: None,
         initial: None,
+        recording: None,
+        reference: None,
         definition: None,
         parameter: "albedo".into(),
         sweep_start: None,
@@ -91,6 +95,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--interval-days" => a.interval_days = number(val()?, &flag)?,
             "--target" => a.target = val()?,
             "--output" => a.output = Some(val()?),
+            "--reference" => a.reference = Some(val()?),
+            "--recording" => a.recording = Some(val()?),
             "--initial" => a.initial = Some(val()?),
             "--definition" => a.definition = Some(val()?),
             "--parameter" => a.parameter = val()?,
@@ -147,6 +153,7 @@ fn help() {
     println!(
         r#"Cosmogon headless tools
   models                         Print model/source/parameter registry JSON
+  inspect --recording DIR         Validate and print saved numeric recording data
   experiment --output NEW_DIR    Record a saved or new universe at uniform simulation times
   sweep --output NEW_DIR         Run independent branches from the same starting state
   replay --output NEW_DIR        Run an exported definition against its frozen base
@@ -160,6 +167,7 @@ Research inputs:
   --samples 2..4096 --interval-days DAYS (86400 seconds per day)
   --parameter KEY --from VALUE --to VALUE --runs 2..64
   --measure-target NAME --measure KEY
+  --recording DIR [--reference DIR --measure KEY] (inspect actual rows/differences)
   --definition definition.json   Replay requires this and --initial
 Values use canonical units listed by models. Missing uncertainty is not inferred.
 Research creation defaults to Solar System Lab. Results are exploratory implemented models;
@@ -194,6 +202,20 @@ fn main() {
     match a.cmd.as_str() {
         "help" => help(),
         "models" => println!("{}", serde_json::to_string_pretty(&serde_json::json!({"format":"cosmogon-model-registry", "schema_version":1, "models":cosmogon_sim::research::PhysicsModelRegistry::models(), "sources":cosmogon_sim::research::SCIENTIFIC_SOURCES, "parameters":cosmogon_sim::research::PARAMETERS})).unwrap()),
+        "inspect" => {
+            let result=(||->Result<serde_json::Value,String>{
+                let path=a.recording.as_ref().ok_or("inspect requires --recording DIR")?;
+                let table=cosmogon_sim::research::SavedRecording::read(std::path::Path::new(path))?;
+                if let Some(reference)=&a.reference {
+                    let reference=cosmogon_sim::research::SavedRecording::read(std::path::Path::new(reference))?;
+                    let key=a.measure.as_ref().ok_or("Difference inspection requires --measure KEY")?;
+                    let parameter=cosmogon_sim::research::PARAMETERS.iter().find(|p|p.key.eq_ignore_ascii_case(key)||format!("{:?}",p.id).eq_ignore_ascii_case(key)).ok_or("Unknown measurement; use models")?;
+                    let difference=table.difference_from(&reference,parameter.id)?;
+                    Ok(serde_json::json!({"format":"cosmogon-recording-difference","schema_version":1,"parameter":parameter.key,"unit":parameter.unit,"target":table.target_name,"reference":reference.target_name,"points":difference,"alignment":"Identical elapsed sample times since each recording's own start; no interpolation or absolute-epoch alignment","limitations":"Difference is not a physical error estimate or uncertainty. Shared initial conditions are not inferred."}))
+                } else {serde_json::to_value(&table).map_err(|e|e.to_string())}
+            })();
+            match result {Ok(data)=>println!("{}",serde_json::to_string_pretty(&data).unwrap()),Err(e)=>{eprintln!("Recording inspect failed: {e}");std::process::exit(1);}}
+        }
         "experiment" => { if let Err(e) = experiment(&a) { eprintln!("Experiment failed: {e}"); std::process::exit(1); } }
         "sweep" | "replay" => { if let Err(e) = batch(&a) { eprintln!("Batch failed: {e}"); std::process::exit(1); } }
         "validate" => {

@@ -50,6 +50,9 @@
 * Calculate native/headless analytic circular-orbit and cached JPL endpoint validation reports with actual residuals, initial/reference vectors, units, solver conditions and explicit coverage limits.
 * Allow independent changed/measured objects and a persisted primary measurement. Surface completed branches from cancelled/failed studies without reporting success; open computed results automatically.
 * Fit research scroll areas within the window, separate per-tab scroll state, add CLI help and graceful argument errors; research creation defaults to Solar Lab.
+* Reopen observer bundles through a bounded shared numeric reader and CLI inspect; verify keys, units, finite rows and state ordering. Load up to eight completed study trajectories off the main thread.
+* Add shared elapsed-time graph zoom/cursor, nearest-state keyboard inspection, multiple computed branches and explicit scale guards. Add saved graph/time choices, parameter favorites and Explore/Learn/Research guidance, including current formula inputs.
+* Preserve invalid/newer workspace files and expose save/load errors; coordinate capture/quit with imported data and completed studies.
 * Simulation state and save format unchanged; **golden fingerprint unchanged**.
 
 ## 1.0.0 — The whole universe (2026-10-04)

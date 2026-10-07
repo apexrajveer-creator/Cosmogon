@@ -3,6 +3,7 @@ use super::{
     units::{self, Quantity},
     UiState, ACCENT, MUTED,
 };
+use crate::research_workspace::{Guidance, PlotChoice, ResearchWorkspace, Scale, TimeUnit};
 use crate::{camera::CameraRig, research::Research, sim::Sim};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -52,6 +53,7 @@ fn control(
     research: &mut Research,
     sim: &Sim,
     target: ResearchTarget,
+    workspace: &mut ResearchWorkspace,
 ) -> Option<cosmogon_sim::sandbox::Edit> {
     ui.label(
         egui::RichText::new(target.name(&sim.universe).unwrap_or("Unavailable object"))
@@ -70,6 +72,7 @@ fn control(
         );
     }
     ui.label(egui::RichText::new("Edits are undoable. Derived values stay locked and update from their inputs. ‘Reset’ restores this selection's snapshot.").small().color(MUTED));
+    ui.checkbox(&mut workspace.choices.favorite_only, "Favorites only");
     let query = research.query.trim().to_lowercase();
     let mut pending = None;
     let mut found = false;
@@ -87,6 +90,11 @@ fn control(
             .iter()
             .filter(|p| {
                 p.section == section
+                    && (workspace.choices.guidance != Guidance::Explore
+                        || !query.is_empty()
+                        || !matches!(section, "State vector" | "Solver" | "Diagnostics"))
+                    && (!workspace.choices.favorite_only
+                        || workspace.choices.favorites.contains(&p.id))
                     && (query.is_empty()
                         || format!("{} {} {} {}", p.name, p.key, p.section, p.model)
                             .to_lowercase()
@@ -107,7 +115,10 @@ fn control(
         header.show(ui,|ui| {
             egui::Grid::new(("research_controls",section)).striped(true).num_columns(3).spacing([10.0,8.0]).show(ui,|ui| {
                 for (p,r) in rows {
-                    ui.label(p.name);
+                    ui.horizontal(|ui| {
+                        if ui.small_button(if workspace.choices.favorites.contains(&p.id) {"★"} else {"☆"}).on_hover_text(format!("Toggle favorite: {}",p.name)).clicked() { workspace.favorite(p.id); }
+                        ui.label(p.name);
+                    });
                     let (q,unit)=quantity(p.id);
                     ui.vertical(|ui| {
                         if let Some(v)=units::edit(ui,(target,p.id),r.value,q,unit,p.editable && !sim.is_reference(),None) {
@@ -160,6 +171,18 @@ fn control(
             .map(|d| d.name)
             .collect::<Vec<_>>()
             .join(", ");
+        if workspace.choices.guidance == Guidance::Learn {
+            ui.label("Trace the calculation from this object's current inputs:");
+            for dependency in p.dependencies {
+                if let Some(value) = read_parameter(&sim.universe, target, *dependency) {
+                    let d = dependency.descriptor();
+                    ui.label(format!("{} = {:.8e} {}", d.name, value.value, d.unit));
+                }
+            }
+            if let Some(value) = read_parameter(&sim.universe, target, id) {
+                ui.strong(format!("{} = {:.8e} {}", p.name, value.value, p.unit));
+            }
+        }
         if !reverse.is_empty() {
             ui.label(format!("Used by: {reverse}"));
         }
@@ -391,8 +414,15 @@ fn sources(ui: &mut egui::Ui, sim: &Sim, target: ResearchTarget) {
     }
     ui.label(egui::RichText::new("Source descriptions do not grant redistribution rights. Detailed inventory: data/SOURCE_REGISTRY. No runtime download is required.").small().color(MUTED));
 }
-fn plots(ui: &mut egui::Ui, research: &mut Research, sim: &Sim, target: ResearchTarget, now: f64) {
-    ui.horizontal(|ui| {
+fn plots(
+    ui: &mut egui::Ui,
+    research: &mut Research,
+    sim: &Sim,
+    target: ResearchTarget,
+    now: f64,
+    workspace: &mut ResearchWorkspace,
+) {
+    ui.horizontal_wrapped(|ui| {
         if research.recording {
             if ui.button("Stop recording").clicked() {
                 if let Some(e) = &mut research.experiment {
@@ -400,93 +430,179 @@ fn plots(ui: &mut egui::Ui, research: &mut Research, sim: &Sim, target: Research
                 }
                 research.stop("Recording stopped by user.");
             }
-        } else if ui.button("Start new recording").clicked() {
+        } else if ui
+            .add_enabled(
+                research.recording_task.is_none(),
+                egui::Button::new("Start new recording"),
+            )
+            .clicked()
+        {
             if let Err(e) = research.start(sim, target, 4096, now) {
                 research.status = Some(e);
             }
+            workspace.cursor = None;
         }
-        ui.add(
-            egui::Slider::new(&mut research.sample_interval_s, 0.1..=10.0)
-                .text("real seconds / sample"),
-        );
-    });
-    ui.label(egui::RichText::new("Recording stays attached to its starting object. Unchanged paused states are not duplicated; paused edits receive separate rows. Rewind or loading stops it. Limit: 4096 states.").small().color(MUTED));
-    if let Some(e) = &research.experiment {
-        ui.label(format!(
-            "{} · {} / {} samples",
-            e.target_name,
-            e.samples.len(),
-            e.limit
-        ));
-        egui::ComboBox::from_id_salt("research_plot")
-            .selected_text(research.plot.descriptor().name)
-            .show_ui(ui, |ui| {
-                for p in &e.parameters {
-                    ui.selectable_value(&mut research.plot, p.descriptor.id, p.descriptor.name);
-                }
-            });
-        let p = research.plot.descriptor();
-        let events = e
-            .events
-            .iter()
-            .map(|event| (event.time - e.initial_header.sim_time, event.title.clone()))
-            .collect::<Vec<_>>();
-        super::research_chart::chart(
-            ui,
-            ("research_main", p.id),
-            p.name,
-            p.unit,
-            &e.points(p.id),
-            &events,
-        );
-        let companions: Vec<_> = e
-            .parameters
-            .iter()
-            .filter(|p| {
-                matches!(
-                    p.descriptor.id,
-                    ParameterId::Temperature
-                        | ParameterId::Insolation
-                        | ParameterId::Habitability
-                        | ParameterId::Gravity
-                        | ParameterId::Luminosity
-                        | ParameterId::StarTemperature
-                ) && p.descriptor.id != research.plot
-            })
-            .take(3)
-            .map(|p| p.descriptor.id)
-            .collect();
-        for id in companions {
-            let p = id.descriptor();
-            super::research_chart::chart(
-                ui,
-                ("research_companion", p.id),
-                p.name,
-                p.unit,
-                &e.points(id),
-                &events,
+        if research.saved.is_none() {
+            ui.add(
+                egui::Slider::new(&mut research.sample_interval_s, 0.1..=10.0)
+                    .text("real seconds / sample"),
             );
         }
-        egui::CollapsingHeader::new(format!("Observed Chronicle events ({})", e.events.len()))
-            .show(ui, |ui| {
-                for event in e.events.iter().rev().take(20) {
-                    ui.label(format!(
-                        "{} s · {}",
-                        event.time - e.initial_header.sim_time,
-                        event.title
-                    ));
+    });
+    egui::CollapsingHeader::new("Open previously recorded data").show(ui,|ui| {
+        ui.add(egui::TextEdit::singleline(&mut research.recording_path).hint_text("Directory containing manifest.json and samples.csv").desired_width(f32::INFINITY));
+        if ui.add_enabled(research.recording_task.is_none() && !research.recording && !research.recording_path.trim().is_empty(),egui::Button::new("Open recording")).clicked(){research.load_recording();workspace.cursor=None;}
+        if research.recording_task.is_some(){ui.spinner();}
+        ui.label(egui::RichText::new("Loads numeric data and source context. It does not load the initial universe or rerun the experiment.").small().color(MUTED));
+    });
+    let (ids, events, name, count) = if let Some(table) = &research.saved {
+        ui.label(
+            egui::RichText::new(format!(
+                "Saved data · {} · {} states · live universe is separate",
+                table.target_name,
+                table.samples.len()
+            ))
+            .color(ACCENT),
+        );
+        egui::CollapsingHeader::new("Recording frame and source context").show(ui, |ui| {
+            ui.label(&table.frame);
+            ui.label(&table.time_coordinate);
+            ui.label("Source labels describe the recording start; edit_count distinguishes later interventions. Opening data does not independently verify its provenance or accuracy.");
+            ui.monospace(format!("{} · {}", table.engine, table.initial_fingerprint));
+            for c in &table.columns {
+                ui.label(format!(
+                    "{} · initial {} · {}",
+                    c.parameter.descriptor().name,
+                    c.state.label(),
+                    c.source
+                ));
+                ui.label(c.uncertainty.map(|v|format!("Reported initial uncertainty: {v:.6e} {}",c.unit)).unwrap_or_else(||"Initial uncertainty unavailable".into()));
+            }
+        });
+        (
+            table
+                .columns
+                .iter()
+                .map(|p| p.parameter)
+                .collect::<Vec<_>>(),
+            table.events.clone(),
+            table.target_name.clone(),
+            table.samples.len(),
+        )
+    } else if let Some(e) = &research.experiment {
+        (
+            e.parameters.iter().map(|p| p.descriptor.id).collect(),
+            e.events
+                .iter()
+                .map(|event| (event.time - e.initial_header.sim_time, event.title.clone()))
+                .collect(),
+            e.target_name.clone(),
+            e.samples.len(),
+        )
+    } else {
+        ui.label("Start a recording or open a bundle to inspect orbital, physical and environment quantities.");
+        return;
+    };
+    if research.saved.is_none() {
+        ui.label(format!("{name} · {count} recorded states"));
+    }
+    egui::CollapsingHeader::new("Choose graphs and time units").show(ui, |ui| {
+        ui.label("Choose up to four graphs. Unsupported choices remain saved for other objects.");
+        ui.horizontal(|ui| {
+            for unit in [TimeUnit::Seconds, TimeUnit::Days, TimeUnit::Years] {
+                ui.selectable_value(&mut workspace.choices.time_unit, unit, unit.label());
+            }
+        });
+        for id in &ids {
+            let mut selected = workspace.choices.plots.iter().any(|p| p.parameter == *id);
+            if ui
+                .add_enabled(
+                    selected || workspace.choices.plots.len() < 4,
+                    egui::Checkbox::new(&mut selected, id.descriptor().name),
+                )
+                .changed()
+            {
+                if selected {
+                    workspace.choices.plots.push(PlotChoice {
+                        parameter: *id,
+                        scale: Scale::Linear,
+                    });
+                } else if workspace.choices.plots.len() > 1 {
+                    workspace.choices.plots.retain(|p| p.parameter != *id);
                 }
-            });
-        if ui.button("Export CSV + reproducibility bundle").clicked() {
-            let path = crate::research::export_path();
-            if let Err(e) = research.export(&path) {
-                research.status = Some(format!("Export failed: {e}"));
             }
         }
-        ui.label(egui::RichText::new("Includes unit-labelled columns, model/source metadata, initial save, observed edits and events. Error bars remain unavailable.").small().color(MUTED));
-    } else {
-        ui.label("Start a recording to compare orbital, physical and environment quantities on the same timeline.");
+    });
+    let mut plotted = 0;
+    for i in 0..workspace.choices.plots.len() {
+        let id = workspace.choices.plots[i].parameter;
+        if !ids.contains(&id) {
+            continue;
+        }
+        plotted += 1;
+        let points = if let Some(table) = &research.saved {
+            table.points(id)
+        } else {
+            research.experiment.as_ref().unwrap().points(id)
+        };
+        let d = id.descriptor();
+        super::research_chart::chart(
+            ui,
+            d.name,
+            d.unit,
+            &[super::research_chart::Series {
+                label: name.clone(),
+                points,
+            }],
+            &events,
+            &mut workspace.choices.range,
+            &mut workspace.choices.plots[i].scale,
+            workspace.choices.time_unit,
+            &mut workspace.cursor,
+        );
     }
+    if research.saved.is_some() {
+        if let Some(table) = &research.saved {
+            if !table.events.is_empty() {
+                egui::CollapsingHeader::new("Recorded events").show(ui, |ui| {
+                    for (t, title) in table.events.iter().rev().take(20) {
+                        ui.label(format!(
+                            "{} {} · {}",
+                            units::fmt_num(*t / workspace.choices.time_unit.factor()),
+                            workspace.choices.time_unit.label(),
+                            title
+                        ));
+                    }
+                });
+            }
+        }
+    }
+    if plotted == 0 {
+        ui.label("The saved graph choices are unavailable for this object. Choose supported graphs above.");
+    }
+    egui::CollapsingHeader::new("Most recent actual states").show(ui, |ui| {
+        let samples = research
+            .saved
+            .as_ref()
+            .map(|t| &t.samples)
+            .or_else(|| research.experiment.as_ref().map(|e| &e.samples))
+            .unwrap();
+        for (i, s) in samples.iter().enumerate().rev().take(10) {
+            ui.monospace(format!(
+                "State {} · {:.8e} absolute simulation s · {} edits",
+                i + 1,
+                s.simulation_time_s,
+                s.edit_count
+            ));
+        }
+    });
+    if research.saved.is_none() && ui.button("Export CSV + reproducibility bundle").clicked() {
+        let path = crate::research::export_path();
+        if let Err(e) = research.export(&path) {
+            research.status = Some(format!("Export failed: {e}"));
+        }
+    }
+    ui.label(egui::RichText::new("Charts share elapsed time since this recording began. Paused edits are distinct rows; no interpolation or invented uncertainty. Save graph choices with Save workspace.").small().color(MUTED));
 }
 fn research_targets(u: &cosmogon_sim::Universe) -> Vec<(ResearchTarget, String)> {
     let mut targets = Vec::new();
@@ -513,19 +629,36 @@ fn experiments(
     batch: &mut crate::research_batch::ResearchBatch,
     sim: &Sim,
     target: ResearchTarget,
+    workspace: &mut ResearchWorkspace,
 ) {
     use cosmogon_sim::research::{ExperimentDefinition, ParameterSweep};
-    ui.heading("Ask a question. Change one input. Compare the outcomes.");
-    ui.label("Freeze a starting state, then run independent copies in the background. Your live universe stays separate from the experiment.");
-    if ui
-        .add_enabled(
-            !batch.running(),
-            egui::Button::new("Freeze selected object's starting state"),
-        )
-        .clicked()
-    {
-        if let Err(e) = batch.freeze(&sim.universe, target) {
-            batch.status = Some(e);
+    if batch.results_mode {
+        if let (Some(base), Some(d)) = (&batch.frozen, &batch.definition) {
+            let changed = d
+                .sweep
+                .as_ref()
+                .and_then(|s| s.target.name(base))
+                .unwrap_or("fixed overrides / original state");
+            ui.strong(format!(
+                "{} · changing {} · {} completed runs",
+                d.measurement_target.name(base).unwrap_or("Unavailable"),
+                changed,
+                batch.results.len()
+            ));
+        }
+    } else {
+        ui.heading("Ask a question. Change one input. Compare the outcomes.");
+        ui.label("Freeze a starting state, then run independent copies in the background. Your live universe stays separate from the experiment.");
+        if ui
+            .add_enabled(
+                !batch.running(),
+                egui::Button::new("Freeze selected object's starting state"),
+            )
+            .clicked()
+        {
+            if let Err(e) = batch.freeze(&sim.universe, target) {
+                batch.status = Some(e);
+            }
         }
     }
     ui.horizontal(|ui| {
@@ -668,15 +801,17 @@ fn experiments(
             }
         }
     }
-    if let Some(p) = &batch.progress {
-        ui.label(format!(
-            "Completed {} / {} runs · current state {} / {}",
-            p.completed_runs, p.total_runs, p.current_sample, p.total_samples
-        ));
+    if !batch.results_mode {
+        if let Some(p) = &batch.progress {
+            ui.label(format!(
+                "Completed {} / {} runs · current state {} / {}",
+                p.completed_runs, p.total_runs, p.current_sample, p.total_samples
+            ));
+        }
     }
     if batch.results_mode && !batch.results.is_empty() {
         ui.separator();
-        ui.heading("Compare completed runs");
+
         egui::ComboBox::from_id_salt("experiment_output")
             .selected_text(batch.compare_parameter.descriptor().name)
             .show_ui(ui, |ui| {
@@ -690,7 +825,86 @@ fn experiments(
                     }
                 }
             });
+        ui.horizontal(|ui| {
+            ui.label("Time:");
+            for unit in [TimeUnit::Seconds, TimeUnit::Days, TimeUnit::Years] {
+                ui.selectable_value(&mut workspace.choices.time_unit, unit, unit.label());
+            }
+        });
         let p = batch.compare_parameter.descriptor();
+        if !batch.trajectories.is_empty() {
+            ui.checkbox(
+                &mut workspace.choices.comparison_difference,
+                "Difference from first completed run",
+            );
+            let baseline = &batch.trajectories[0];
+            let differences = if workspace.choices.comparison_difference {
+                batch
+                    .trajectories
+                    .iter()
+                    .map(|t| t.difference_from(baseline, p.id))
+                    .collect::<Result<Vec<_>, _>>()
+            } else {
+                Ok(Vec::new())
+            };
+            if let Err(e) = &differences {
+                ui.label(e);
+            }
+            let show_difference = workspace.choices.comparison_difference && differences.is_ok();
+            let series = batch
+                .trajectories
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| t.columns.iter().any(|c| c.parameter == p.id))
+                .map(|(i, t)| super::research_chart::Series {
+                    label: format!(
+                        "Run {} · input {}",
+                        i + 1,
+                        batch
+                            .results
+                            .get(i)
+                            .and_then(|r| r.input_value)
+                            .map(|v| format!(
+                                "{v:.5e} {}",
+                                batch
+                                    .definition
+                                    .as_ref()
+                                    .and_then(|d| d.sweep.as_ref())
+                                    .map(|s| s.parameter.descriptor().unit)
+                                    .unwrap_or("")
+                            ))
+                            .unwrap_or_else(|| "baseline".into())
+                    ),
+                    points: if show_difference {
+                        differences.as_ref().unwrap()[i].clone()
+                    } else {
+                        t.points(p.id)
+                    },
+                })
+                .collect::<Vec<_>>();
+            super::research_chart::chart(
+                ui,
+                &if show_difference {
+                    format!("{} · Δ from first completed run", p.name)
+                } else {
+                    p.name.to_string()
+                },
+                p.unit,
+                &series,
+                &[],
+                &mut workspace.choices.range,
+                &mut workspace.choices.comparison_scale,
+                workspace.choices.time_unit,
+                &mut workspace.cursor,
+            );
+            if show_difference {
+                ui.label("Difference uses identical elapsed sample times, not interpolation. The first branch is a reference for comparison, not necessarily the unmodified universe or a physical error estimate.");
+            }
+            ui.label(egui::RichText::new("Up to eight completed branches are plotted; every run remains in the table and CSV. Elapsed time is relative to each branch's starting state.").small().color(MUTED));
+        }
+        if let Some(status) = &batch.trajectory_status {
+            ui.label(status);
+        }
         egui::Grid::new("experiment_comparison")
             .striped(true)
             .show(ui, |ui| {
@@ -761,6 +975,7 @@ pub fn panel(
     rig: Res<CameraRig>,
     time: Res<Time<Real>>,
     mut batch: ResMut<crate::research_batch::ResearchBatch>,
+    mut workspace: ResMut<ResearchWorkspace>,
 ) -> Result {
     if let Some(tab) = ui_state.research_requested.take() {
         research.open = true;
@@ -779,7 +994,8 @@ pub fn panel(
     let ctx = contexts.ctx_mut()?;
     let mut open = research.open;
     let mut pending = None;
-    let panel_height = (ctx.content_rect().height() - 310.0).clamp(160.0, 430.0);
+    let before_choices = workspace.choices.clone();
+    let panel_height = (ctx.content_rect().height() - 370.0).clamp(160.0, 380.0);
     egui::Window::new("Control Panel & Research")
         .open(&mut open)
         .frame(egui::Frame::window(&ctx.style()).fill(egui::Color32::from_rgb(13, 17, 25)))
@@ -798,6 +1014,13 @@ pub fn panel(
                     ui.selectable_value(&mut research.tab, tab, name);
                 }
             });
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Guidance:");
+                for (mode,name) in [(Guidance::Explore,"Explore"),(Guidance::Learn,"Learn"),(Guidance::Research,"Research")] {ui.selectable_value(&mut workspace.choices.guidance,mode,name);}
+                if ui.button(if workspace.dirty {"Save workspace •"} else {"Save workspace"}).clicked(){if let Err(e)=workspace.save(){workspace.status=Some(format!("Workspace save failed: {e}"));}}
+            });
+            if workspace.choices.guidance == Guidance::Learn {ui.label(egui::RichText::new("Choose an object, trace its inputs with Info, record its evolution, then compare frozen alternatives. Guidance changes explanations; the physical engine stays the same.").small().color(MUTED));}
+            if let Some(status)=&workspace.status {ui.label(egui::RichText::new(status).small().color(ACCENT));}
             ui.separator();
             egui::ScrollArea::vertical()
                 .id_salt(("research_scroll", research.tab))
@@ -805,9 +1028,9 @@ pub fn panel(
                 .show(ui, |ui| match research.tab {
                     1 => models(ui, &mut research, &sim, t, &mut ui_state),
                     2 => sources(ui, &sim, t),
-                    3 => plots(ui, &mut research, &sim, t, time.elapsed_secs_f64()),
-                    4 => experiments(ui, &mut batch, &sim, t),
-                    _ => pending = control(ui, &mut research, &sim, t),
+                    3 => plots(ui, &mut research, &sim, t, time.elapsed_secs_f64(), &mut workspace),
+                    4 => experiments(ui, &mut batch, &sim, t, &mut workspace),
+                    _ => pending = control(ui, &mut research, &sim, t, &mut workspace),
                 });
             if let Some(status) = &research.status {
                 ui.separator();
@@ -815,6 +1038,9 @@ pub fn panel(
             }
         });
     research.open = open;
+    if workspace.choices != before_choices {
+        workspace.dirty = true;
+    }
     if let Some(edit) = pending {
         match sim.edit(edit, time.elapsed_secs_f64()) {
             Ok(out) => research.status = Some(out.summary),

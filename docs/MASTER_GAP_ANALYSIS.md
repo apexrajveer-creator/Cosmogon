@@ -20,7 +20,7 @@ The old `GAP_ANALYSIS.md` describes the pre-sandbox baseline and is historical.
 | 13 Real universe | Embedded Horizons and ingestion script | Catalogue registry, spatial index, streaming, dataset manager and rights review |
 | 14 Exotic universe | Stellar evolution, compact-object visuals, nurseries | Per-model validation and advanced effects; no wholesale reimplementation |
 | 15 Interstellar | Reduced generation ships, terraforming, Dyson swarm | Richer shared consequences, branching civilizations and communication models |
-| 16 Research | Typed model/source/parameter registry, native controls/interactive plots, observer CSV/initial-state bundles, frozen definitions/replay/sweeps, cross-object measurements, computed analytic/JPL reports and guided comparisons | Broader comparison workflows, uncertainty propagation and independent model validation |
+| 16 Research | Typed model/source/parameter registry, native controls/interactive plots, observer CSV/initial-state bundles, frozen definitions/replay/sweeps, cross-object measurements, computed analytic/JPL reports, saved graph/favorite choices, reopened recordings, synchronized trajectory comparison and guided explanations | Broader comparison workflows, uncertainty propagation and independent model validation |
 | 17–19 Polish/product | Native distribution pipeline and broad usable app | Cinematics/audio/accessibility/control completeness, signing, dataset delivery, product QA |
 
 ## Immediate sequence

@@ -98,3 +98,8 @@ establishes measurement capability and makes no optimization claim.
 See [VALIDATION.md](VALIDATION.md) for measured runs and retained evidence. Baseline whole-process
 numbers and tool limitations are in [CURRENT_STATE_AUDIT.md](CURRENT_STATE_AUDIT.md).
 A controlled cross-platform performance benchmark and full GPU/VRAM traces remain future work.
+
+Automated saved-recording runs (`--research-recording … --quit`) render on the main thread to
+avoid an early pipelined-renderer shutdown hang. Reports include `measurement.pipelined_rendering`;
+compare performance only between runs with matching renderer scheduling. Ordinary interactive
+sessions and other automated workloads retain pipelined rendering.

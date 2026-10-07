@@ -192,3 +192,47 @@ The typed definition/native sweep interval permits up to one million years betwe
 N-body runs can require substantial computation. This input bound is not an accuracy claim. The
 single CLI `experiment` observer retains its 3652.5-day maximum. Malformed command-line requests
 return a concise error and failure status rather than panicking.
+
+
+## Reopening data, trajectory comparison and saved workspace choices
+
+Plots & Export → Open previously recorded data opens a six-file observer bundle's numeric table.
+It reads the manifest, CSV and events on a worker, without replacing or evolving the live universe.
+`cosmogon-cli inspect --recording DIR` exposes the same verified numeric rows, parameter keys/units
+and initial source context as JSON. This accepts Cosmogon's numeric CSV dialect, not arbitrary CSV.
+Format/schema, registered units/keys, row counts, finite values and chronological edit ordering are
+checked; limits are 1 MiB manifest, 8 MiB CSV, 2 MiB events, 4096 states and 1000 events. Corrupt data
+is refused. This checks format consistency, not independent provenance, file authenticity or model
+accuracy. Source labels and optional uncertainty refer to the recording start; they are not
+per-state uncertainty propagation. The complete original bundle remains on disk.
+
+Completed studies load up to eight saved trajectories on a background worker. The selected output
+is plotted for those branches in the same canonical unit, while all up to 64 runs remain in the
+numeric result table and exported bundles. Lines connect actual samples for display; nearest-state
+inspection does not interpolate results. Charts share elapsed-time zoom/pan and cursor across the
+selected graphs. Each recording/branch uses elapsed time since its own start; this does not align
+absolute epochs from unrelated studies. Difference from first completed run requires identical elapsed sample times and reveals small branch effects without interpolation. The first branch is not necessarily an unmodified control, and the difference is not a physical error estimate. CLI `inspect --recording DIR --reference BASELINE_DIR --measure KEY` exposes the same calculated differences.
+Log requires positive values; fractional change uses each
+series' own first value and is not an error estimate. Unsupported transforms fall back visibly.
+Click a chart and use left/right arrows for recorded-state inspection; direct keyboard/pointer and
+assistive-technology behavior still require manual verification.
+
+Guidance offers Explore, Learn and Research within the same workspace. Explore initially hides
+solver/diagnostic/state-vector groups unless searched; Learn explains current inputs behind Info's
+formula and the study path; Research keeps the full controls. Guidance changes presentation, not
+physical accuracy. Parameter stars and Favorites only are user choices. Choose graphs and time
+units selects up to four quantities, with seconds, 86400-second days or 365.25-day Julian years.
+Unsupported graph choices stay saved for other objects rather than silently discarding them.
+
+Save workspace persists guidance, favorites/filter, selected graphs/scales, comparison scale/difference choice,
+time unit and normalized time-range fractions in Cosmogon/research-workspace.json, separate from
+Universe. It has its own format/schema 1, 64 KiB read limit and bounded/validated choices. Older
+partial choices receive defaults. Invalid/newer files are preserved and disabled for writes;
+failed saves are visible. Changes are marked unsaved until the explicit Save action. The cursor
+is transient; full window positions/docking and per-sandbox layouts remain future work.
+
+Developer `--research-recording DIR --panel plots` opens data at startup; `--research-workspace FILE`
+loads a separate choices file for capture QA. Opening saved data and automatic live export are
+mutually exclusive. Capture waits for requested imported data or completed automated studies, and
+coordinated quit includes the new data-loading task. No new dependency, Universe field, physical
+algorithm or golden-fingerprint change is introduced.

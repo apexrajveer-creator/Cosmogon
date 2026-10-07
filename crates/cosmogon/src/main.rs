@@ -17,6 +17,7 @@ mod notifications;
 mod persistence;
 mod performance;
 mod research;
+mod research_workspace;
 mod research_batch;
 mod render;
 mod sim;
@@ -31,6 +32,17 @@ use bevy_egui::EguiPlugin;
 fn main() -> bevy::app::AppExit {
     let started = std::time::Instant::now();
     let args = args::Args::parse();
+    // Reject invalid automated inputs before starting the renderer. Early GPU teardown
+    // can otherwise wait for a render task that still needs the main-thread executor.
+    // Interactive opening remains asynchronous and reports errors in the workspace.
+    if args.quit_after_capture {
+        if let Some(path) = &args.research_recording {
+            if let Err(error) = cosmogon_sim::research::SavedRecording::read(std::path::Path::new(path)) {
+                eprintln!("Cannot open research recording: {error}");
+                return bevy::app::AppExit::error();
+            }
+        }
+    }
     let mut settings = persistence::UserSettings::load();
     if let Some(fov) = args.fov { settings.presentation.fov_deg = fov; }
     if let Some(ev) = args.exposure { settings.presentation.exposure_ev = ev; }
@@ -38,9 +50,19 @@ fn main() -> bevy::app::AppExit {
     if args.quiet { settings.sound_volume = 0.0; settings.notifications.do_not_disturb = true; }
     settings.presentation.sanitize();
 
+    let plugins = DefaultPlugins.build();
+    // The pipelined renderer's shutdown waits without servicing its main-thread
+    // executor. Imported-table automation may finish during GPU initialization;
+    // render those short jobs on the main thread so teardown cannot deadlock.
+    let plugins = if args.research_recording.is_some() && args.quit_after_capture {
+        plugins.disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>()
+    } else {
+        plugins
+    };
+
     App::new()
         .add_plugins(
-            DefaultPlugins
+            plugins
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "Cosmogon".into(),

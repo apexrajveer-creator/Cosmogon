@@ -134,3 +134,5 @@ prepared/running/complete/incomplete status and completed-run outcomes. base.cos
 See RESEARCH for replay compatibility and partial/cancelled export semantics.
 
 Measured orbital reports use cosmogon-model-validation schema 1 outside Universe/saves. They contain fixed fixture inputs and reference coordinates, computed metrics and regression guards, with coverage limitations.
+
+Research workspace choices use a separate cosmogon-research-workspace schema 1 file. Guidance, favorites, up to four graph quantities/scales, comparison scale/difference choice, time unit and normalized zoom range are persisted explicitly. Invalid/newer files remain untouched. Observer bundle reopening reads existing manifest/CSV/events without loading Universe; see RESEARCH for limits and source-label semantics.

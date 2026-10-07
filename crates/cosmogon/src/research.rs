@@ -30,6 +30,10 @@ pub struct Research {
     pub automatic_done: bool,
     pub sample_interval_s: f64,
     pub plot: ParameterId,
+    pub saved: Option<cosmogon_sim::research::SavedRecording>,
+    pub recording_path: String,
+    pub recording_task: Option<Task<Result<cosmogon_sim::research::SavedRecording, String>>>,
+    pub import_automatic_done: bool,
     pub validation_requested: bool,
     pub validation_report: Option<cosmogon_sim::research::ValidationReport>,
     pub validation_task: Option<Task<cosmogon_sim::research::ValidationReport>>,
@@ -54,6 +58,10 @@ impl Default for Research {
             automatic_done: false,
             sample_interval_s: 1.0,
             plot: ParameterId::Temperature,
+            saved: None,
+            recording_path: String::new(),
+            recording_task: None,
+            import_automatic_done: true,
             validation_requested: false,
             validation_report: None,
             validation_task: None,
@@ -84,6 +92,7 @@ impl Research {
         now: f64,
     ) -> Result<(), String> {
         self.experiment = Some(Experiment::new(&sim.universe, t, limit)?);
+        self.saved = None;
         self.experiment.as_mut().unwrap().sampling_policy = format!("Native observer: requested real-time interval {} s; actual simulation times are in samples.csv",self.sample_interval_s);
         self.recording = true;
         self.generation = sim.generation;
@@ -98,6 +107,17 @@ impl Research {
             self.plot = e.parameters[0].descriptor.id;
         }
         Ok(())
+    }
+    pub fn load_recording(&mut self) {
+        if self.recording_task.is_some() {
+            return;
+        }
+        let path = std::path::PathBuf::from(self.recording_path.trim());
+        self.recording_task = Some(
+            AsyncComputeTaskPool::get()
+                .spawn(async move { cosmogon_sim::research::SavedRecording::read(&path) }),
+        );
+        self.status = Some("Opening recorded data in the background…".into());
     }
     pub fn stop(&mut self, reason: &str) {
         self.recording = false;
@@ -120,8 +140,9 @@ pub struct ResearchPlugin;
 impl Plugin for ResearchPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Research>()
+            .init_resource::<crate::research_workspace::ResearchWorkspace>()
             .add_systems(Startup, init)
-            .add_systems(Update, poll_validation)
+            .add_systems(Update, (poll_validation, poll_recording))
             .add_systems(
                 Last,
                 record
@@ -130,7 +151,21 @@ impl Plugin for ResearchPlugin {
             );
     }
 }
-fn init(mut research: ResMut<Research>, args: Res<Args>) {
+fn init(
+    mut research: ResMut<Research>,
+    args: Res<Args>,
+    mut workspace: ResMut<crate::research_workspace::ResearchWorkspace>,
+) {
+    if let Some(path) = &args.research_workspace {
+        *workspace = crate::research_workspace::ResearchWorkspace::load(path.into());
+    }
+    if let Some(path) = &args.research_recording {
+        research.recording_path = path.clone();
+        research.open = true;
+        research.tab = 3;
+        research.import_automatic_done = false;
+        research.load_recording();
+    }
     match args.panel.as_deref() {
         Some("control") => research.open = true,
         Some("models") => {
@@ -346,5 +381,49 @@ mod tests {
         sim.generation += 1;
         research.selection(&sim, ResearchTarget::Star(0));
         assert_eq!(research.baseline_target.unwrap().1, 1);
+    }
+}
+
+fn poll_recording(
+    mut research: ResMut<Research>,
+    args: Res<Args>,
+    mut exit: MessageWriter<AppExit>,
+    performance: Res<crate::performance::Performance>,
+    batch: Res<crate::research_batch::ResearchBatch>,
+) {
+    let result = research
+        .recording_task
+        .as_mut()
+        .and_then(|task| block_on(future::poll_once(task)));
+    if let Some(result) = result {
+        research.recording_task = None;
+        research.import_automatic_done = true;
+        match result {
+            Ok(table) => {
+                research.recording = false;
+                research.status = Some(format!(
+                    "Opened {} recorded states for {}. Live universe unchanged.",
+                    table.samples.len(),
+                    table.target_name
+                ));
+                research.saved = Some(table);
+                if args.research_recording.is_some()
+                    && args.quit_after_capture
+                    && args.capture.is_none()
+                    && (args.profile.is_none() || performance.automatic_done)
+                    && (args.research_export.is_none() || research.automatic_done)
+                    && (args.research_batch.is_none() || batch.automatic_done)
+                {
+                    exit.write(AppExit::Success);
+                }
+            }
+            Err(e) => {
+                research.status = Some(format!("Could not open recording: {e}"));
+                if args.research_recording.is_some() && args.quit_after_capture {
+                    error!("Research recording load failed: {e}");
+                    exit.write(AppExit::error());
+                }
+            }
+        }
     }
 }
