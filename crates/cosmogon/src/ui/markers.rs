@@ -38,6 +38,7 @@ pub fn draw_markers(
     mut ui_state: ResMut<UiState>,
     cam: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     args: Res<crate::args::Args>,
+    study: Res<super::surface_study::Study>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     if ui_state.photo_mode {
@@ -123,6 +124,26 @@ pub fn draw_markers(
             if labels || selected {
                 let text = if d > 0.3 * LIGHT_YEAR { format!("{}  {:.1} ly", sys.name, d / LIGHT_YEAR) } else { sys.name.clone() };
                 label(&painter, sp, &text, if has_civ { CIV } else { TEXT }, &font);
+            }
+        }
+    }
+
+    // Derived analysis trace in the same body-fixed frame as source probes. Do not bridge
+    // hidden rows or draw a stale/different-source study through the planet's back side.
+    if ui_state.surface_study_open && !ui_state.hidden {
+        if let Some((r,section,cursor))=study.overlay(&sim) {
+            let body=u.body(r);let center=to_render(u.body_position(r,t));let frame=body_rotation_f64(&sim,r,t);
+            let mut previous=None;
+            for row in &section.rows {
+                let reading=&row.reading;
+                let local=DVec3::from_array(cosmogon_sim::planet::terrain::dir_from_lat_lon(reading.latitude_deg.to_radians(),reading.longitude_east_deg.to_radians()));
+                let radial=frame*local;let radius=body.radius+reading.height_above_areoid_m;
+                let projected=crate::surface::above_horizon(view.origin-center,radial,radius).then(||project(center+radial*(radius+50.0))).flatten();
+                if let Some(point)=projected {
+                    if let Some((last,interpolated))=previous {let color=if interpolated || row.depends_on_provider_interpolation {egui::Color32::from_rgb(215,120,110)} else {ACCENT};painter.line_segment([last,point],egui::Stroke::new(2.0_f32,color));}
+                    if row.index==cursor {painter.circle_filled(point,5.0,egui::Color32::WHITE);label(&painter,point+egui::vec2(4.0,-15.0),&format!("Section row {}",cursor),TEXT,&small);}
+                    previous=Some((point,row.depends_on_provider_interpolation));
+                } else {previous=None;}
             }
         }
     }

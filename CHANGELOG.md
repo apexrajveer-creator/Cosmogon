@@ -2,6 +2,8 @@
 
 ## Unreleased — native exploration and research
 
+- Reopen native numeric terrain studies with exact pinned source/sphere/samples and transactional failure recovery. Show source-aware sampled paths and selected rows on Mars; suppress stale, hidden or mismatched traces. Preserve independent study graphs/exports and capture actual study definitions/rows in photo metadata. Add explicit current-world adaptation and bounded pre-render automation checks. No Universe or golden change.
+
 - Add independently pinned NASA MOLA 16ppd relief and coverage, with exact source/label/provider checksums and reproducible conversion. Explicit undoable source selection shares heights across terrain, probes, landing markers, camera travel and numeric studies. Save/version and bookmark/section mismatch checks preserve reproducibility; terrain/bake caches follow source changes. Existing worlds and new defaults stay unchanged, so the golden remains `0xf2c4140a45ae509b`. Finer pixels retain interpolated support and unavailable uncertainty; no local safety/accuracy claim.
 
 - Add shared deterministic MOLA terrain sections between historical/custom endpoints, actual native height-distance graphs and row-to-probe/travel actions. Protect source-supported CSV/definition/JSON exports and headless replay; retain source-cell weights/counts, checksums, unavailable uncertainty and overview/geodesic limits. No Universe or golden change.

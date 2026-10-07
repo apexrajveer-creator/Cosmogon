@@ -12,6 +12,7 @@ mod performance;
 mod research;
 mod research_chart;
 mod surface_study;
+pub(crate) use surface_study::Study;
 mod navigation;
 mod tools;
 pub mod tour;
@@ -242,7 +243,7 @@ fn init_ui_state(mut ui: ResMut<UiState>, args: Res<crate::args::Args>) {
         Some("create") => ui.create_open = true,
         Some("physics") => ui.physics_open = true,
         Some("surface") => ui.body_tab = BodyTab::Surface,
-        Some("section") => ui.surface_study_open = true,
+        Some("section" | "section-map") => ui.surface_study_open = true,
         Some("alerts") => ui.alerts_open = true,
         Some("sound") => { ui.alerts_open = true; ui.alerts_tab = 1; }
         Some("routing") => { ui.alerts_open = true; ui.alerts_tab = 2; }

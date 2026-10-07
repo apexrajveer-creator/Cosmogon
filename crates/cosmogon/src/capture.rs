@@ -41,7 +41,7 @@ pub fn photo_path() -> std::path::PathBuf {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn take_photo(mut commands: Commands, mut photo: ResMut<Photo>, mut ui: ResMut<crate::ui::UiState>, mut sim: ResMut<crate::sim::Sim>, time: Res<Time>, mut gizmos: ResMut<GizmoConfigStore>, rig: Res<crate::camera::CameraRig>, settings: Res<crate::persistence::UserSettings>) {
+fn take_photo(mut commands: Commands, mut photo: ResMut<Photo>, mut ui: ResMut<crate::ui::UiState>, mut sim: ResMut<crate::sim::Sim>, time: Res<Time>, mut gizmos: ResMut<GizmoConfigStore>, rig: Res<crate::camera::CameraRig>, settings: Res<crate::persistence::UserSettings>, study: Res<crate::ui::Study>) {
     if !photo.requested {
         if !ui.photo_requested {
             return;
@@ -65,7 +65,7 @@ fn take_photo(mut commands: Commands, mut photo: ResMut<Photo>, mut ui: ResMut<c
         let path = photo_path();
         let ok = path.parent().is_some_and(|d| std::fs::create_dir_all(d).is_ok());
         if ok {
-            let metadata = settings.photo_metadata.then(|| photo_metadata(&sim, &rig, &settings));
+            let metadata = settings.photo_metadata.then(|| photo_metadata(&sim, &rig, &settings, &study));
             commands.spawn(Screenshot::primary_window()).observe(save_photo(path, metadata, false));
             sim.status = Some(("Saving photo…".into(), time.elapsed_secs_f64()));
         } else {
@@ -81,7 +81,7 @@ fn take_photo(mut commands: Commands, mut photo: ResMut<Photo>, mut ui: ResMut<c
 }
 
 #[allow(clippy::too_many_arguments)]
-fn capture(mut commands: Commands, args: Res<Args>, mut frames: Local<u32>, mut done: Local<bool>, mut exit: MessageWriter<AppExit>, state: Res<State<AppState>>, perf: Res<crate::performance::Performance>, research: Res<crate::research::Research>, batch: Res<crate::research_batch::ResearchBatch>, outcome: Res<CaptureOutcome>, sim: Option<Res<crate::sim::Sim>>, rig: Res<crate::camera::CameraRig>, settings: Res<crate::persistence::UserSettings>) {
+fn capture(mut commands: Commands, args: Res<Args>, mut frames: Local<u32>, mut done: Local<bool>, mut exit: MessageWriter<AppExit>, state: Res<State<AppState>>, perf: Res<crate::performance::Performance>, research: Res<crate::research::Research>, batch: Res<crate::research_batch::ResearchBatch>, outcome: Res<CaptureOutcome>, sim: Option<Res<crate::sim::Sim>>, rig: Res<crate::camera::CameraRig>, settings: Res<crate::persistence::UserSettings>, study: Res<crate::ui::Study>) {
     let Some(path) = &args.capture else { return };
     // Wait for the requested universe rather than capturing the menu.
     if (args.new.is_some() || args.load.is_some() || args.continue_latest) && *state.get() != AppState::Observing {
@@ -93,7 +93,7 @@ fn capture(mut commands: Commands, args: Res<Args>, mut frames: Local<u32>, mut 
     if !*done && *frames == args.capture_after {
         *done = true;
         info!("capturing screenshot to {path}");
-        let metadata = args.capture_metadata.then(|| sim.as_ref().map(|sim| photo_metadata(sim, &rig, &settings))).flatten();
+        let metadata = args.capture_metadata.then(|| sim.as_ref().map(|sim| photo_metadata(sim, &rig, &settings, &study))).flatten();
         commands.spawn(Screenshot::primary_window()).observe(save_photo(path.into(), metadata, true));
     }
     if *done && args.quit_after_capture && outcome.0.is_none() && *frames > args.capture_after.saturating_add(2000) { error!("Screenshot capture timed out"); exit.write(AppExit::error()); return; }
@@ -107,7 +107,7 @@ fn capture(mut commands: Commands, args: Res<Args>, mut frames: Local<u32>, mut 
 #[derive(Resource, Default)]
 struct CaptureOutcome(Option<bool>);
 
-fn photo_metadata(sim: &crate::sim::Sim, rig: &crate::camera::CameraRig, settings: &crate::persistence::UserSettings) -> serde_json::Value {
+fn photo_metadata(sim: &crate::sim::Sim, rig: &crate::camera::CameraRig, settings: &crate::persistence::UserSettings, study: &crate::ui::Study) -> serde_json::Value {
     serde_json::json!({
         "format": "cosmogon-photo", "schema_version": 1,
         "app_version": env!("CARGO_PKG_VERSION"),
@@ -119,6 +119,7 @@ fn photo_metadata(sim: &crate::sim::Sim, rig: &crate::camera::CameraRig, setting
         "landing_reference": rig.surface_anchor.as_ref().and_then(|a|a.site_id.as_deref()).and_then(cosmogon_sim::planet::landing::find),
         "surface_height_reference": "Radial altitude above shared MOLA height on spherical base; not landing safety",
         "coordinate_registration": cosmogon_sim::planet::landing::REGISTRATION,
+        "terrain_study": study.metadata(),
         "landing_registry": cosmogon_sim::planet::landing::VERSION,
         "camera_position_render_m": rig.eye().to_array(), "orientation_xyzw": rig.rotation.to_array(),
         "presentation": settings.presentation,

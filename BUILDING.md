@@ -145,3 +145,9 @@ output folders. An exported definition retains its chosen reference sphere/sampl
 ## Finer Mars source selection
 
 See [MARS_REFINEMENT](docs/MARS_REFINEMENT.md). Both verified grids are embedded; no runtime data download is needed. `--mars-terrain 4|16` applies an explicit source edit for native development starts and CLI surface/section commands. CLI `terrain --mars-terrain 16 --save NEW_FILE [--initial OLD_SAVE]` creates a protected saved world. `cargo run --release -p cosmogon_cli --example mola_profile` measures warm source queries only; it is not a graphics benchmark.
+
+## Native terrain study replay
+
+`--terrain-section /path/to/definition.json` reopens a bounded terrain section without changing the world. It preserves the exact dataset, sphere radius and samples. Different-source study graphs/export remain available; geographic actions require a matching world. See [TERRAIN_STUDY_REPLAY](docs/TERRAIN_STUDY_REPLAY.md). Invalid automated definitions exit before GPU startup.
+
+`--panel section-map` opens the compact geographic trace view; Graph view keeps the profile and row values prominent, with setup/import collapsed.
