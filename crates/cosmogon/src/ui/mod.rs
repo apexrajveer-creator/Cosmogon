@@ -79,6 +79,12 @@ pub struct UiState {
     pub body_tab: BodyTab,
     pub surface_latitude: f64,
     pub surface_longitude: f64,
+    pub surface_site: Option<String>,
+    pub surface_altitude: f64,
+    pub surface_tracked: bool,
+    pub surface_horizon: bool,
+    pub surface_export_path: String,
+    pub surface_export_status: Option<String>,
     pub search: String,
     pub chronicle_min_importance: u8,
     pub menu: MenuScreen,
@@ -109,6 +115,17 @@ pub struct UiState {
     pub photo_mode: bool,
 }
 
+impl UiState {
+    pub fn show_surface_anchor(&mut self, a: &crate::surface::SurfaceAnchor) {
+        self.surface_site=a.site_id.clone();self.surface_latitude=a.latitude_deg;self.surface_longitude=a.longitude_east_deg;
+        self.surface_altitude=a.altitude_m;self.surface_tracked=a.tracked;
+        let radial=bevy::math::DVec3::from_array(cosmogon_sim::planet::terrain::dir_from_lat_lon(a.latitude_deg.to_radians(),a.longitude_east_deg.to_radians()));
+        let forward=bevy::math::DQuat::from_array(a.local_orientation_xyzw)*bevy::math::DVec3::NEG_Z;
+        self.surface_horizon=forward.dot(-radial)<0.7;
+        self.surface_export_status=None;self.body_tab=BodyTab::Surface;self.show_right=true;
+    }
+}
+
 impl Default for UiState {
     fn default() -> Self {
         Self {
@@ -134,6 +151,12 @@ impl Default for UiState {
             body_tab: BodyTab::Overview,
             surface_latitude: 18.65,
             surface_longitude: 226.2,
+            surface_site: None,
+            surface_altitude: 100_000.0,
+            surface_tracked: true,
+            surface_horizon: false,
+            surface_export_path: String::new(),
+            surface_export_status: None,
             search: String::new(),
             chronicle_min_importance: 4,
             menu: MenuScreen::Home,
@@ -203,6 +226,12 @@ fn init_ui_state(mut ui: ResMut<UiState>, args: Res<crate::args::Args>) {
     }
     if args.menu.is_some() {
         ui.intro_skipped = true;
+    }
+    if let Some(site) = args.surface_site.as_deref().and_then(cosmogon_sim::planet::landing::find) {
+        ui.surface_site = Some(site.id.into()); ui.surface_latitude = site.latitude_north_deg; ui.surface_longitude = site.longitude_east_deg;
+        ui.surface_altitude = args.surface_altitude; ui.surface_tracked = !args.surface_snapshot;
+        ui.surface_horizon = args.surface_horizon;
+        ui.body_tab = BodyTab::Surface;
     }
     match args.panel.as_deref() {
         Some("create") => ui.create_open = true,

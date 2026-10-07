@@ -73,3 +73,13 @@ Before adding or refreshing release data, record provider terms and redistributi
 - Observations: mapping phase February 1999 through June 2001, plus specified off-nadir polar observations in 1998/mapping. Labels' broader observation timestamps are retained in the XML.
 - Processing: tools/process_mola.py validates pinned raw SHA256, dimensions, type and label version, then converts big-endian to little-endian without resampling. Runtime bilinear heights expose four source-cell medians, observation counts and weights; zero counts mark provider-interpolated bins. Counts are not confidence or uncertainty.
 - Limits: global overview, not local geology, engineering/landing safety or a current terrain survey. No random subgrid elevation is added to Mars. Colours, climate, resource distribution and fine shading remain generated/modelled; the renderer uses a spherical base rather than the full areoid shape. Future grid revisions must receive a distinct saved terrain identifier to preserve old worlds.
+
+
+## mars-landing-references@2026-10-07.1
+
+- Provider: NASA Langley NTRS (Perseverance) and NASA GISS Mars24 (Curiosity, InSight, Viking 1).
+- References: https://ntrs.nasa.gov/citations/20210024644 ; https://www.giss.nasa.gov/tools/mars24/help/landers.html . Read 2026-10-07; source acquisition/narrative dates 2021-11-19 / 2023-12-09.
+- Imported fields: historical UTC landing date, north latitude, east longitude, stable ID and citation. Embedded factual transcription in crates/cosmogon_sim/src/planet/landing.rs; explicit reviewed updates only. No copied source narrative, imagery, tracks, mission status or new Universe fields.
+- Rights: NTRS declares US Government public use permitted. GISS numerical reference facts are cited individually; no image rights are inferred and no mission media is copied.
+- Uncertainty: unavailable/null. Complete source frame/datum/covariance is not established by these summaries. Overview interpretation uses the MOLA planetocentric body-fixed convention and existing simulated axial tilt/spin; not metre-level registered coordinates or a SPICE solution.
+- Use: native historical landing markers, coordinate selection/camera travel, source-supported probe JSON and CLI sites/surface. No fabricated current rover positions or landing-safety claims.

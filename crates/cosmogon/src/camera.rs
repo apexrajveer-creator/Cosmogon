@@ -36,6 +36,8 @@ struct Transition {
 pub struct CameraRig {
     pub focus: Option<Target>,
     pub free: Option<crate::navigation::Flight>,
+    pub surface_anchor: Option<crate::surface::SurfaceAnchor>,
+    pub navigation_notice: Option<String>,
     pub rotation: DQuat,
     pub nearest_surface: Option<BodyRef>,
     pub clearance: f64,
@@ -57,13 +59,15 @@ pub struct CameraRig {
 
 impl Default for CameraRig {
     fn default() -> Self {
-        Self { focus: None, free: None, rotation: DQuat::IDENTITY, nearest_surface: None, clearance: 1.0e7, start_free: false, target_pos: DVec3::ZERO, distance: 3.0e7, desired_distance: 3.0e7, yaw: 0.6, pitch: 0.35, focus_radius: 6.4e6, ground_radius: 6.4e6, transition: None, applied_args: false, pivot_shift: DVec3::ZERO }
+        Self { focus: None, free: None, surface_anchor: None, navigation_notice: None, rotation: DQuat::IDENTITY, nearest_surface: None, clearance: 1.0e7, start_free: false, target_pos: DVec3::ZERO, distance: 3.0e7, desired_distance: 3.0e7, yaw: 0.6, pitch: 0.35, focus_radius: 6.4e6, ground_radius: 6.4e6, transition: None, applied_args: false, pivot_shift: DVec3::ZERO }
     }
 }
 
 impl CameraRig {
     /// Fly to a new target. `distance_radii`: how far to end up, in target radii (None = keep a sensible default).
     pub fn focus_on(&mut self, target: Target, sim: &Sim, distance_radii: Option<f64>) {
+        self.surface_anchor = None;
+        self.navigation_notice = None;
         let (pos, radius) = target_info(sim, target);
         if let Some(free) = self.free.take() {
             let back = free.rotation * DVec3::Z;
@@ -87,6 +91,37 @@ impl CameraRig {
         if self.free.is_none() {
             self.free = Some(crate::navigation::Flight::new(self.eye(), self.rotation));
             self.transition = None;
+        }
+    }
+
+    pub fn travel_surface(&mut self, anchor: crate::surface::SurfaceAnchor, sim: &Sim) -> Result<(), String> {
+        let flight = anchor.pose(sim)?;
+        self.rotation = flight.rotation;
+        self.free = Some(flight);
+        self.focus = Some(Target::Body(anchor.body));
+        self.nearest_surface = Some(anchor.body);
+        self.clearance = anchor.altitude_m;
+        self.transition = None;
+        self.start_free = false;
+        self.navigation_notice = Some(if anchor.tracked { "Following the surface. Movement releases tracking; looking around keeps it." } else { "Snapshot view placed. The camera does not follow the planet's motion or spin." }.into());
+        self.surface_anchor = Some(anchor);
+        Ok(())
+    }
+
+    pub fn release_surface(&mut self) {
+        self.surface_anchor = None;
+        if let Some(f) = &mut self.free { f.velocity = DVec3::ZERO; }
+        self.navigation_notice = Some("Surface tracking released. Free flight continues from this view.".into());
+    }
+
+    pub fn follow_surface(&mut self, sim: &Sim) {
+        if let Some(a) = &self.surface_anchor {
+            if a.tracked {
+                match a.pose(sim) {
+                    Ok(f) => { self.rotation = f.rotation; self.free = Some(f); }
+                    Err(e) => { self.release_surface(); self.navigation_notice = Some(e); }
+                }
+            }
         }
     }
 
@@ -162,8 +197,10 @@ fn apply_graphics_settings(settings: Res<UserSettings>, mut q: Query<(&mut Bloom
 }
 
 /// Pick something interesting to look at when a universe opens (or obey `--focus`).
-fn initial_focus(mut rig: ResMut<CameraRig>, mut sim: ResMut<Sim>, args: Res<Args>) {
+fn initial_focus(mut rig: ResMut<CameraRig>, mut sim: ResMut<Sim>, args: Res<Args>, mut exit: MessageWriter<bevy::app::AppExit>) {
     rig.free = None;
+    rig.surface_anchor = None;
+    rig.navigation_notice = None;
     rig.pivot_shift = DVec3::ZERO;
     rig.start_free = args.free_camera;
     let u = &sim.universe;
@@ -197,7 +234,7 @@ fn initial_focus(mut rig: ResMut<CameraRig>, mut sim: ResMut<Sim>, args: Res<Arg
     let (pos, radius) = target_info(&sim, target);
     if let (Some((lat, lon)), Target::Body(r)) = (args.latlon, target) {
         // Camera above a geographic point: body-local direction rotated into the world.
-        let rot = crate::render::body_rotation(&sim, r, sim.universe.time).as_dquat();
+        let rot = crate::render::body_rotation_f64(&sim, r, sim.universe.time);
         // "noon" = the longitude currently facing the star.
         let lon = if lon.is_nan() {
             let star = rot.inverse() * (to_render(sim.universe.system(r.system).star_position(sim.universe.time)) - pos);
@@ -228,6 +265,21 @@ fn initial_focus(mut rig: ResMut<CameraRig>, mut sim: ResMut<Sim>, args: Res<Arg
     if sim.selected.is_none() {
         sim.selected = Some(target);
     }
+    if let Some(id) = &args.surface_site {
+        let site = cosmogon_sim::planet::landing::find(id).expect("validated site argument");
+        let result = (|| {
+            let Target::Body(r) = find_target(&sim, "Mars").ok_or("Mars is absent from this world")? else { return Err("Mars target is not a body".to_string()) };
+            let anchor = crate::surface::SurfaceAnchor::new(r, site.latitude_north_deg, site.longitude_east_deg, args.surface_altitude, Some(id.clone()), !args.surface_snapshot)?;
+            let anchor = if args.surface_horizon {anchor.horizon()} else {anchor};
+            rig.travel_surface(anchor, &sim)?;
+            sim.selected = Some(Target::Body(r));
+            Ok(())
+        })();
+        if let Err(e) = result {
+            eprintln!("Surface travel failed: {e}"); rig.navigation_notice = Some(e);
+            if args.quit_after_capture { exit.write(bevy::app::AppExit::error()); }
+        }
+    }
 }
 
 pub fn find_target(sim: &Sim, name: &str) -> Option<Target> {
@@ -257,6 +309,8 @@ fn camera_input(
     mut settings: ResMut<UserSettings>,
     ui: Res<crate::ui::UiState>,
 ) {
+    let rig = &mut *rig;
+    rig.follow_surface(&sim);
     // Automated captures must be reproducible: ignore whatever the mouse is doing.
     if args.capture.is_some() || ui.pause_menu {
         return;
@@ -298,6 +352,14 @@ fn camera_input(
         flight.speed_m_s = settings.camera.speed(clearance) * boost;
         let desired = flight.rotation * local * flight.speed_m_s;
         flight.advance(desired, dt, settings.camera.inertia, settings.camera.damping);
+        if local != DVec3::ZERO {
+            rig.surface_anchor = None;
+            rig.navigation_notice = Some("Movement released surface tracking.".into());
+        } else if let Some(a) = &mut rig.surface_anchor {
+            if a.tracked {
+                a.local_orientation_xyzw = (crate::render::body_rotation_f64(&sim, a.body, sim.universe.time).inverse() * flight.rotation).normalize().to_array();
+            }
+        }
         return;
     }
     // Close to a surface, controls work on altitude and slow down so the ground is navigable.
@@ -319,13 +381,13 @@ fn camera_input(
             MouseScrollUnit::Pixel => scroll.delta.y as f64 / 40.0,
         };
         if lines != 0.0 {
-            zoom_by(&mut rig, (-lines * 0.15).exp());
+            zoom_by(rig, (-lines * 0.15).exp());
         }
     }
     if !wants_keys && !cmd {
         let zoom = (keys.pressed(KeyCode::KeyS) as i32 - keys.pressed(KeyCode::KeyW) as i32) as f64;
         if zoom != 0.0 {
-            zoom_by(&mut rig, (zoom * 2.4 * time.delta_secs_f64().min(0.1)).exp());
+            zoom_by(rig, (zoom * 2.4 * time.delta_secs_f64().min(0.1)).exp());
         }
         rig.yaw += (keys.pressed(KeyCode::KeyA) as i32 - keys.pressed(KeyCode::KeyD) as i32) as f64 * 1.2 * time.delta_secs_f64().min(0.1);
 
@@ -343,6 +405,7 @@ fn update_camera(
     mut cam: Query<(&mut Transform, &mut Projection, &mut Bloom, &mut ColorGrading), With<MainCamera>>,
     settings: Res<UserSettings>,
 ) {
+    rig.follow_surface(&sim);
     if rig.free.is_some() {
         update_free_camera(&mut rig, &sim, &lod, &mut view, &windows, &mut cam, &settings);
         return;
@@ -363,7 +426,7 @@ fn update_camera(
     // Ground under the camera: real terrain height when close-up terrain is active.
     rig.ground_radius = match focus {
         Target::Body(r) => {
-            let rot = crate::render::body_rotation(&sim, r, sim.universe.time).as_dquat();
+            let rot = crate::render::body_rotation_f64(&sim, r, sim.universe.time);
             let dir_local = rot.inverse() * (rig.eye() - live_pos);
             lod.ground_radius(r, dir_local).unwrap_or(radius).max(radius * 0.99)
         }
@@ -503,7 +566,7 @@ fn update_free_camera(
     if let Some(r) = surface {
         let center = to_render(sim.universe.body_position(r, sim.universe.time));
         let delta = flight.position - center;
-        let rot = crate::render::body_rotation(sim, r, sim.universe.time).as_dquat();
+        let rot = crate::render::body_rotation_f64(sim, r, sim.universe.time);
         let radius = lod.ground_radius(r, rot.inverse() * delta).unwrap_or(sim.universe.body(r).radius);
         let altitude = delta.length() - radius;
         // Match orbit mode's clearance: metre-level camera placement exposes the

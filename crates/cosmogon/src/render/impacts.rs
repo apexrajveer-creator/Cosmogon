@@ -13,7 +13,7 @@ use bevy::shader::ShaderRef;
 use cosmogon_sim::BodyRef;
 use std::collections::HashMap;
 
-use super::{body_rotation, to_render, SharedMeshes, SimVisual, ViewInfo};
+use super::{body_rotation_f64, to_render, SharedMeshes, SimVisual, ViewInfo};
 use crate::sim::Sim;
 
 /// Real seconds a flash lasts.
@@ -137,7 +137,7 @@ pub fn update_impact_flashes(
         let alive = u.systems.get(f.r.system as usize).and_then(|s| s.bodies.get(f.r.body as usize)).is_some_and(|b| b.exists());
         let (pos, normal, body_r) = if alive {
             let b = u.body(f.r);
-            let rot = body_rotation(&sim, f.r, u.time).as_dquat();
+            let rot = body_rotation_f64(&sim, f.r, u.time);
             let n = rot * f.local_dir;
             (to_render(u.body_position(f.r, u.time)) + n * b.radius, n, b.radius)
         } else {

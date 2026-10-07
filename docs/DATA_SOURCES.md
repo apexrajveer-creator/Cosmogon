@@ -78,3 +78,18 @@ Runtime bilinear sampling is shared with rendering and exposes source-cell weigh
 uncertainty is supplied and no generated noise is added to Mars elevation. Colours, climate, resources
 and subpixel shading remain modelled/generated. See [MARS_TERRAIN](MARS_TERRAIN.md) and
 [SOURCE_REGISTRY](../data/SOURCE_REGISTRY) for resolution, frame, checksum, version and rights evidence.
+
+## Historical Mars landing references
+
+`cosmogon_sim::planet::landing` embeds four reference records in version
+`mars-landing-references@2026-10-07.1`; no mission imagery is ingested.
+Perseverance's touchdown/date and north/east coordinates come from
+[NASA Langley NTRS 20210024644](https://ntrs.nasa.gov/citations/20210024644), acquired 2021-11-19,
+which identifies public distribution and US Government work with public use permitted. Curiosity,
+InSight and Viking 1 use [NASA GISS Mars24](https://www.giss.nasa.gov/tools/mars24/help/landers.html),
+whose narrative is dated 2023-12-09. Read 2026-10-07. We retain individual source links/dates and
+numerical coordinate facts, not copied narrative, mission status, rover tracks, logos or photographs.
+Updates require explicit source verification and a new registry version. Coordinates are north latitude
+and east longitude interpreted on the MOLA body-fixed frame for overview navigation; complete source
+mapping-frame registration and positional covariance are unavailable. Every exported reference carries
+null uncertainty and the registration limitation. Decimal precision does not establish accuracy.

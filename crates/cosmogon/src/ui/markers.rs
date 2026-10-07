@@ -12,7 +12,7 @@ use cosmogon_sim::BodyRef;
 use super::{UiState, ACCENT, CIV, LIFE, MUTED, TEXT};
 use crate::camera::{CameraRig, MainCamera};
 use crate::persistence::UserSettings;
-use crate::render::{body_rotation, to_render, ViewInfo};
+use crate::render::{body_rotation_f64, to_render, ViewInfo};
 use crate::sim::{Sim, Target};
 
 struct Hit {
@@ -20,6 +20,7 @@ struct Hit {
     radius: f32,
     target: Target,
     priority: f32,
+    site: Option<&'static str>,
 }
 
 fn rgb(c: [f32; 3]) -> egui::Color32 {
@@ -34,7 +35,7 @@ pub fn draw_markers(
     mut rig: ResMut<CameraRig>,
     view: Res<ViewInfo>,
     settings: Res<UserSettings>,
-    ui_state: Res<UiState>,
+    mut ui_state: ResMut<UiState>,
     cam: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     args: Res<crate::args::Args>,
 ) -> Result {
@@ -110,7 +111,7 @@ pub fn draw_markers(
         let has_civ = u.civs.iter().any(|c| c.system == sys.id && c.is_alive());
         let has_life = u.biospheres.iter().any(|b| b.system == sys.id && b.stage >= Stage::Microbial);
         let selected = sim.selected == Some(Target::Star(sys.id));
-        hits.push(Hit { pos: sp, radius: 10.0, target: Target::Star(sys.id), priority: 1.0 });
+        hits.push(Hit { pos: sp, radius: 10.0, target: Target::Star(sys.id), priority: 1.0, site: None });
         if d > extent * 6.0 {
             let c = rgb(sys.star.color(t));
             painter.circle_stroke(sp, if selected { 9.0 } else { 6.0 }, egui::Stroke::new(1.0_f32, if selected { ACCENT } else { c.gamma_multiply(0.6) }));
@@ -122,6 +123,40 @@ pub fn draw_markers(
             if labels || selected {
                 let text = if d > 0.3 * LIGHT_YEAR { format!("{}  {:.1} ly", sys.name, d / LIGHT_YEAR) } else { sys.name.clone() };
                 label(&painter, sp, &text, if has_civ { CIV } else { TEXT }, &font);
+            }
+        }
+    }
+
+    // Historical landing references and the numeric probe share the body's f64 frame.
+    // No icons are drawn on legacy procedural Mars or interpreted as live rover telemetry.
+    if labels {
+        if let Some(Target::Body(r)) = sim.selected.or(rig.focus) {
+            let b=u.body(r);
+            if b.exists() && b.elevation_data == Some(cosmogon_sim::planet::terrain::ElevationData::MarsMola) && b.name.eq_ignore_ascii_case("Mars") {
+                let center=to_render(u.body_position(r,t));
+                if view.screen_radius(center,b.radius)>80.0 {
+                    let frame=body_rotation_f64(&sim,r,t);
+                    let mut points:Vec<(f64,f64,String,Option<&'static str>,bool)>=cosmogon_sim::planet::landing::SITES.iter().map(|s|(s.latitude_north_deg,s.longitude_east_deg,format!("{} · landing",s.mission),Some(s.id),false)).collect();
+                    if ui_state.body_tab == super::BodyTab::Surface {
+                        // The selected site is the probe; do not draw two overlapping symbols.
+                        points.retain(|p| p.3 != ui_state.surface_site.as_deref() || p.3.is_none());
+                        points.insert(0,(ui_state.surface_latitude,ui_state.surface_longitude,"Surface probe".into(),ui_state.surface_site.as_deref().and_then(cosmogon_sim::planet::landing::find).map(|s|s.id),true));
+                    }
+                    for (lat,lon,name,site,probe) in points {
+                        let Ok(reading)=cosmogon_sim::planet::mola::read(lat,lon) else {continue};
+                        let local=DVec3::from_array(cosmogon_sim::planet::terrain::dir_from_lat_lon(lat.to_radians(),lon.to_radians()));
+                        let radial=frame*local;
+                        let radius=b.radius+reading.height_above_areoid_m;
+                        if !crate::surface::above_horizon(view.origin-center,radial,radius) {continue;}
+                        let Some(sp)=project(center+radial*(radius+50.0)) else {continue};
+                        let color=if probe {ACCENT} else {egui::Color32::from_rgb(145,220,235)};
+                        painter.circle_stroke(sp,if probe {7.0} else {4.5},egui::Stroke::new(1.5_f32,color));
+                        painter.line_segment([sp-egui::vec2(10.0,0.0),sp+egui::vec2(10.0,0.0)],egui::Stroke::new(1.0_f32,color));
+                        painter.line_segment([sp-egui::vec2(0.0,10.0),sp+egui::vec2(0.0,10.0)],egui::Stroke::new(1.0_f32,color));
+                        label(&painter,sp+egui::vec2(4.0,-14.0),&name,color,&small);
+                        if site.is_some() {hits.push(Hit {pos:sp,radius:9.0,target:Target::Body(r),priority:6.0,site});}
+                    }
+                }
             }
         }
     }
@@ -145,7 +180,7 @@ pub fn draw_markers(
                 }
             }
             let selected = sim.selected == Some(Target::Body(r));
-            hits.push(Hit { pos: sp, radius: px.max(9.0), target: Target::Body(r), priority: 2.0 + if b.parent.is_none() { 1.0 } else { 0.0 } });
+            hits.push(Hit { pos: sp, radius: px.max(9.0), target: Target::Body(r), priority: 2.0 + if b.parent.is_none() { 1.0 } else { 0.0 }, site: None });
             let civ = u.civ_on(r).is_some();
             let life = u.biosphere(r).is_some_and(|x| x.stage >= Stage::Microbial);
             let color = if civ { CIV } else if life { LIFE } else { MUTED };
@@ -181,7 +216,7 @@ pub fn draw_markers(
         if px < 40.0 {
             continue;
         }
-        let rot = body_rotation(&sim, r, t).as_dquat();
+        let rot = body_rotation_f64(&sim, r, t);
         let to_cam = (view.origin - center).normalize();
         let surface = |dir: [f64; 3], lift: f64| -> (DVec3, bool) {
             let n = rot * DVec3::new(dir[0], dir[1], dir[2]);
@@ -371,7 +406,7 @@ pub fn draw_markers(
             }
             let (lat, lon) = crate::render::colony_site(c.id, col.body);
             let d = cosmogon_sim::planet::terrain::dir_from_lat_lon(lat, lon);
-            let rot = body_rotation(&sim, r, t).as_dquat();
+            let rot = body_rotation_f64(&sim, r, t);
             let n = rot * DVec3::new(d[0], d[1], d[2]);
             if n.dot((view.origin - center).normalize()) < 0.05 {
                 continue;
@@ -459,9 +494,16 @@ pub fn draw_markers(
                 .max_by(|a, b| (a.priority - a.pos.distance(pp) * 0.01).total_cmp(&(b.priority - b.pos.distance(pp) * 0.01)));
             if let Some(h) = best {
                 sim.selected = Some(h.target);
-                if double {
-                    rig.focus_on(h.target, &sim, None);
-                }
+                if let Some(site) = h.site.and_then(cosmogon_sim::planet::landing::find) {
+                    ui_state.surface_site=Some(site.id.into());ui_state.surface_latitude=site.latitude_north_deg;ui_state.surface_longitude=site.longitude_east_deg;
+                    ui_state.body_tab=super::BodyTab::Surface;ui_state.show_right=true;ui_state.surface_export_status=None;
+                    if double {
+                        if let Target::Body(r)=h.target {
+                            let result=crate::surface::SurfaceAnchor::new(r,site.latitude_north_deg,site.longitude_east_deg,ui_state.surface_altitude,Some(site.id.into()),ui_state.surface_tracked).map(|a|if ui_state.surface_horizon {a.horizon()} else {a}).and_then(|a|rig.travel_surface(a,&sim));
+                            if let Err(e)=result {rig.navigation_notice=Some(e);}
+                        }
+                    }
+                } else if double {rig.focus_on(h.target,&sim,None);}
             }
         }
     }

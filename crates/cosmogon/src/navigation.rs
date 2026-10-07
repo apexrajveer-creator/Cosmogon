@@ -94,6 +94,8 @@ pub struct Viewpoint {
     pub anchor: Option<String>,
     #[serde(default)]
     pub anchor_target: Option<crate::sim::Target>,
+    #[serde(default)]
+    pub surface_anchor: Option<crate::surface::SurfaceAnchor>,
     /// Render-frame metres relative to anchor, or absolute when anchor is absent.
     pub position_m: [f64; 3],
     pub orientation_xyzw: [f64; 4],
@@ -114,12 +116,12 @@ impl Viewpoint {
             crate::sim::Target::Body(r) => sim.universe.body(r).name.clone(),
         });
         let base = rig.focus.map(|t| target_info(sim, t).0).unwrap_or(DVec3::ZERO);
-        Self { name: name.trim().chars().take(80).collect(), world: world_key(sim), anchor, anchor_target: rig.focus, position_m: (rig.eye() - base).to_array(), orientation_xyzw: rig.rotation.to_array(), presentation: presentation.clone(), simulation_time_s: sim.universe.time }
+        Self { name: name.trim().chars().take(80).collect(), world: world_key(sim), anchor, anchor_target: rig.focus, surface_anchor: rig.surface_anchor.clone(), position_m: (rig.eye() - base).to_array(), orientation_xyzw: rig.rotation.to_array(), presentation: presentation.clone(), simulation_time_s: sim.universe.time }
     }
     pub fn belongs_to(&self, sim: &Sim) -> bool { self.world == world_key(sim) }
     fn valid(&self) -> bool {
         let q = DQuat::from_array(self.orientation_xyzw);
-        !self.name.trim().is_empty() && self.position_m.iter().all(|v| v.is_finite() && v.abs() < 1e28) && q.is_finite() && (q.length_squared() - 1.0).abs() < 0.01 && self.simulation_time_s.is_finite()
+        !self.name.trim().is_empty() && self.name.chars().count() <= 80 && self.surface_anchor.as_ref().is_none_or(|a|a.valid() && self.anchor_target == Some(crate::sim::Target::Body(a.body))) && self.position_m.iter().all(|v| v.is_finite() && v.abs() < 1e28) && q.is_finite() && (q.length_squared() - 1.0).abs() < 0.01 && self.simulation_time_s.is_finite()
     }
     pub fn restore(&self, sim: &Sim, rig: &mut CameraRig, presentation: &mut Presentation) -> Result<(), String> {
         if !self.valid() || !self.belongs_to(sim) { return Err("This viewpoint is invalid or belongs to another universe.".into()); }
@@ -136,9 +138,19 @@ impl Viewpoint {
         } };
         let base = focus.map(|t| target_info(sim, t).0).unwrap_or(DVec3::ZERO);
         let pos = base + DVec3::from_array(self.position_m);
+        // Validate terrain/source availability before changing any camera or lens state.
+        let surface_pose = self.surface_anchor.as_ref().map(|a|a.pose(sim)).transpose()?;
         rig.focus = focus.or(rig.focus);
         rig.rotation = DQuat::from_array(self.orientation_xyzw).normalize();
         rig.free = Some(Flight::new(pos, rig.rotation));
+        rig.surface_anchor = self.surface_anchor.clone();
+        if let Some(a) = &self.surface_anchor {
+            if a.tracked {
+                let flight = surface_pose.expect("validated surface pose");
+                rig.rotation = flight.rotation; rig.free = Some(flight);
+            }
+        }
+        rig.navigation_notice = None;
         *presentation = self.presentation.clone();
         presentation.sanitize();
         Ok(())
@@ -161,7 +173,7 @@ impl Viewpoints {
     fn load(path: PathBuf) -> Self {
         let loaded = match std::fs::read(&path) {
             Ok(data) => serde_json::from_slice::<ViewpointFile>(&data).map_err(|e| e.to_string()).and_then(|file| {
-                if file.version != 1 || file.viewpoints.len() > 128 || file.viewpoints.iter().any(|v| !v.valid()) {
+                if !matches!(file.version, 1 | 2) || file.viewpoints.len() > 128 || file.viewpoints.iter().any(|v| !v.valid()) || (file.version == 1 && file.viewpoints.iter().any(|v|v.surface_anchor.is_some())) {
                     Err("Unsupported or invalid viewpoint library; the original file has been preserved.".into())
                 } else { Ok(file.viewpoints) }
             }),
@@ -191,7 +203,7 @@ impl Viewpoints {
     }
 }
 fn write_library(path: &Path, values: &[Viewpoint]) -> Result<(), String> {
-    let data = serde_json::to_vec_pretty(&ViewpointFile { version: 1, viewpoints: values.to_vec() }).map_err(|e| e.to_string())?;
+    let data = serde_json::to_vec_pretty(&ViewpointFile { version: 2, viewpoints: values.to_vec() }).map_err(|e| e.to_string())?;
     let parent = path.parent().ok_or("Invalid viewpoint folder")?;
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
@@ -234,7 +246,12 @@ mod tests {
     fn viewpoint_library_round_trips_and_protects_unknown_versions() {
         let path = std::env::temp_dir().join(format!("cosmogon-viewpoints-{}.json", std::process::id()));
         let mut lib = Viewpoints { items: Vec::new(), status: None, writable: true, path: path.clone() };
-        let v = Viewpoint { name: "Ring sunrise".into(), world: "test".into(), anchor: None, anchor_target: None, position_m: [1.0, 2.0, 3.0], orientation_xyzw: [0.0, 0.0, 0.0, 1.0], presentation: Presentation::default(), simulation_time_s: 42.0 };
+        let v = Viewpoint { name: "Ring sunrise".into(), world: "test".into(), anchor: None, anchor_target: None, surface_anchor: None, position_m: [1.0, 2.0, 3.0], orientation_xyzw: [0.0, 0.0, 0.0, 1.0], presentation: Presentation::default(), simulation_time_s: 42.0 };
+        // Version 1 omits geographic anchors and still loads.
+        let mut old = serde_json::to_value(&v).unwrap(); old.as_object_mut().unwrap().remove("surface_anchor");
+        std::fs::write(&path,serde_json::to_vec(&serde_json::json!({"version":1,"viewpoints":[old]})).unwrap()).unwrap();
+        assert!(Viewpoints::load(path.clone()).writable);
+        assert!(Viewpoints::load(path.clone()).items[0].surface_anchor.is_none());
         lib.add(v.clone()).unwrap();
         assert_eq!(Viewpoints::load(path.clone()).items[0].position_m, v.position_m);
         lib.remove(0).unwrap(); assert!(Viewpoints::load(path.clone()).items.is_empty());

@@ -30,6 +30,10 @@ pub struct Args {
     pub debug: bool,
     /// Place the camera above this latitude,longitude (degrees) of the focused body.
     pub latlon: Option<(f64, f64)>,
+    pub surface_site: Option<String>,
+    pub surface_altitude: f64,
+    pub surface_snapshot: bool,
+    pub surface_horizon: bool,
     /// Apply a curated experiment (`--what-if chicxulub_today`) to a new Solar System Lab.
     pub what_if: Option<String>,
     /// Start this guided tour (developer: combine with --what-if for tours that need one).
@@ -66,6 +70,7 @@ pub struct Args {
 impl Args {
     pub fn parse() -> Self {
         let a = Self::parse_from(std::env::args().skip(1));
+        if let Err(e) = a.validate_surface() { eprintln!("{e}"); std::process::exit(1); }
         if a.research_recording.is_some() && a.research_export.is_some() {
             eprintln!("Choose either --research-recording to open saved data or --research-export to record live data");
             std::process::exit(1);
@@ -74,7 +79,7 @@ impl Args {
     }
 
     fn parse_from(args: impl Iterator<Item = String>) -> Self {
-        let mut a = Args { capture_after: 90, profile_frames: 600, profile_warmup: 120, research_samples: 60, research_every: 20, ..Default::default() };
+        let mut a = Args { capture_after: 90, profile_frames: 600, profile_warmup: 120, research_samples: 60, research_every: 20, surface_altitude: 100_000.0, ..Default::default() };
         let mut it = args;
         while let Some(flag) = it.next() {
             let mut val = || it.next().unwrap_or_default();
@@ -113,6 +118,10 @@ impl Args {
                 "--continue" => a.continue_latest = true,
                 "--capture-metadata" => a.capture_metadata = true,
                 "--free-camera" => a.free_camera = true,
+                "--surface-site" => a.surface_site = Some(val()),
+                "--surface-altitude" => a.surface_altitude = val().parse().unwrap_or(f64::NAN),
+                "--surface-snapshot" => a.surface_snapshot = true,
+                "--surface-horizon" => a.surface_horizon = true,
                 "--fov" => a.fov = val().parse().ok(),
                 "--exposure" => a.exposure = val().parse().ok(),
                 "--quiet" => a.quiet = true,
@@ -144,16 +153,33 @@ impl Args {
                 f => eprintln!("ignoring unknown argument {f}"),
             }
         }
-        if (a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
+        if (a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
             a.new = Some(Scenario::SolarSystemLab);
         }
         a
+    }
+
+    fn validate_surface(&self) -> Result<(), String> {
+        if let Some(id) = &self.surface_site {
+            if cosmogon_sim::planet::landing::find(id).is_none() { return Err(format!("Unknown --surface-site {id}; choose perseverance, curiosity, insight or viking-1")); }
+            if !self.surface_altitude.is_finite() || !(60.0..=1e8).contains(&self.surface_altitude) { return Err("--surface-altitude must be finite, between 60 and 100000000 metres".into()); }
+            if self.latlon.is_some() || self.focus.as_deref().is_some_and(|s|!s.eq_ignore_ascii_case("Mars")) { return Err("--surface-site selects Mars and its source coordinates; do not combine with --latlon or another --focus".into()); }
+        }
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn surface_requests_reject_misleading_or_invalid_combinations() {
+        for values in [vec!["--surface-site","missing"],vec!["--surface-site","curiosity","--surface-altitude","NaN"],vec!["--surface-site","curiosity","--surface-altitude","59"],vec!["--surface-site","curiosity","--focus","Earth"],vec!["--surface-site","curiosity","--latlon","0,0"]] {
+            assert!(Args::parse_from(values.into_iter().map(String::from)).validate_surface().is_err());
+        }
+        let a=Args::parse_from(["--surface-site","perseverance"].into_iter().map(String::from));
+        assert!(a.validate_surface().is_ok());assert_eq!(a.new,Some(Scenario::SolarSystemLab));
+    }
 
     #[test]
     fn research_limits_and_default_scene_are_bounded() {

@@ -314,7 +314,7 @@ pub fn right_panel(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mu
                     BodyTab::Orbit => orbit(ui, u, r, &mut ctx, &mut ui_state.impulse),
                     BodyTab::Physics => physics_tab(ui, u, r),
                     BodyTab::Environment => environment(ui, u, r, &mut ctx),
-                    BodyTab::Surface => surface_tab(ui, b, &mut ui_state),
+                    BodyTab::Surface => surface_tab(ui, b, r, &mut ui_state, &mut rig, &sim),
                     BodyTab::Life => life(ui, u, r),
                     BodyTab::Civilization => {
                         if let Some(c) = u.civs.iter().rev().find(|c| c.system == r.system && c.body == r.body) {
@@ -1127,23 +1127,51 @@ fn civilization(ui: &mut egui::Ui, u: &Universe, c: &Civilization, ui_state: &mu
 }
 
 /// A coordinate probe reads the same height field as terrain/climate and exposes its support.
-fn surface_tab(ui: &mut egui::Ui, body: &cosmogon_sim::astro::Body, state: &mut UiState) {
-    use cosmogon_sim::planet::{mola, terrain::ElevationData};
+fn surface_tab(ui: &mut egui::Ui, body: &cosmogon_sim::astro::Body, r: BodyRef, state: &mut UiState, rig: &mut CameraRig, sim: &Sim) {
+    use cosmogon_sim::planet::{landing, mola, terrain::ElevationData};
     heading(ui, "Surface data");
     match body.elevation_data {
         Some(ElevationData::MarsMola) => {
             ui.label("NASA MGS / MOLA · derived observed topography");
             ui.hyperlink_to("Dataset and citation · DOI 10.17189/1z1b-kv84",mola::SOURCE_URL);
             ui.label(egui::RichText::new("Global overview: 0.25° cells, about 14.82 km at the equator. No landing-safety or local-resolution claim.").small().color(ACCENT));
-            ui.label(egui::RichText::new(format!("Height above {}. IAU2000 planetocentric latitude; east-positive longitude.",mola::DATUM)).small().color(MUTED));
-            ui.horizontal(|ui| {ui.label("Latitude (°)");ui.add(egui::DragValue::new(&mut state.surface_latitude).speed(0.05).range(-90.0..=90.0));});
-            ui.horizontal(|ui| {ui.label("Longitude east (°)");ui.add(egui::DragValue::new(&mut state.surface_longitude).speed(0.05).range(-360.0..=360.0));});
+            heading(ui,"Explore a landing reference");
+            let old_site = state.surface_site.clone();
+            egui::ComboBox::from_id_salt("landing_reference").selected_text(state.surface_site.as_deref().and_then(landing::find).map(|s|s.mission).unwrap_or("Custom coordinate")).show_ui(ui,|ui| {
+                ui.selectable_value(&mut state.surface_site,None,"Custom coordinate");
+                for site in &landing::SITES { ui.selectable_value(&mut state.surface_site,Some(site.id.into()),site.mission); }
+            });
+            if old_site != state.surface_site {
+                if let Some(s) = state.surface_site.as_deref().and_then(landing::find) { state.surface_latitude=s.latitude_north_deg; state.surface_longitude=s.longitude_east_deg; }
+                state.surface_export_status=None;
+            }
+            if let Some(s) = state.surface_site.as_deref().and_then(landing::find) {
+                ui.label(format!("Touchdown · {} UTC",s.landing_utc_date));
+                ui.hyperlink_to("NASA coordinate reference",s.source_url);
+                ui.label(egui::RichText::new("Historical landing point, not the rover's current position. Positional uncertainty unavailable; metre-level registration unverified.").small().color(MUTED));
+            }
+            let mut changed=false;
+            ui.horizontal(|ui| {ui.label("Latitude (°)");changed |= ui.add(egui::DragValue::new(&mut state.surface_latitude).speed(0.05).range(-90.0..=90.0).max_decimals(5)).changed();});
+            ui.horizontal(|ui| {ui.label("Longitude east (°)");changed |= ui.add(egui::DragValue::new(&mut state.surface_longitude).speed(0.05).range(-360.0..=360.0).max_decimals(5)).changed();});
+            if changed {state.surface_site=None;state.surface_export_status=None;}
+            if let Ok(reading)=mola::read(state.surface_latitude,state.surface_longitude) {kv(ui,"MOLA height above areoid",format!("{:.2} m",reading.height_above_areoid_m));}
+            ui.horizontal(|ui| {ui.label("Altitude above terrain (m)");ui.add(egui::DragValue::new(&mut state.surface_altitude).speed(1000.0).range(60.0..=1e8));});
+            ui.horizontal(|ui| {ui.label("View");ui.selectable_value(&mut state.surface_horizon,false,"Ground overview");ui.selectable_value(&mut state.surface_horizon,true,"Horizon");});
+            ui.checkbox(&mut state.surface_tracked,"Follow the planet's motion and spin");
+            ui.horizontal(|ui| {
+                if ui.button("Visit coordinate").clicked() {
+                    let result=crate::surface::SurfaceAnchor::new(r,state.surface_latitude,state.surface_longitude,state.surface_altitude,state.surface_site.clone(),state.surface_tracked).map(|a|if state.surface_horizon {a.horizon()} else {a}).and_then(|a|rig.travel_surface(a,sim));
+                    if let Err(e)=result {rig.navigation_notice=Some(e);}
+                }
+                if ui.add_enabled(rig.surface_anchor.is_some(),egui::Button::new("Release to free flight")).clicked() {rig.release_surface();}
+            });
+            if let Some(message)=&rig.navigation_notice {ui.label(egui::RichText::new(message).small().color(ACCENT));}
+            ui.label(egui::RichText::new("Changing the probe samples data. Visit moves the camera; it does not change the universe. Save a viewpoint in Camera & Photo to return here.").small().color(MUTED));
             match mola::read(state.surface_latitude,state.surface_longitude) {
                 Ok(reading) => {
-                    kv(ui,"Bilinear height",format!("{:.2} m",reading.height_above_areoid_m));
                     units::quality_badge(ui, Quality::Derived);
                     ui.label(egui::RichText::new("Provider medians at grid centres; the app blends neighbouring cells. Height uncertainty is unavailable, not zero.").small().color(MUTED));
-                    heading(ui,"Contributing source cells");
+                    egui::CollapsingHeader::new("Contributing source cells").show(ui,|ui| {
                     egui::Grid::new("mola_cells").striped(true).show(ui,|ui| {
                         ui.strong("Centre (N, E)");ui.strong("m");ui.strong("Shots");ui.strong("Weight");ui.end_row();
                         for cell in reading.source_cells.iter().filter(|c|c.weight>0.0) {
@@ -1156,14 +1184,36 @@ fn surface_tab(ui: &mut egui::Ui, body: &cosmogon_sim::astro::Body, state: &mut 
                         ui.colored_label(ACCENT,"Includes a provider-interpolated cell with no direct observations.");
                     }
                     ui.label(egui::RichText::new("Shots are observation counts, not uncertainty or confidence scores. High counts do not establish local precision.").small().color(MUTED));
+                    });
                 }
                 Err(e) => {ui.label(e);}
             }
             egui::CollapsingHeader::new("Versions and modelling limits").show(ui,|ui| {
+                ui.label(format!("Height above {}. IAU2000 planetocentric latitude; east-positive longitude.",mola::DATUM));
                 ui.label(mola::DATASET);
                 ui.label("2003 grid; PDS4 label 1.1 corrects projection metadata in September 2026. Source and converted checksums are bundled.");
                 ui.label("No generated noise is added to the Mars elevation field. Colours, climate and fine shading remain modelled/generated. The rendered base is spherical; the areoid shape itself is not modelled.");
-                ui.label("These coordinates are body-fixed. Changing them samples data; it does not move the camera or change the universe.");
+                ui.label(landing::REGISTRATION);
+                ui.label(format!("Landing registry {} · sources read {}",landing::VERSION,landing::ACCESSED));
+            });
+            egui::CollapsingHeader::new("Export this reading").show(ui,|ui| {
+                if state.surface_export_path.is_empty() {state.surface_export_path=crate::persistence::data_dir().join("surface-reading.json").display().to_string();}
+                ui.label("JSON with coordinates, height, support cells and source metadata. Existing files are protected.");
+                ui.text_edit_singleline(&mut state.surface_export_path);
+                if ui.button("Save reading JSON").clicked() {
+                    let result=(||->Result<(),String> {
+                        use std::io::Write;
+                        let mut record=landing::probe(state.surface_latitude,state.surface_longitude,state.surface_site.as_deref())?;
+                        record["target"]=serde_json::json!(body.name);
+                        let bytes=serde_json::to_vec_pretty(&record).map_err(|e|e.to_string())?;
+                        let path=std::path::Path::new(&state.surface_export_path);
+                        if let Some(parent)=path.parent().filter(|p|!p.as_os_str().is_empty()) {std::fs::create_dir_all(parent).map_err(|e|e.to_string())?;}
+                        let mut file=std::fs::OpenOptions::new().create_new(true).write(true).open(path).map_err(|e|e.to_string())?;
+                        file.write_all(&bytes).map_err(|e|e.to_string())
+                    })();
+                    state.surface_export_status=Some(match result {Ok(())=>format!("Saved {}",state.surface_export_path),Err(e)=>format!("Could not save reading: {e}")});
+                }
+                if let Some(message)=&state.surface_export_status {ui.label(message);}
             });
         }
         Some(ElevationData::Earth) => {

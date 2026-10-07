@@ -24,7 +24,7 @@ pub mod terrain_lod;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::asset::embedded_asset;
-use bevy::math::DVec3;
+use bevy::math::{DQuat, DVec3};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -618,10 +618,15 @@ pub fn colony_site(civ: u32, body: u32) -> (f64, f64) {
 /// Orientation of a body: axial tilt and spin (tidally locked bodies face their primary).
 /// The spin comes from the simulation so impacts land where they are drawn.
 pub fn body_rotation(sim: &Sim, r: BodyRef, t: f64) -> Quat {
+    body_rotation_f64(sim, r, t).as_quat()
+}
+
+/// Shared CPU transform: retain f64 through terrain, geographic navigation and markers.
+pub fn body_rotation_f64(sim: &Sim, r: BodyRef, t: f64) -> DQuat {
     let sys = sim.universe.system(r.system);
     let b = &sys.bodies[r.body as usize];
     let spin = sys.spin_angle(r.body as usize, t);
-    sim_to_render_rot() * Quat::from_rotation_x(b.axial_tilt as f32) * Quat::from_rotation_z(spin as f32)
+    DQuat::from_rotation_x(-std::f64::consts::FRAC_PI_2) * DQuat::from_rotation_x(b.axial_tilt) * DQuat::from_rotation_z(spin)
 }
 
 fn update_world_positions(sim: Res<Sim>, mut stars: Query<(&StarVisual, &mut WorldPos), Without<BodyVisual>>, mut bodies: Query<(&mut BodyVisual, &mut WorldPos, &mut Transform), Without<StarVisual>>) {

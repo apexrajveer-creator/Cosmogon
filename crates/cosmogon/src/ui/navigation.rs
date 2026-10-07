@@ -20,7 +20,7 @@ pub fn panel(mut contexts: EguiContexts, mut state: ResMut<UiState>, mut rig: Re
         ui.separator();
         match state.camera_tab {
             0 => {
-                ui.label(egui::RichText::new(if rig.free.is_some() { "FREE FLIGHT" } else { "ORBIT & TRACK" }).color(ACCENT).strong());
+                ui.label(egui::RichText::new(if rig.surface_anchor.as_ref().is_some_and(|a|a.tracked) { "SURFACE TRACKING" } else if rig.free.is_some() { "FREE FLIGHT" } else { "ORBIT & TRACK" }).color(ACCENT).strong());
                 ui.horizontal(|ui| {
                     if ui.add_enabled(rig.free.is_none(), egui::Button::new("Detach camera (G)")).clicked() { rig.detach(); }
                     if ui.button("Orbit selection (F)").clicked() {
@@ -28,6 +28,8 @@ pub fn panel(mut contexts: EguiContexts, mut state: ResMut<UiState>, mut rig: Re
                     }
                     if ui.button("Stop").clicked() { if let Some(f) = &mut rig.free { f.velocity = bevy::math::DVec3::ZERO; } }
                 });
+                if rig.surface_anchor.is_some() && ui.button("Release surface view").clicked() {rig.release_surface();}
+                if let Some(message)=&rig.navigation_notice {ui.label(egui::RichText::new(message).small().color(ACCENT));}
                 ui.add_space(6.0);
                 ui.label("W / S forward & back · A / D sideways · R / C up & down");
                 ui.label("Right-drag to look · Q / E roll · arrows to look");
@@ -70,7 +72,7 @@ pub fn panel(mut contexts: EguiContexts, mut state: ResMut<UiState>, mut rig: Re
             }
             _ => {
                 ui.label(egui::RichText::new("SAVED VIEWPOINTS").color(ACCENT).strong());
-                ui.label(egui::RichText::new("Position, orientation and lens settings for this universe. Views follow their reference object's position; restoring a view does not rewind time.").small().color(MUTED));
+                ui.label(egui::RichText::new("Position, orientation and lens for this universe. Surface views can follow body spin and motion; other views restore relative to their reference object. Time is never rewound.").small().color(MUTED));
                 ui.horizontal(|ui| {
                     ui.add(egui::TextEdit::singleline(&mut state.viewpoint_name).hint_text("Name this view").desired_width(235.0));
                     if ui.add_enabled(views.writable && !state.viewpoint_name.trim().is_empty(), egui::Button::new("Save view")).clicked() {
@@ -84,10 +86,21 @@ pub fn panel(mut contexts: EguiContexts, mut state: ResMut<UiState>, mut rig: Re
                     for (i, view) in entries {
                         ui.push_id(i, |ui| { ui.horizontal(|ui| {
                             if ui.button(&view.name).on_hover_text("Restore this viewpoint in free-camera mode").clicked() {
-                                views.status = Some(match view.restore(&sim, &mut rig, &mut settings.presentation) { Ok(()) => format!("Restored {}", view.name), Err(e) => e });
+                                views.status = Some(match view.restore(&sim, &mut rig, &mut settings.presentation) {
+                                    Ok(()) => {
+                                        if let Some(a)=&rig.surface_anchor {
+                                            state.show_surface_anchor(a);
+                                            sim.selected=Some(crate::sim::Target::Body(a.body));
+                                        }
+                                        format!("Restored {}",view.name)
+                                    }
+                                    Err(e)=>e
+                                });
                             }
                             if ui.small_button("Remove").clicked() { state.remove_viewpoint = Some(i); }
-                        }); });
+                        });
+                        if let Some(a)=&view.surface_anchor {ui.label(egui::RichText::new(format!("{} · {:.5}° N, {:.5}° E · {:.0} m · {}",a.site_id.as_deref().unwrap_or("Surface"),a.latitude_deg,a.longitude_east_deg,a.altitude_m,if a.tracked {"follow surface"} else {"snapshot"})).small().color(MUTED));}
+                        });
                     }
                 });
                 if let Some(i) = state.remove_viewpoint {

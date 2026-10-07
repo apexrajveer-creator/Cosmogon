@@ -24,6 +24,7 @@ struct Args {
     initial: Option<String>,
     recording: Option<String>,
     reference: Option<String>,
+    site: Option<String>,
     latitude: f64,
     longitude: f64,
     definition: Option<String>,
@@ -57,6 +58,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         initial: None,
         recording: None,
         reference: None,
+        site: None,
         latitude: 0.0,
         longitude: 0.0,
         definition: None,
@@ -77,6 +79,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     };
     let mut it = args;
     let mut explicit_scenario = false;
+    let mut explicit_target = false;
+    let mut explicit_coordinates = false;
     if let Some(c) = it.next() {
         a.cmd = c;
     }
@@ -97,10 +101,11 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         match flag.as_str() {
             "--samples" => a.samples = number::<usize>(val()?, &flag)?.clamp(2, 4096),
             "--interval-days" => a.interval_days = number(val()?, &flag)?,
-            "--target" => a.target = val()?,
+            "--target" => { a.target = val()?; explicit_target = true; },
+            "--site" => a.site = Some(val()?),
             "--output" => a.output = Some(val()?),
-            "--latitude" => a.latitude = number(val()?, &flag)?,
-            "--longitude" => a.longitude = number(val()?, &flag)?,
+            "--latitude" => { a.latitude = number(val()?, &flag)?; explicit_coordinates = true; },
+            "--longitude" => { a.longitude = number(val()?, &flag)?; explicit_coordinates = true; },
             "--reference" => a.reference = Some(val()?),
             "--recording" => a.recording = Some(val()?),
             "--initial" => a.initial = Some(val()?),
@@ -139,6 +144,12 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             unknown => return Err(format!("Unknown flag {unknown}; use --help")),
         }
     }
+    if let Some(id) = &a.site {
+        if a.cmd != "surface" { return Err("--site is a surface probe option".into()); }
+        let site = cosmogon_sim::planet::landing::find(id).ok_or_else(||format!("Unknown landing reference: {id}"))?;
+        if explicit_coordinates || (explicit_target && !a.target.eq_ignore_ascii_case("Mars")) { return Err("--site supplies Mars and its source coordinates; do not combine with explicit coordinates or another target".into()); }
+        a.target = "Mars".into(); a.latitude = site.latitude_north_deg; a.longitude = site.longitude_east_deg;
+    }
     if !explicit_scenario && matches!(a.cmd.as_str(), "experiment" | "sweep") {
         a.scenario = Scenario::SolarSystemLab;
     }
@@ -159,6 +170,7 @@ fn help() {
     println!(
         r#"Cosmogon headless tools
   surface --target Mars          Sample authoritative MOLA height and source-cell coverage JSON
+  sites                          Print historical landing references, sources and registration limits
   datasets                       Print embedded MOLA source/version/checksum metadata
   models                         Print model/source/parameter registry JSON
   inspect --recording DIR         Validate and print saved numeric recording data
@@ -169,6 +181,7 @@ fn help() {
   run | check | survey | profile Run the released simulation/determinism tools
 
 Surface coordinates: --latitude -90..90 --longitude -360..360 (degrees, east positive)
+Or: surface --site perseverance|curiosity|insight|viking-1 (historical touchdown, not current rover position)
 
 Research inputs:
   --initial BASE.cosmo           Use a complete saved state; overrides scenario/seed
@@ -211,6 +224,7 @@ fn main() {
     };
     match a.cmd.as_str() {
         "help" => help(),
+        "sites" => println!("{}", serde_json::to_string_pretty(&cosmogon_sim::planet::landing::registry()).unwrap()),
         "datasets" => println!("{}", cosmogon_sim::planet::mola::METADATA),
         "surface" => { if let Err(e) = surface(&a) { eprintln!("Surface probe failed: {e}"); std::process::exit(1); } }
         "models" => println!("{}", serde_json::to_string_pretty(&serde_json::json!({"format":"cosmogon-model-registry", "schema_version":1, "models":cosmogon_sim::research::PhysicsModelRegistry::models(), "sources":cosmogon_sim::research::SCIENTIFIC_SOURCES, "parameters":cosmogon_sim::research::PARAMETERS})).unwrap()),
@@ -553,20 +567,22 @@ mod argument_tests {
         );
         assert_eq!(args(&["sweep", "--help"]).unwrap().cmd, "help");
     }
+    #[test]
+    fn named_surface_probes_use_verified_coordinates_and_reject_conflicts() {
+        let a=args(&["surface","--site","curiosity"]).unwrap();
+        assert_eq!(a.target,"Mars");assert_eq!(a.latitude,-4.59);assert_eq!(a.longitude,137.44);
+        for values in [vec!["surface","--site","unknown"],vec!["surface","--site","curiosity","--target","Earth"],vec!["surface","--site","curiosity","--latitude","0"],vec!["run","--site","curiosity"]] {assert!(args(&values).is_err());}
+    }
 }
 
 fn surface(a: &Args) -> Result<(), String> {
-    use cosmogon_sim::planet::{mola, terrain::{ElevationData, METRES_PER_UNIT, Terrain, dir_from_lat_lon}};
+    use cosmogon_sim::planet::terrain::ElevationData;
     let u = if let Some(path) = &a.initial { save::read_file(std::path::Path::new(path)).map_err(|e|e.to_string())? }
         else { Universe::new(settings(a,a.seed)) };
     let body = u.systems.iter().flat_map(|s| &s.bodies).find(|b|b.exists() && b.name.eq_ignore_ascii_case(&a.target)).ok_or("Target body not found")?;
     if body.elevation_data != Some(ElevationData::MarsMola) { return Err("This probe requires a body using the embedded Mars MOLA grid; older procedural saves retain their original terrain".into()); }
-    let reading=mola::read(a.latitude,a.longitude)?;
-    let authoritative_height_m=Terrain::of(body).elevation(dir_from_lat_lon(a.latitude.to_radians(),a.longitude.to_radians()))*METRES_PER_UNIT;
-    println!("{}",serde_json::to_string_pretty(&serde_json::json!({"format":"cosmogon-surface-probe","schema_version":1,
-        "target":body.name,"reading":reading,"authoritative_height_m":authoritative_height_m,
-        "frame":"IAU2000 planetocentric latitude; east longitude; GMM3 degree/order 50 areoid height",
-        "sampling":"Bilinear between 0.25-degree grid pixel centres; support cells with zero observations are provider-interpolated",
-        "limitations":"Global overview (14.82 km equatorial spacing), not landing safety/local relief. No per-cell uncertainty or propagated covariance. Rendering uses a spherical base radius; areoid shape is not modelled. Colours, climate and subpixel shading are generated/modelled separately."})).map_err(|e|e.to_string())?);
+    let mut record = cosmogon_sim::planet::landing::probe(a.latitude,a.longitude,a.site.as_deref())?;
+    record["target"]=serde_json::json!(body.name);
+    println!("{}",serde_json::to_string_pretty(&record).map_err(|e|e.to_string())?);
     Ok(())
 }

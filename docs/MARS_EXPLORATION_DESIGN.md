@@ -1,7 +1,9 @@
 # Next Mars exploration build
 
-Continuation from observed-terrain checkpoint 013a682. This is implementation direction and
-primary-source research, not a claim that mission layers or coordinate travel are already built.
+Continuation from observed-terrain checkpoint 013a682. The landing registry, shared f64 frame,
+probe markers, snapshot/tracked travel and geographic viewpoints are now implemented. Validation
+is recorded in [MARS_EXPLORATION_VALIDATION](MARS_EXPLORATION_VALIDATION.md). Higher-resolution
+terrain, mission imagery/paths and landing engineering remain future work.
 
 ## Connected user journey
 

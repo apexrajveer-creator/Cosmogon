@@ -21,7 +21,7 @@ use cosmogon_sim::BodyRef;
 
 use super::look::Look;
 use super::materials::{PlanetMaterial, TerrainMaterial};
-use super::{body_rotation, to_render, BodyVisual, ViewInfo, WorldPos};
+use super::{body_rotation_f64, to_render, BodyVisual, ViewInfo, WorldPos};
 use crate::camera::CameraRig;
 use crate::persistence::UserSettings;
 use crate::sim::{Sim, Target};
@@ -471,7 +471,7 @@ pub fn update_terrain_lod(
 
     // Choose leaves from the camera position in the body's own frame.
     let center = to_render(u.body_position(r, t));
-    let rot = body_rotation(&sim, r, t).as_dquat();
+    let rot = body_rotation_f64(&sim, r, t);
     let cam_local = rot.inverse() * (view.origin - center);
     let quality = match settings.graphics {
         crate::persistence::GraphicsPreset::Low => 2.0,
@@ -558,7 +558,7 @@ pub fn position_patches(sim: Res<Sim>, mut q: Query<(&TerrainPatch, &mut WorldPo
             Some((b, c, r)) if b == p.body => (c, r),
             _ => {
                 let c = to_render(u.body_position(p.body, t));
-                let r = body_rotation(&sim, p.body, t).as_dquat();
+                let r = body_rotation_f64(&sim, p.body, t);
                 cache = Some((p.body, c, r));
                 (c, r)
             }

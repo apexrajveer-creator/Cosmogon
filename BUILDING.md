@@ -109,3 +109,20 @@ converts their endianness. The application needs no runtime network. `cosmogon-c
 MOLA source/checksum metadata; `surface --target Mars --latitude 18.625 --longitude 226.125` samples
 the shared field. Native `--new lab --focus Mars --panel surface` opens the source-cell probe.
 See [MARS_TERRAIN](docs/MARS_TERRAIN.md).
+
+### Historical landing references and surface travel
+
+```bash
+./target/release/cosmogon-cli sites
+./target/release/cosmogon-cli surface --site perseverance
+./target/release/cosmogon --surface-site curiosity --surface-altitude 100000 --speed 0 \
+    --panel surface --capture /tmp/curiosity.png --capture-after 300 --capture-metadata --quit
+```
+
+`--surface-site` selects a historical reference and new Solar System Lab unless a world is supplied.
+Altitude uses radial metres above the pinned MOLA field (60–100000000); `--surface-snapshot` leaves
+camera pose fixed after placement rather than following body translation/spin. `--surface-horizon`
+uses a horizon composition instead of the footprint overview. The automation renderer
+runs on the main thread for `--surface-site --quit`, as for imported-recording captures, to avoid early
+GPU teardown waits. Ordinary interactive starts retain pipelined rendering. Historical coordinates,
+coarse terrain and unverified registration do not provide current rover position or landing safety.

@@ -30,7 +30,7 @@ through primary-source research and product reasoning across student-to-research
 [RESEARCH_DESIGN](docs/RESEARCH_DESIGN.md). The following slice reopens recorded bundles, compares completed trajectories and persists guidance/favorites/graph choices; `--research-recording` and CLI inspect use the same bounded reader. Keep building successive connected slices. This does not change Universe/save state or the golden fingerprint. Research verification:
 [RESEARCH_VALIDATION](docs/RESEARCH_VALIDATION.md), 208 passed plus 1 existing ignored at checkpoint 6e6da11. The following measured-validation slice adds cross-object studies and actual analytic/JPL reports; see [SCIENTIFIC_VALIDATION](docs/SCIENTIFIC_VALIDATION.md), 212 passed plus 1 existing ignored. Recorded-data verification: [RECORDED_DATA_VALIDATION](docs/RECORDED_DATA_VALIDATION.md).
 
-New Solar System worlds now use observed-derived Mars MOLA relief and coverage metadata; see [MARS_TERRAIN](docs/MARS_TERRAIN.md). This deliberate terrain state change re-pins the golden to `0xf2c4140a45ae509b`; old saves retain their stored terrain. Next connected work is specified in [MARS_EXPLORATION_DESIGN](docs/MARS_EXPLORATION_DESIGN.md); verified landing references are researched, while markers and surface travel remain unimplemented.
+New Solar System worlds now use observed-derived Mars MOLA relief and coverage metadata; see [MARS_TERRAIN](docs/MARS_TERRAIN.md). This deliberate terrain state change re-pins the golden to `0xf2c4140a45ae509b`; old saves retain their stored terrain. The connected exploration slice adds four historical landing references, probe/landing markers, shared f64 body-fixed transforms, altitude travel, ground/horizon composition and snapshot/tracked geographic viewpoints. Native/headless exports retain source and registration limits; see [MARS_EXPLORATION_DESIGN](docs/MARS_EXPLORATION_DESIGN.md) and [MARS_EXPLORATION_VALIDATION](docs/MARS_EXPLORATION_VALIDATION.md). Current checks: 223 passed plus 1 existing ignored; the golden remains unchanged. Higher-resolution terrain and current rover paths remain unimplemented.
 
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
@@ -66,6 +66,7 @@ Map of the 1.0 features (start here when changing one):
 | Throw / Grab tools | — | `interact.rs`, `sim.rs` (`Tool`), `ui/dock.rs` |
 | Guided tours | — | `ui/tour.rs` |
 | Timeline and rewind | — | `timeline.rs` |
+| Historical Mars landing references / geographic travel | `planet/landing.rs`, `planet/mola.rs` | `surface.rs`, `camera.rs`, `ui/inspect.rs`, `ui/markers.rs` |
 | Camera, free flight, viewpoints | — | `camera.rs`, `navigation.rs`, `ui/navigation.rs` |
 | Photo mode, lens/colour, dev capture | — | `capture.rs`, `navigation.rs`, `ui/navigation.rs` |
 | Research controls/models/sources/CSV | `research/` | `research.rs`, `ui/research.rs`; CLI `experiment`, `models` |
