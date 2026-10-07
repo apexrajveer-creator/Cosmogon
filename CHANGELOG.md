@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased — native exploration and research
+## Unreleased — native exploration, research and habitat engineering
+
+- Add authoritative user-created geographic habitat experiments with finite mass stores, NASA BVAD Rev2 nominal crew exchanges, powered air/water processing, primary-star solar/external supply, battery losses and lumped heat budgets. Ordinary undoable edits, exact save/resume, design-alert entry/recovery, native controls/markers, model/source context and protected snapshot/trajectory exports share the engine. Optional state and monotonic identifiers are omitted from untouched worlds; the golden remains `0xf2c4140a45ae509b`. Phase 9 remains partial, with unquantified predictive uncertainty and no safety/medical certification.
+- Restore derived N-body acceleration caches on save loading before between-step position/illumination readers run. Dynamic save/continue and habitat replay fixtures cover the correction without changing serialized initial trajectories.
 
 - Reopen native numeric terrain studies with exact pinned source/sphere/samples and transactional failure recovery. Show source-aware sampled paths and selected rows on Mars; suppress stale, hidden or mismatched traces. Preserve independent study graphs/exports and capture actual study definitions/rows in photo metadata. Add explicit current-world adaptation and bounded pre-render automation checks. No Universe or golden change.
 

@@ -37,6 +37,8 @@ fn main() -> bevy::app::AppExit {
     // can otherwise wait for a render task that still needs the main-thread executor.
     // Interactive opening remains asynchronous and reports errors in the workspace.
     if args.quit_after_capture {
+        if let Some(path)=&args.load {if let Err(e)=cosmogon_sim::save::read_file(std::path::Path::new(path)) {eprintln!("Cannot load automated world: {e}");return bevy::app::AppExit::error();}}
+        if let Some(path)=&args.habitat_definition {if let Err(e)=cosmogon_sim::habitat::Definition::read(std::path::Path::new(path)) {eprintln!("Cannot open habitat definition: {e}");return bevy::app::AppExit::error();}}
         if let Some(path)=&args.terrain_section {if let Err(error)=cosmogon_sim::planet::section::Definition::read(std::path::Path::new(path)).and_then(|d|d.calculate()) {eprintln!("Cannot open terrain section: {error}");return bevy::app::AppExit::error();}}
         if let Some(path) = &args.research_recording {
             if let Err(error) = cosmogon_sim::research::SavedRecording::read(std::path::Path::new(path)) {
@@ -56,7 +58,7 @@ fn main() -> bevy::app::AppExit {
     // The pipelined renderer's shutdown waits without servicing its main-thread
     // executor. Imported-table automation may finish during GPU initialization;
     // render those short jobs on the main thread so teardown cannot deadlock.
-    let plugins = if (args.research_recording.is_some() || args.surface_site.is_some() || args.mars_terrain.is_some() || args.terrain_section.is_some()) && args.quit_after_capture {
+    let plugins = if (args.habitat_definition.is_some() || args.research_recording.is_some() || args.surface_site.is_some() || args.mars_terrain.is_some() || args.terrain_section.is_some()) && args.quit_after_capture {
         plugins.disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>()
     } else {
         plugins

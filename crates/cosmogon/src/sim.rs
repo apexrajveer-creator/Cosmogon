@@ -486,6 +486,10 @@ fn poll_pending(mut commands: Commands, pending: Option<ResMut<PendingUniverse>>
                     })();
                     if let Err(e)=result {msg.0=Some(format!("Could not apply terrain source: {e}"));if args.quit_after_capture {error!("Cannot start automated run: {e}");exit.write(AppExit::error());}next.set(AppState::MainMenu);return;}
                 }
+                if let Some(path)=&args.habitat_definition {
+                    let result=cosmogon_sim::habitat::Definition::read(std::path::Path::new(path)).and_then(|definition|sim.edit(Edit::CreateHabitat {definition:Box::new(definition)},0.0));
+                    if let Err(e)=result {msg.0=Some(format!("Could not build habitat: {e}"));if args.quit_after_capture {error!("Cannot start automated run: {e}");exit.write(AppExit::error());}next.set(AppState::MainMenu);return;}
+                }
                 if let Some(s) = args.speed {
                     sim.speed = s.min(SPEEDS.len() - 1);
                 }

@@ -21,6 +21,7 @@ struct Hit {
     target: Target,
     priority: f32,
     site: Option<&'static str>,
+    habitat: Option<u64>,
 }
 
 fn rgb(c: [f32; 3]) -> egui::Color32 {
@@ -112,7 +113,7 @@ pub fn draw_markers(
         let has_civ = u.civs.iter().any(|c| c.system == sys.id && c.is_alive());
         let has_life = u.biospheres.iter().any(|b| b.system == sys.id && b.stage >= Stage::Microbial);
         let selected = sim.selected == Some(Target::Star(sys.id));
-        hits.push(Hit { pos: sp, radius: 10.0, target: Target::Star(sys.id), priority: 1.0, site: None });
+        hits.push(Hit { pos: sp, radius: 10.0, target: Target::Star(sys.id), priority: 1.0, site: None,habitat: None });
         if d > extent * 6.0 {
             let c = rgb(sys.star.color(t));
             painter.circle_stroke(sp, if selected { 9.0 } else { 6.0 }, egui::Stroke::new(1.0_f32, if selected { ACCENT } else { c.gamma_multiply(0.6) }));
@@ -148,6 +149,24 @@ pub fn draw_markers(
         }
     }
 
+    // Actual user-created experiment coordinates, not inferred civilization colonies.
+    if labels && !ui_state.hidden {
+        for h in &u.habitats {
+            let r=h.definition.body;let Some(body)=u.systems.get(r.system as usize).and_then(|s|s.bodies.get(r.body as usize)).filter(|b|b.exists() && b.kind.has_surface()) else {continue;};
+            let center=to_render(u.body_position(r,t));if view.screen_radius(center,body.radius)<40.0 {continue;}
+            let local=cosmogon_sim::planet::terrain::dir_from_lat_lon(h.definition.latitude_deg.to_radians(),h.definition.longitude_east_deg.to_radians());
+            let radial=body_rotation_f64(&sim,r,t)*DVec3::from_array(local);
+            let radius=body.radius+cosmogon_sim::planet::terrain::Terrain::of(body).elevation(local)*cosmogon_sim::planet::terrain::METRES_PER_UNIT;
+            if !crate::surface::above_horizon(view.origin-center,radial,radius) {continue;}
+            if let Some(point)=project(center+radial*(radius+100.0)) {
+                let color=if h.alert_bits!=0 {super::DANGER} else {LIFE};
+                painter.rect_stroke(egui::Rect::from_center_size(point,egui::vec2(12.0,12.0)),2.0,egui::Stroke::new(2.0_f32,color),egui::StrokeKind::Middle);
+                label(&painter,point+egui::vec2(6.0,4.0),&format!("{} · experiment",h.definition.name),color,&small);
+                hits.push(Hit {pos:point,radius:9.0,target:Target::Body(r),priority:7.0,site:None,habitat:Some(h.id)});
+            }
+        }
+    }
+
     // Historical landing references and the numeric probe share the body's f64 frame.
     // No icons are drawn on legacy procedural Mars or interpreted as live rover telemetry.
     if labels {
@@ -175,7 +194,7 @@ pub fn draw_markers(
                         painter.line_segment([sp-egui::vec2(10.0,0.0),sp+egui::vec2(10.0,0.0)],egui::Stroke::new(1.0_f32,color));
                         painter.line_segment([sp-egui::vec2(0.0,10.0),sp+egui::vec2(0.0,10.0)],egui::Stroke::new(1.0_f32,color));
                         label(&painter,sp+egui::vec2(4.0,-14.0),&name,color,&small);
-                        if site.is_some() {hits.push(Hit {pos:sp,radius:9.0,target:Target::Body(r),priority:6.0,site});}
+                        if site.is_some() {hits.push(Hit {pos:sp,radius:9.0,target:Target::Body(r),priority:6.0,site,habitat:None});}
                     }
                 }
             }
@@ -201,7 +220,7 @@ pub fn draw_markers(
                 }
             }
             let selected = sim.selected == Some(Target::Body(r));
-            hits.push(Hit { pos: sp, radius: px.max(9.0), target: Target::Body(r), priority: 2.0 + if b.parent.is_none() { 1.0 } else { 0.0 }, site: None });
+            hits.push(Hit { pos: sp, radius: px.max(9.0), target: Target::Body(r), priority: 2.0 + if b.parent.is_none() { 1.0 } else { 0.0 }, site: None,habitat: None });
             let civ = u.civ_on(r).is_some();
             let life = u.biosphere(r).is_some_and(|x| x.stage >= Stage::Microbial);
             let color = if civ { CIV } else if life { LIFE } else { MUTED };
@@ -515,6 +534,7 @@ pub fn draw_markers(
                 .max_by(|a, b| (a.priority - a.pos.distance(pp) * 0.01).total_cmp(&(b.priority - b.pos.distance(pp) * 0.01)));
             if let Some(h) = best {
                 sim.selected = Some(h.target);
+                if let Some(id)=h.habitat {ui_state.habitat_requested=Some(id);}
                 if let Some(site) = h.site.and_then(cosmogon_sim::planet::landing::find) {
                     ui_state.surface_site=Some(site.id.into());ui_state.surface_latitude=site.latitude_north_deg;ui_state.surface_longitude=site.longitude_east_deg;
                     ui_state.body_tab=super::BodyTab::Surface;ui_state.show_right=true;ui_state.surface_export_status=None;

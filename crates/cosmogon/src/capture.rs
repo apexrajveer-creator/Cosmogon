@@ -120,6 +120,7 @@ fn photo_metadata(sim: &crate::sim::Sim, rig: &crate::camera::CameraRig, setting
         "surface_height_reference": "Radial altitude above shared MOLA height on spherical base; not landing safety",
         "coordinate_registration": cosmogon_sim::planet::landing::REGISTRATION,
         "terrain_study": study.metadata(),
+        "habitat_reports": sim.universe.habitats.iter().map(|h|h.report()).collect::<Vec<_>>(),
         "landing_registry": cosmogon_sim::planet::landing::VERSION,
         "camera_position_render_m": rig.eye().to_array(), "orientation_xyzw": rig.rotation.to_array(),
         "presentation": settings.presentation,

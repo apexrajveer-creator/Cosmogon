@@ -33,6 +33,7 @@ pub struct Args {
     pub surface_site: Option<String>,
     pub mars_terrain: Option<String>,
     pub terrain_section: Option<String>,
+    pub habitat_definition: Option<String>,
     pub surface_altitude: f64,
     pub surface_snapshot: bool,
     pub surface_horizon: bool,
@@ -120,6 +121,7 @@ impl Args {
                 "--continue" => a.continue_latest = true,
                 "--capture-metadata" => a.capture_metadata = true,
                 "--free-camera" => a.free_camera = true,
+                "--habitat-definition" => a.habitat_definition=Some(val()),
                 "--terrain-section" => a.terrain_section = Some(val()),
                 "--mars-terrain" => a.mars_terrain = Some(val()),
                 "--surface-site" => a.surface_site = Some(val()),
@@ -157,7 +159,7 @@ impl Args {
                 f => eprintln!("ignoring unknown argument {f}"),
             }
         }
-        if (a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
+        if (a.habitat_definition.is_some() || a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
             a.new = Some(Scenario::SolarSystemLab);
         }
         a

@@ -94,6 +94,9 @@ pub enum Edit {
     SetProperty { body: BodyRef, property: BodyProperty },
     /// Explicit observed height-source choice; does not switch gravity or orbital state.
     SetMarsTerrain { body: BodyRef, dataset: terrain::ElevationData },
+    CreateHabitat { definition: Box<crate::habitat::Definition> },
+    ConfigureHabitat { system: u32, id: u64, config: Box<crate::habitat::Config> },
+    RemoveHabitat { system: u32, id: u64 },
     SetStar { system: u32, property: StarProperty },
     /// Choose analytic (Kepler) or N-body gravity and its settings.
     SetPhysics { system: u32, nbody: bool, settings: PhysicsSettings },
@@ -104,7 +107,8 @@ pub enum Edit {
 impl Edit {
     pub fn system(&self) -> u32 {
         match self {
-            Edit::AddBody { system, .. } | Edit::SetStar { system, .. } | Edit::SetPhysics { system, .. } | Edit::Intervene { system, .. } => *system,
+            Edit::AddBody { system, .. } | Edit::SetStar { system, .. } | Edit::SetPhysics { system, .. } | Edit::Intervene { system, .. } | Edit::ConfigureHabitat {system,..} | Edit::RemoveHabitat {system,..} => *system,
+            Edit::CreateHabitat {definition} => definition.body.system,
             Edit::RemoveBody { body } | Edit::SetState { body, .. } | Edit::Impulse { body, .. } | Edit::SetOrbit { body, .. } | Edit::SetProperty { body, .. } | Edit::SetMarsTerrain { body, .. } => body.system,
         }
     }
@@ -413,6 +417,17 @@ fn validate(u: &Universe, e: &Edit) -> Result<(), String> {
                 _ => {}
             }
         }
+        Edit::CreateHabitat {definition} => {
+            definition.validate()?;body_ok(&definition.body)?;
+            if !u.body(definition.body).kind.has_surface() {return Err("Habitat placement requires an existing solid surface".into());}
+            if u.scheduler.tasks.get(crate::habitat::TASK).is_some_and(|t|t.name!="habitats") {return Err("Habitat scheduler slot belongs to an unsupported task".into());}
+            if u.habitats.len()>=64 {return Err("A world supports at most 64 habitat experiments".into());}
+        }
+        Edit::ConfigureHabitat {system,id,config} => {
+            let h=u.habitats.iter().find(|h|h.id==*id && h.definition.body.system==*system).ok_or("No such habitat")?;
+            h.check_config(config)?;
+        }
+        Edit::RemoveHabitat {system,id} => {if !u.habitats.iter().any(|h|h.id==*id && h.definition.body.system==*system) {return Err("No such habitat".into());}}
         Edit::SetMarsTerrain { body, dataset } => {
             body_ok(body)?;
             if !u.body(*body).name.eq_ignore_ascii_case("Mars") || !u.body(*body).kind.has_surface() || dataset.mola().is_none() {return Err("MOLA source selection requires Mars and a supported MOLA grid".into());}
@@ -455,6 +470,9 @@ fn describe(u: &Universe, e: &Edit) -> String {
             BodyProperty::Co2Fraction(f) => format!("Set CO₂ of {} to {:.4}%", name(body), f * 100.0),
             BodyProperty::WaterInventory(w) => format!("Set water of {} to {w:.3} Earth oceans", name(body)),
         },
+        Edit::CreateHabitat {definition} => format!("Built {} on {}",definition.name,name(&definition.body)),
+        Edit::ConfigureHabitat {id,..} => format!("Configured habitat {id}"),
+        Edit::RemoveHabitat {id,..} => format!("Removed habitat {id}"),
         Edit::SetMarsTerrain { body, dataset } => format!("Set terrain of {} to {}", name(body), dataset.mola().expect("validated MOLA").label()),
         Edit::SetStar { system, property } => {
             let s = &u.system(*system).star.name;
@@ -487,6 +505,37 @@ impl Universe {
             let summary = self.apply_intervention(*civ, action);
             self.edits.push(EditRecord { time: t, summary: summary.clone(), edit });
             return Ok(EditOutcome { created: None, summary });
+        }
+        // Habitat edits have their own conserved state; never activate orbital dynamics.
+        if matches!(edit,Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::RemoveHabitat {..}) {
+            let summary=describe(self,&edit);
+            let body=match &edit {
+                Edit::CreateHabitat {definition} => {
+                    let id=self.next_habitat_id;let next=id.checked_add(1).ok_or("Habitat identifiers exhausted")?;
+                    let mut h=crate::habitat::Habitat::new(id,(**definition).clone(),t)?;
+                    let env=self.habitat_environment(definition,t);
+                    h.budget.temperature_domain_supported=true;
+                    h.budget.environment_available=env.irradiance_w_m2.is_some() && env.exterior_temperature_k.is_some();
+                    h.budget.horizontal_irradiance_w_m2=env.irradiance_w_m2;h.budget.exterior_temperature_k=env.exterior_temperature_k;
+                    h.budget.served_cycle_fraction=1.0;
+                    self.habitats.push(h);self.next_habitat_id=next;definition.body
+                }
+                Edit::ConfigureHabitat {id,config,..} => {
+                    let i=self.habitats.iter().position(|h|h.id==*id).expect("validated habitat");
+                    // Complete the remainder under the old configuration before applying
+                    // the new one. Preview first so rejection leaves all state untouched.
+                    let mut preview=self.habitats[i].clone();
+                    let env=self.habitat_environment(&preview.definition,t);preview.step(t,env)?;
+                    preview.check_config(config)?;preview.config=(**config).clone();
+                    let body=preview.definition.body;self.habitats[i]=preview;self.habitat_events(i,t);body
+                }
+                Edit::RemoveHabitat {id,..} => {let i=self.habitats.iter().position(|h|h.id==*id).expect("validated habitat");self.habitats.remove(i).definition.body}
+                _=>unreachable!(),
+            };
+            self.ensure_habitat_task();
+            self.edits.push(EditRecord {time:t,summary:summary.clone(),edit});
+            self.history.push(Event {time:t,category:Category::Space,importance:3,title:summary.clone(),detail:"User-created habitat experiment; finite stores and explicit engineering assumptions. No measured settlement or safety certification.".into(),system:Some(body.system),body:Some(body.body),civ:None});
+            return Ok(EditOutcome {created:None,summary});
         }
         // Height-source edits preserve the existing gravity model and phase. Refresh the
         // ordinary derived environment, then journal the source change for reproducibility.
@@ -683,7 +732,7 @@ impl Universe {
                     sys.deactivate_dynamics(t)?;
                 }
             }
-            Edit::Intervene { .. } | Edit::SetMarsTerrain { .. } => unreachable!("handled above"),
+            Edit::Intervene { .. } | Edit::SetMarsTerrain { .. } | Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::RemoveHabitat {..} => unreachable!("handled above"),
         }
 
         let sys = &mut self.systems[s];

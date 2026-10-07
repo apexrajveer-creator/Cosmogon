@@ -26,6 +26,7 @@ struct Args {
     reference: Option<String>,
     site: Option<String>,
     mars_terrain: Option<String>,
+    habitat_id: Option<u64>,
     from_site: Option<String>,
     to_site: Option<String>,
     latitude: f64,
@@ -63,6 +64,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         reference: None,
         site: None,
         mars_terrain: None,
+        habitat_id: None,
         from_site: None,
         to_site: None,
         latitude: 0.0,
@@ -85,11 +87,14 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     };
     let mut it = args;
     let mut explicit_scenario = false;
+    let mut explicit_seed = false;
     let mut explicit_target = false;
     let mut explicit_coordinates = false;
     let mut explicit_samples = false;
     if let Some(c) = it.next() {
         a.cmd = c;
+        if a.cmd=="habitat" {a.samples=25;a.interval_days=1.0/24.0;a.scenario=Scenario::SolarSystemLab;}
+        if a.cmd=="habitat-definition" {a.scenario=Scenario::SolarSystemLab;a.target="Mars".into();}
     }
     if matches!(a.cmd.as_str(), "--help" | "-h" | "help") {
         a.cmd = "help".into();
@@ -105,11 +110,14 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
                 .filter(|v| !v.starts_with("--"))
                 .ok_or_else(|| format!("{flag} needs a value"))
         };
+        if a.cmd=="habitat" && !matches!(flag.as_str(),"--definition"|"--habitat-id"|"--initial"|"--output"|"--samples"|"--interval-days"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat study option"));}
+        if a.cmd=="habitat-definition" && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat-definition option"));}
         match flag.as_str() {
             "--samples" => {
                 let requested=number::<usize>(val()?,&flag)?;explicit_samples=true;
                 if a.cmd=="section" && !(2..=1024).contains(&requested) {return Err("Section samples must be between 2 and 1024".into());}
-                a.samples=requested.clamp(2,4096);
+                if a.cmd=="habitat" && !(1..=1024).contains(&requested) {return Err("Habitat samples must be between 1 and 1024".into());}
+                a.samples=if a.cmd=="habitat" {requested} else {requested.clamp(2,4096)};
             },
             "--interval-days" => a.interval_days = number(val()?, &flag)?,
             "--target" => { a.target = val()?; explicit_target = true; },
@@ -123,6 +131,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--reference" => a.reference = Some(val()?),
             "--recording" => a.recording = Some(val()?),
             "--initial" => a.initial = Some(val()?),
+            "--habitat-id" => {if a.cmd!="habitat" {return Err("--habitat-id requires habitat".into());}a.habitat_id=Some(number(val()?,&flag)?);},
             "--definition" => a.definition = Some(val()?),
             "--parameter" => a.parameter = val()?,
             "--from" => a.sweep_start = Some(number(val()?, &flag)?),
@@ -130,7 +139,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--runs" => a.sweep_runs = number(val()?, &flag)?,
             "--measure-target" => a.measure_target = Some(val()?),
             "--measure" => a.measure = Some(val()?),
-            "--seed" => a.seed = number(val()?, &flag)?,
+            "--seed" => {a.seed = number(val()?, &flag)?;explicit_seed=true;},
             "--seeds" => a.seeds = number(val()?, &flag)?,
             "--years" => a.years = number(val()?, &flag)?,
             "--systems" => a.systems = number(val()?, &flag)?,
@@ -157,6 +166,12 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             }
             unknown => return Err(format!("Unknown flag {unknown}; use --help")),
         }
+    }
+    if matches!(a.cmd.as_str(),"habitat"|"habitat-definition") && a.initial.is_some() && (explicit_scenario || explicit_seed) {return Err("Choose saved --initial world or new --scenario/--seed, not both".into());}
+    if a.cmd=="habitat" {
+        if a.definition.is_none() && a.initial.is_none() {return Err("habitat requires --definition FILE or --initial saved world".into());}
+        if a.definition.is_some() && a.habitat_id.is_some() {return Err("Choose a new --definition or existing --habitat-id".into());}
+        if !a.interval_days.is_finite() || a.interval_days<1.0/86400.0 || a.interval_days>30.0 || a.interval_days*(a.samples.saturating_sub(1)) as f64>30.0 {return Err("Habitat studies require a positive finite interval and at most 30 days total".into());}
     }
     if a.mars_terrain.is_some() && !matches!(a.cmd.as_str(),"terrain"|"surface"|"section") {return Err("--mars-terrain is a terrain, surface or section option".into());}
     if a.cmd == "terrain" && (a.mars_terrain.is_none() || a.save.is_none() || explicit_coordinates || explicit_target || a.definition.is_some()) {return Err("terrain requires --mars-terrain 4|16 --save NEW_FILE; optionally --initial SAVE".into());}
@@ -195,6 +210,11 @@ fn help() {
   surface --target Mars          Sample authoritative MOLA height and source-cell coverage JSON
   section [--output NEW_DIR]      Calculate/export a source-supported MOLA terrain section
   sites                          Print historical landing references, sources and registration limits
+  habitat-definition [--target Mars --latitude N --longitude E] [--initial SAVE]
+      [--output NEW_FILE]        Create a complete editable preset for this world.
+  habitat --definition FILE [--initial SAVE] [--output NEW_DIR]
+      [--samples 1..1024 --interval-days D]  At most 30 days; default 25 hourly samples.
+      --initial SAVE without definition resumes an existing habitat; --habitat-id selects among many.
   terrain --mars-terrain 4|16 --save NEW_FILE  Explicit source edit; optionally --initial SAVE
   datasets                       Print embedded MOLA source/version/checksum metadata
   models                         Print model/source/parameter registry JSON
@@ -254,6 +274,8 @@ fn main() {
     };
     match a.cmd.as_str() {
         "help" => help(),
+        "habitat-definition" => {if let Err(e)=habitat_definition(&a) {eprintln!("Habitat definition failed: {e}");std::process::exit(1);}},
+        "habitat" => {if let Err(e)=habitat(&a) {eprintln!("Habitat study failed: {e}");std::process::exit(1);}},
         "section" => {if let Err(e)=section(&a) {eprintln!("Terrain section failed: {e}");std::process::exit(1);}},
         "sites" => println!("{}", serde_json::to_string_pretty(&cosmogon_sim::planet::landing::registry()).unwrap()),
         "datasets" => println!("{}", serde_json::to_string_pretty(&cosmogon_sim::planet::mola::registry()).unwrap()),
@@ -574,51 +596,6 @@ fn find_target(u: &Universe, name: &str) -> Option<cosmogon_sim::research::Resea
     None
 }
 
-#[cfg(test)]
-mod argument_tests {
-    use super::*;
-    fn args(values: &[&str]) -> Result<Args, String> {
-        parse_args(values.iter().map(|s| s.to_string()))
-    }
-    #[test]
-    fn source_selection_is_explicit_and_rejects_ignored_options() {
-        for values in [vec!["surface","--mars-terrain","32"],vec!["run","--mars-terrain","16"],vec!["terrain","--mars-terrain","16"],vec!["terrain","--save","x"],vec!["terrain","--mars-terrain","4","--save","x","--target","Earth"]] {assert!(args(&values).is_err());}
-        assert_eq!(args(&["surface","--site","curiosity","--mars-terrain","16"]).unwrap().mars_terrain.as_deref(),Some("16"));
-        assert!(args(&["terrain","--mars-terrain","16","--save","x"]).is_ok());
-    }
-    #[test]
-    fn malformed_requests_return_errors_and_research_defaults_to_lab() {
-        for values in [
-            vec!["sweep", "--samples", "bad"],
-            vec!["sweep", "--target"],
-            vec!["run", "--years", "NaN"],
-            vec!["run", "--systems", "999999999"],
-            vec!["run", "--scenario", "missing"],
-        ] {
-            assert!(args(&values).is_err());
-        }
-        assert_eq!(args(&["sweep"]).unwrap().scenario, Scenario::SolarSystemLab);
-        assert_eq!(args(&["run"]).unwrap().scenario, Scenario::Sol);
-        assert_eq!(
-            args(&["sweep", "--scenario", "sol"]).unwrap().scenario,
-            Scenario::Sol
-        );
-        assert_eq!(args(&["sweep", "--help"]).unwrap().cmd, "help");
-    }
-    #[test]
-    fn terrain_sections_reject_ignored_parameters_and_keep_definition_settings() {
-        for values in [vec!["section","--samples","1"],vec!["section","--samples","1025"],vec!["section","--definition","saved.json","--samples","20"],vec!["section","--latitude","1"],vec!["section","--target","Earth"],vec!["run","--from-site","curiosity"]] {assert!(args(&values).is_err());}
-        assert_eq!(args(&["section","--from-site","curiosity","--to-site","insight","--samples","1024"]).unwrap().samples,1024);
-        assert_eq!(args(&["section","--definition","saved.json"]).unwrap().target,"Mars");
-    }
-    #[test]
-    fn named_surface_probes_use_verified_coordinates_and_reject_conflicts() {
-        let a=args(&["surface","--site","curiosity"]).unwrap();
-        assert_eq!(a.target,"Mars");assert_eq!(a.latitude,-4.59);assert_eq!(a.longitude,137.44);
-        for values in [vec!["surface","--site","unknown"],vec!["surface","--site","curiosity","--target","Earth"],vec!["surface","--site","curiosity","--latitude","0"],vec!["run","--site","curiosity"]] {assert!(args(&values).is_err());}
-    }
-}
-
 fn terrain_world(a: &Args) -> Result<Universe,String> {
     let mut u=if let Some(path)=&a.initial {save::read_file(std::path::Path::new(path)).map_err(|e|e.to_string())?} else {Universe::new(settings(a,a.seed))};
     if let Some(ppd)=&a.mars_terrain {
@@ -659,4 +636,81 @@ fn section(a: &Args) -> Result<(),String> {
     let section=definition.calculate()?;
     if let Some(path)=&a.output {section.export(std::path::Path::new(path))?;}
     println!("{}",serde_json::to_string_pretty(&section).map_err(|e|e.to_string())?);Ok(())
+}
+
+fn habitat(a:&Args)->Result<(),String> {
+    use cosmogon_sim::habitat::{self,Definition};
+    if a.output.as_ref().is_some_and(|p|std::path::Path::new(p).exists()) {return Err("Existing exports are protected; choose a new folder".into());}
+    let definition=a.definition.as_ref().map(|p|Definition::read(std::path::Path::new(p))).transpose()?;
+    let mut u=if let Some(path)=&a.initial {save::read_file(std::path::Path::new(path)).map_err(|e|e.to_string())?} else {Universe::new(settings(a,a.seed))};
+    let id=if let Some(definition)=definition {
+        u.apply_edit(cosmogon_sim::sandbox::Edit::CreateHabitat {definition:Box::new(definition)})?;u.habitats.last().expect("created").id
+    } else if let Some(id)=a.habitat_id {if !u.habitats.iter().any(|h|h.id==id) {return Err("No such habitat in saved world".into());}id}
+    else if u.habitats.len()==1 {u.habitats[0].id}
+    else {return Err("Saved world needs one habitat, or explicit --habitat-id".into());};
+    let initial=u.clone();let mut rows=Vec::with_capacity(a.samples);
+    for i in 0..a.samples {u.advance_to(initial.time+i as f64*a.interval_days*cosmogon_sim::time::SECONDS_PER_DAY,None,None);rows.push(habitat::sample(&u,id)?);}
+    if let Some(path)=&a.output {habitat::export(&initial,&u,id,&rows,std::path::Path::new(path))?;}
+    println!("{}",serde_json::to_string_pretty(&serde_json::json!({"format":"cosmogon-habitat-study-result","schema_version":1,"samples":rows.len(),"interval_s":a.interval_days*cosmogon_sim::time::SECONDS_PER_DAY,"initial_state_fingerprint":cosmogon_sim::research::state_fingerprint(&initial)?,"final_state_fingerprint":cosmogon_sim::research::state_fingerprint(&u)?,"report":u.habitats.iter().find(|h|h.id==id).expect("sampled").report()})).map_err(|e|e.to_string())?);Ok(())
+}
+
+fn habitat_definition(a:&Args)->Result<(),String> {
+    use std::io::Write;
+    let u=if let Some(p)=&a.initial {save::read_file(std::path::Path::new(p)).map_err(|e|e.to_string())?} else {Universe::new(settings(a,a.seed))};
+    let r=u.systems.iter().find_map(|s|s.bodies.iter().enumerate().find(|(_,b)|b.exists() && b.kind.has_surface() && b.name.eq_ignore_ascii_case(&a.target)).map(|(j,_)|cosmogon_sim::BodyRef {system:s.id,body:j as u32})).ok_or("Target must identify an existing solid world")?;
+    let d=cosmogon_sim::habitat::Definition::at(r,a.latitude,a.longitude);d.validate()?;
+    let text=serde_json::to_string_pretty(&d).map_err(|e|e.to_string())?;
+    if let Some(path)=&a.output {let p=std::path::Path::new(path);if let Some(parent)=p.parent().filter(|p|!p.as_os_str().is_empty()) {std::fs::create_dir_all(parent).map_err(|e|e.to_string())?;}let mut f=std::fs::OpenOptions::new().write(true).create_new(true).open(p).map_err(|e|format!("Existing definitions are protected: {e}"))?;f.write_all(text.as_bytes()).map_err(|e|e.to_string())?;}
+    println!("{text}");Ok(())
+}
+
+#[cfg(test)]
+mod argument_tests {
+    use super::*;
+    fn args(values: &[&str]) -> Result<Args, String> {
+        parse_args(values.iter().map(|s| s.to_string()))
+    }
+    #[test]
+    fn source_selection_is_explicit_and_rejects_ignored_options() {
+        for values in [vec!["surface","--mars-terrain","32"],vec!["run","--mars-terrain","16"],vec!["terrain","--mars-terrain","16"],vec!["terrain","--save","x"],vec!["terrain","--mars-terrain","4","--save","x","--target","Earth"]] {assert!(args(&values).is_err());}
+        assert_eq!(args(&["surface","--site","curiosity","--mars-terrain","16"]).unwrap().mars_terrain.as_deref(),Some("16"));
+        assert!(args(&["terrain","--mars-terrain","16","--save","x"]).is_ok());
+    }
+    #[test]
+    fn malformed_requests_return_errors_and_research_defaults_to_lab() {
+        for values in [
+            vec!["sweep", "--samples", "bad"],
+            vec!["sweep", "--target"],
+            vec!["run", "--years", "NaN"],
+            vec!["run", "--systems", "999999999"],
+            vec!["run", "--scenario", "missing"],
+        ] {
+            assert!(args(&values).is_err());
+        }
+        assert_eq!(args(&["sweep"]).unwrap().scenario, Scenario::SolarSystemLab);
+        assert_eq!(args(&["run"]).unwrap().scenario, Scenario::Sol);
+        assert_eq!(
+            args(&["sweep", "--scenario", "sol"]).unwrap().scenario,
+            Scenario::Sol
+        );
+        assert_eq!(args(&["sweep", "--help"]).unwrap().cmd, "help");
+    }
+    #[test]
+    fn habitat_studies_have_bounded_horizon_and_reject_ignored_options() {
+        for values in [vec!["habitat"],vec!["habitat","--definition","x","--samples","0"],vec!["habitat","--definition","x","--samples","1025"],vec!["habitat","--definition","x","--interval-days","nan"],vec!["habitat","--definition","x","--interval-days","31"],vec!["habitat","--definition","x","--years","1"],vec!["habitat","--definition","x","--target","Mars"],vec!["habitat","--definition","x","--habitat-id","1"],vec!["run","--habitat-id","0"]] {assert!(args(&values).is_err());}
+        let a=args(&["habitat","--definition","x"]).unwrap();assert_eq!(a.samples,25);assert_eq!(a.scenario,Scenario::SolarSystemLab);assert_eq!(a.interval_days,1.0/24.0);
+        assert_eq!(args(&["habitat","--initial","x","--samples","1"]).unwrap().samples,1);
+    }
+    #[test]
+    fn terrain_sections_reject_ignored_parameters_and_keep_definition_settings() {
+        for values in [vec!["section","--samples","1"],vec!["section","--samples","1025"],vec!["section","--definition","saved.json","--samples","20"],vec!["section","--latitude","1"],vec!["section","--target","Earth"],vec!["run","--from-site","curiosity"]] {assert!(args(&values).is_err());}
+        assert_eq!(args(&["section","--from-site","curiosity","--to-site","insight","--samples","1024"]).unwrap().samples,1024);
+        assert_eq!(args(&["section","--definition","saved.json"]).unwrap().target,"Mars");
+    }
+    #[test]
+    fn named_surface_probes_use_verified_coordinates_and_reject_conflicts() {
+        let a=args(&["surface","--site","curiosity"]).unwrap();
+        assert_eq!(a.target,"Mars");assert_eq!(a.latitude,-4.59);assert_eq!(a.longitude,137.44);
+        for values in [vec!["surface","--site","unknown"],vec!["surface","--site","curiosity","--target","Earth"],vec!["surface","--site","curiosity","--latitude","0"],vec!["run","--site","curiosity"]] {assert!(args(&values).is_err());}
+    }
 }

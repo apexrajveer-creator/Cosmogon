@@ -42,6 +42,8 @@ pub enum SaveError {
     Corrupt(#[from] serde_json::Error),
     #[error("unsupported or mismatched terrain dataset: {0}")]
     Dataset(String),
+    #[error("unsupported or invalid habitat model: {0}")]
+    Model(String),
     #[error("migration failed: {0}")]
     Migration(String),
     #[error("i/o error: {0}")]
@@ -118,6 +120,7 @@ pub fn data_versions(u: &Universe) -> std::collections::BTreeMap<String, String>
     if u.systems.iter().any(|s|s.bodies.iter().any(|b|b.elevation_data == Some(crate::planet::terrain::ElevationData::MarsMola16))) {
         m.insert("nasa-pds-mgs-mola-megdr-16ppd".into(), crate::planet::mola::DATASET_16.into());
     }
+    if !u.habitats.is_empty() || u.next_habitat_id>0 {m.insert("cosmogon-habitat-budgets".into(),crate::habitat::MODEL.into());}
     m
 }
 
@@ -142,6 +145,22 @@ pub fn from_json(s: &str) -> Result<Universe, SaveError> {
             return Err(SaveError::Dataset("16ppd world is missing its required dataset version".into()));
         }
     }
+    if u.next_habitat_id>0 && terrain_versions.get("cosmogon-habitat-budgets").and_then(Value::as_str)!=Some(crate::habitat::MODEL) {return Err(SaveError::Model("Missing or mismatched experiment model version".into()));}
+    if !u.habitats.is_empty() {
+        if terrain_versions.get("cosmogon-habitat-budgets").and_then(Value::as_str)!=Some(crate::habitat::MODEL) {return Err(SaveError::Model("Missing or mismatched model version".into()));}
+        if u.habitats.len()>64 {return Err(SaveError::Model("More than 64 habitats".into()));}
+        let task=u.scheduler.tasks.get(crate::habitat::TASK).ok_or_else(||SaveError::Model("Missing habitat scheduler".into()))?;
+        if task.name!="habitats" || task.period!=crate::habitat::PERIOD || !task.origin.is_finite() || task.next_due()<=u.time || task.next_due()-u.time>crate::habitat::PERIOD+0.001 {return Err(SaveError::Model("Invalid habitat scheduler".into()));}
+        let mut ids=std::collections::BTreeSet::new();
+        for h in &u.habitats {
+            h.validate(u.time).map_err(SaveError::Model)?;
+            if h.id>=u.next_habitat_id || !ids.insert(h.id) || u.systems.get(h.definition.body.system as usize).and_then(|s|s.bodies.get(h.definition.body.body as usize)).is_none() {return Err(SaveError::Model("Duplicate habitat identifier or invalid world reference".into()));}
+        }
+    }
+    // Acceleration is a derived, skipped cache. Restore it before any position reader
+    // extrapolates between macro steps (illumination, climate, camera and habitat budgets).
+    // Otherwise a resumed dynamic world briefly uses linear instead of quadratic motion.
+    for sys in &mut u.systems {sys.refresh_accelerations();}
     // Tasks added by newer versions (stellar evolution) start running in older saves.
     u.ensure_star_task();
     Ok(u)
@@ -204,6 +223,16 @@ mod tests {
         b.advance_by(2.0 * SECONDS_PER_KYR);
         assert_eq!(serde_json::to_string(&a).unwrap(), serde_json::to_string(&b).unwrap());
         assert_eq!(read_header(&json).unwrap().name, "test");
+    }
+
+    #[test]
+    fn dynamic_save_restores_between_step_positions_and_acceleration_cache() {
+        let mut a=Universe::new(UniverseSettings {scenario:Scenario::SolarSystemLab,..Default::default()});a.advance_by(120.0);
+        let mut b=from_json(&to_json(&a,"dynamic").unwrap()).unwrap();
+        assert_eq!(serde_json::to_string(&a).unwrap(),serde_json::to_string(&b).unwrap());
+        for (i,body) in a.systems[0].bodies.iter().enumerate() {if body.exists() {assert_eq!(a.systems[0].body_local_position(i,a.time),b.systems[0].body_local_position(i,b.time));}}
+        assert_eq!(a.systems[0].dynamics.as_ref().unwrap().acc,b.systems[0].dynamics.as_ref().unwrap().acc);
+        a.advance_by(3600.0);b.advance_by(3600.0);assert_eq!(serde_json::to_string(&a).unwrap(),serde_json::to_string(&b).unwrap());
     }
 
     #[test]

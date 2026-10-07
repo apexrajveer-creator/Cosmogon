@@ -151,3 +151,9 @@ See [MARS_REFINEMENT](docs/MARS_REFINEMENT.md). Both verified grids are embedded
 `--terrain-section /path/to/definition.json` reopens a bounded terrain section without changing the world. It preserves the exact dataset, sphere radius and samples. Different-source study graphs/export remain available; geographic actions require a matching world. See [TERRAIN_STUDY_REPLAY](docs/TERRAIN_STUDY_REPLAY.md). Invalid automated definitions exit before GPU startup.
 
 `--panel section-map` opens the compact geographic trace view; Graph view keeps the profile and row values prominent, with setup/import collapsed.
+
+## Habitat engineering
+
+See [HABITAT_ENGINEERING](docs/HABITAT_ENGINEERING.md) for the reduced model, complete controls, advanced JSON and limitations. CLI `habitat-definition --target Mars --latitude -4.59 --longitude 137.44 --output /tmp/habitat.json` emits a protected editable setup for the chosen world. `habitat --definition /tmp/habitat.json --output /tmp/habitat-day-1` defaults to 25 actual hourly samples on a Lab world. `habitat --initial /tmp/habitat-day-1/initial.cosmo --output /tmp/habitat-replay-1` replays without adding another habitat. --initial restores an exact world; --habitat-id selects among multiple experiments.
+
+Native `--load /tmp/habitat-day-1/final.cosmo --focus Mars --panel habitat --quiet --capture /tmp/habitat.png --capture-metadata --capture-after 240 --quit` shows completed budgets. --panel habitat-controls|habitat-build|habitat-model opens other tabs; --habitat-definition FILE explicitly builds a new experiment. Automated invalid definitions and worlds are rejected before GPU startup. Ordinary loading remains asynchronous. Photo metadata retains actual reports. The same engine owns each fixed minute; high cosmic clock speeds can be CPU limited. Exports protect existing files/folders and retain exact worlds, source/model versions, numerical values and unavailable uncertainty.

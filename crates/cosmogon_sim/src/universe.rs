@@ -182,7 +182,14 @@ pub struct Universe {
     /// Star-forming clouds.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nurseries: Vec<crate::nursery::Nursery>,
+    /// User-created engineering experiments; legacy/default worlds stay byte-identical.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub habitats: Vec<crate::habitat::Habitat>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub(crate) next_habitat_id: u64,
 }
+
+fn is_zero(n:&u64)->bool {*n==0}
 
 fn life_mult(s: &UniverseSettings) -> LifeMultipliers {
     LifeMultipliers { life: s.life_rate, intelligence: s.intelligence_rate * s.life_rate }
@@ -250,6 +257,8 @@ impl Universe {
             blasts: Vec::new(),
             starships: Vec::new(),
             nurseries: Vec::new(),
+            habitats: Vec::new(),
+            next_habitat_id: 0,
         };
         let prehistory_events = u.run_prehistory(&mut biospheres);
         u.biospheres = biospheres;
@@ -532,6 +541,7 @@ impl Universe {
                 TASK_CIV => skip = Some(if self.settings.systems.civilization { self.step_civs(due, k) } else { k + 1_000_000 }),
                 TASK_ENV => self.step_environment(due),
                 crate::stellar::TASK_STARS => star_skip = Some(self.step_stars(due, k)),
+                crate::habitat::TASK => self.step_habitats(due),
                 _ => {}
             }
             self.scheduler.complete(task);

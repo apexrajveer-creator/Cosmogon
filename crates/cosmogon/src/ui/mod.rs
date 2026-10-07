@@ -12,6 +12,7 @@ mod performance;
 mod research;
 mod research_chart;
 mod surface_study;
+mod habitat;
 pub(crate) use surface_study::Study;
 mod navigation;
 mod tools;
@@ -80,6 +81,8 @@ pub struct UiState {
     pub left_tab: LeftTab,
     pub body_tab: BodyTab,
     pub surface_study_open: bool,
+    pub habitat_open: bool,
+    pub habitat_requested: Option<u64>,
     pub surface_latitude: f64,
     pub surface_longitude: f64,
     pub surface_site: Option<String>,
@@ -153,6 +156,8 @@ impl Default for UiState {
             left_tab: LeftTab::Systems,
             body_tab: BodyTab::Overview,
             surface_study_open: false,
+            habitat_open: false,
+            habitat_requested: None,
             surface_latitude: 18.65,
             surface_longitude: 226.2,
             surface_site: None,
@@ -196,7 +201,8 @@ impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UiState>()
             .init_resource::<surface_study::Study>()
-            .add_systems(Startup, init_ui_state)
+            .init_resource::<habitat::HabitatUi>()
+            .add_systems(Startup, (init_ui_state,habitat::init))
             .add_systems(EguiPrimaryContextPass, apply_theme)
             .add_systems(EguiPrimaryContextPass, (home::main_menu).after(apply_theme).run_if(in_state(AppState::MainMenu)))
             .add_systems(EguiPrimaryContextPass, (home::generating).after(apply_theme).run_if(in_state(AppState::Generating)))
@@ -208,6 +214,7 @@ impl Plugin for UiPlugin {
                     .run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)),
             )
             .add_systems(EguiPrimaryContextPass,surface_study::panel.after(research::panel).run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)))
+            .add_systems(EguiPrimaryContextPass,habitat::panel.after(surface_study::panel).run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)))
             .add_plugins(home::MenuScenePlugin);
     }
 }
@@ -239,10 +246,12 @@ fn init_ui_state(mut ui: ResMut<UiState>, args: Res<crate::args::Args>) {
         ui.surface_horizon = args.surface_horizon;
         ui.body_tab = BodyTab::Surface;
     }
+    if args.habitat_definition.is_some() {ui.habitat_open=true;}
     match args.panel.as_deref() {
         Some("create") => ui.create_open = true,
         Some("physics") => ui.physics_open = true,
         Some("surface") => ui.body_tab = BodyTab::Surface,
+        Some("habitat" | "habitat-controls" | "habitat-build" | "habitat-model") => ui.habitat_open = true,
         Some("section" | "section-map") => ui.surface_study_open = true,
         Some("alerts") => ui.alerts_open = true,
         Some("sound") => { ui.alerts_open = true; ui.alerts_tab = 1; }

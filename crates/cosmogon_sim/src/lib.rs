@@ -23,6 +23,7 @@ pub mod civ;
 pub mod collision;
 pub mod expansion;
 pub mod habitability;
+pub mod habitat;
 pub mod history;
 pub mod impact;
 pub mod intervene;
