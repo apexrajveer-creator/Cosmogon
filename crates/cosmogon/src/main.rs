@@ -16,6 +16,8 @@ mod navigation;
 mod notifications;
 mod persistence;
 mod performance;
+mod research;
+mod research_batch;
 mod render;
 mod sim;
 mod state;
@@ -68,6 +70,8 @@ fn main() -> bevy::app::AppExit {
             notifications::NotificationPlugin,
             interact::InteractPlugin,
             performance::PerformancePlugin,
+            research::ResearchPlugin,
+            research_batch::ResearchBatchPlugin,
         ))
         .run()
 }

@@ -9,6 +9,8 @@ mod hud;
 mod inspect;
 mod markers;
 mod performance;
+mod research;
+mod research_chart;
 mod navigation;
 mod tools;
 pub mod tour;
@@ -59,6 +61,7 @@ pub struct UiState {
     pub hidden: bool,
     pub debug: bool,
     pub performance_open: bool,
+    pub research_requested: Option<usize>,
     pub alerts_open: bool,
     pub alerts_tab: usize,
     pub notification_query: String,
@@ -111,6 +114,7 @@ impl Default for UiState {
             hidden: false,
             debug: false,
             performance_open: false,
+            research_requested: None,
             alerts_open: false,
             alerts_tab: 0,
             notification_query: String::new(),
@@ -165,7 +169,7 @@ impl Plugin for UiPlugin {
             .add_systems(EguiPrimaryContextPass, (home::generating).after(apply_theme).run_if(in_state(AppState::Generating)))
             .add_systems(
                 EguiPrimaryContextPass,
-                (markers::draw_markers, hud::keyboard, hud::top_bar, hud::bottom_bar, crate::timeline::timeline_strip, dock::tool_dock, inspect::left_panel, inspect::right_panel, tools::tool_windows, hud::toasts, hud::overlays_windows, performance::panel, navigation::panel, alerts::panel, tour::tour_card)
+                (markers::draw_markers, hud::keyboard, hud::top_bar, hud::bottom_bar, crate::timeline::timeline_strip, dock::tool_dock, inspect::left_panel, inspect::right_panel, tools::tool_windows, hud::toasts, hud::overlays_windows, performance::panel, navigation::panel, alerts::panel, research::panel, tour::tour_card)
                     .chain()
                     .after(apply_theme)
                     .run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)),

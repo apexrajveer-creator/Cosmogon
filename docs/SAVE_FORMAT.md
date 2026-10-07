@@ -119,3 +119,15 @@ categories; priority thresholds clamp to 1–5. Nonfinite/out-of-range gains are
 entries/read marks are derived app state and reset on load/rewind; Chronicle remains in Universe.
 Preference writes use temporary-file replacement and expose failures in the new panels. No simulation
 save fields or golden fingerprint change.
+
+## Research bundles
+
+Research recordings use a separate cosmogon-experiment schema 1 manifest and six-file directory;
+see [RESEARCH](RESEARCH.md). The initial.cosmo file is a normal complete save. New edits and
+observed events are separate JSON; CSV includes absolute simulation seconds, edit_count and unit
+keys. Existing destination directories are refused. This adds no Universe fields or save migration.
+
+Experiment definitions and batch roots have separate schema 1 formats. Definitions carry typed
+canonical-unit overrides, ordered sweeps and an optional frozen-state fingerprint; batch.json records
+prepared/running/complete/incomplete status and completed-run outcomes. base.cosmo is a normal save.
+See RESEARCH for replay compatibility and partial/cancelled export semantics.

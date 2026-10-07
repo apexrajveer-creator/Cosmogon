@@ -105,3 +105,6 @@ there · **Home** for the whole system · **Space** pause · **, .** speed · **
 
 ## License
 MIT OR Apache-2.0.
+
+Developer research controls, recorded data and reproducible studies: [RESEARCH](docs/RESEARCH.md).
+Scientific/product acceptance direction: [RESEARCH_DESIGN](docs/RESEARCH_DESIGN.md).

@@ -17,6 +17,16 @@ use cosmogon_sim::{save, Scenario, Universe, UniverseSettings};
 
 struct Args {
     cmd: String,
+    samples: usize,
+    interval_days: f64,
+    target: String,
+    output: Option<String>,
+    initial: Option<String>,
+    definition: Option<String>,
+    parameter: String,
+    sweep_start: Option<f64>,
+    sweep_end: Option<f64>,
+    sweep_runs: usize,
     seed: u64,
     seeds: u64,
     scenario: Scenario,
@@ -28,7 +38,7 @@ struct Args {
 }
 
 fn parse() -> Args {
-    let mut a = Args { cmd: "run".into(), seed: 1, seeds: 10, scenario: Scenario::Sol, years: 200_000.0, life: 0, systems: 24, min_importance: 3, save: None };
+    let mut a = Args { cmd: "run".into(), samples: 60, interval_days: 1.0, target: "Earth".into(), output: None, initial: None, definition: None, parameter: "albedo".into(), sweep_start: None, sweep_end: None, sweep_runs: 5, seed: 1, seeds: 10, scenario: Scenario::Sol, years: 200_000.0, life: 0, systems: 24, min_importance: 3, save: None };
     let mut it = std::env::args().skip(1);
     if let Some(c) = it.next() {
         a.cmd = c;
@@ -36,6 +46,16 @@ fn parse() -> Args {
     while let Some(flag) = it.next() {
         let mut val = || it.next().unwrap_or_else(|| panic!("{flag} needs a value"));
         match flag.as_str() {
+            "--samples" => a.samples = val().parse::<usize>().expect("samples").clamp(2,4096),
+            "--interval-days" => a.interval_days = val().parse().expect("interval days"),
+            "--target" => a.target = val(),
+            "--output" => a.output = Some(val()),
+            "--initial" => a.initial = Some(val()),
+            "--definition" => a.definition = Some(val()),
+            "--parameter" => a.parameter = val(),
+            "--from" => a.sweep_start = Some(val().parse().expect("sweep start")),
+            "--to" => a.sweep_end = Some(val().parse().expect("sweep end")),
+            "--runs" => a.sweep_runs = val().parse().expect("sweep runs"),
             "--seed" => a.seed = val().parse().expect("seed"),
             "--seeds" => a.seeds = val().parse().expect("seeds"),
             "--years" => a.years = val().parse().expect("years"),
@@ -71,11 +91,14 @@ fn settings(a: &Args, seed: u64) -> UniverseSettings {
 fn main() {
     let a = parse();
     match a.cmd.as_str() {
+        "models" => println!("{}", serde_json::to_string_pretty(&serde_json::json!({"format":"cosmogon-model-registry", "schema_version":1, "models":cosmogon_sim::research::PhysicsModelRegistry::models(), "sources":cosmogon_sim::research::SCIENTIFIC_SOURCES, "parameters":cosmogon_sim::research::PARAMETERS})).unwrap()),
+        "experiment" => { if let Err(e) = experiment(&a) { eprintln!("Experiment failed: {e}"); std::process::exit(1); } }
+        "sweep" | "replay" => { if let Err(e) = batch(&a) { eprintln!("Batch failed: {e}"); std::process::exit(1); } }
         "run" => run(&a),
         "check" => check(&a),
         "survey" => survey(&a),
         "profile" => profile(&a),
-        c => eprintln!("unknown command {c}; use run | check | survey"),
+        c => { eprintln!("unknown command {c}; use run | check | survey | profile | models | experiment | sweep | replay"); std::process::exit(1); }
     }
 }
 
@@ -180,4 +203,61 @@ fn profile(a: &Args) {
             .collect();
         println!("{:>14} {:>8.1?} steps {:>9}  {}", format_duration(u.time - u.start_time), t0.elapsed(), r.steps, civs.join(" | "));
     }
+}
+
+/// Offline observer samples use exact requested simulation times; there is no renderer.
+fn experiment(a: &Args) -> Result<(), String> {
+    use cosmogon_sim::research::Experiment;
+    if !a.interval_days.is_finite() || !(1e-6..=3652.5).contains(&a.interval_days) { return Err("Choose 0.000001–3652.5 days between samples".into()); }
+    let output = a.output.as_deref().ok_or("experiment requires --output NEW_DIRECTORY")?;
+    if std::path::Path::new(output).exists() { return Err("The output directory already exists; choose a new path".into()); }
+    let mut u = initial_universe(a)?;
+    let t = find_target(&u,&a.target).ok_or_else(|| format!("No object named {}",a.target))?;
+    let mut recording = Experiment::new(&u,t,a.samples)?;
+    recording.sampling_policy = format!("Offline observer: uniform requested interval {} days (86400 seconds per day)",a.interval_days);
+    let start = u.time;
+    for i in 1..a.samples {
+        u.advance_to(start + i as f64 * a.interval_days * 86400.0,None,None);
+        recording.capture(&u)?;
+    }
+    recording.stop_reason = Some("Requested offline sample count reached".into());
+    recording.export(std::path::Path::new(output))?;
+    println!("Recorded {} states of {} to {}",recording.samples.len(),recording.target_name,output);
+    Ok(())
+}
+fn initial_universe(a: &Args) -> Result<Universe, String> {
+    if let Some(path) = &a.initial { save::read_file(std::path::Path::new(path)).map_err(|e| e.to_string()) }
+    else { Ok(Universe::new(settings(a,a.seed))) }
+}
+fn batch(a: &Args) -> Result<(), String> {
+    use cosmogon_sim::research::{ExperimentDefinition, ParameterSweep, PARAMETERS};
+    let output = a.output.as_deref().ok_or("Batch requires --output NEW_DIRECTORY")?;
+    let u = initial_universe(a)?;
+    let definition = if a.cmd == "replay" {
+        if a.initial.is_none() { return Err("Replay requires --initial base.cosmo and --definition definition.json".into()); }
+        ExperimentDefinition::read(std::path::Path::new(a.definition.as_deref().ok_or("Replay requires --definition definition.json")?))?
+    } else {
+        let target = find_target(&u,&a.target).ok_or_else(||format!("No object named {}",a.target))?;
+        let parameter = PARAMETERS.iter().find(|p|p.key==a.parameter || format!("{:?}",p.id).eq_ignore_ascii_case(&a.parameter)).ok_or("Unknown parameter; use a canonical key from models")?.id;
+        let mut d = ExperimentDefinition::new(target);
+        d.initial_fingerprint = Some(cosmogon_sim::research::state_fingerprint(&u)?);
+        d.name = format!("{} {} sweep",a.target,parameter.descriptor().name);
+        d.samples = a.samples; d.interval_s = a.interval_days * 86400.0;
+        d.sweep = Some(ParameterSweep { target, parameter, values: ExperimentDefinition::linear_values(a.sweep_start.ok_or("Sweep requires --from")?,a.sweep_end.ok_or("Sweep requires --to")?,a.sweep_runs)? });
+        d
+    };
+    let mut last = 0;
+    let results = cosmogon_sim::research::run_batch(&u,&definition,std::path::Path::new(output),||false,|p| {
+        if p.completed_runs>last { last=p.completed_runs; eprintln!("Completed {} / {} runs",last,p.total_runs); }
+    })?;
+    println!("Exported {} independent runs to {}",results.len(),output);
+    Ok(())
+}
+fn find_target(u: &Universe, name: &str) -> Option<cosmogon_sim::research::ResearchTarget> {
+    use cosmogon_sim::research::ResearchTarget;
+    for (s,sys) in u.systems.iter().enumerate() {
+        if sys.star.name.eq_ignore_ascii_case(name) { return Some(ResearchTarget::Star(s as u32)); }
+        if let Some((b,_)) = sys.bodies.iter().enumerate().find(|(_,b)| b.exists() && b.name.eq_ignore_ascii_case(name)) { return Some(ResearchTarget::Body(cosmogon_sim::BodyRef { system:s as u32,body:b as u32 })); }
+    }
+    None
 }

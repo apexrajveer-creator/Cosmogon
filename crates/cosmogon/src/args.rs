@@ -54,6 +54,11 @@ pub struct Args {
     pub capture_metadata: bool,
     pub sound_mode: Option<crate::audio::SoundMode>,
     pub quiet: bool,
+    pub research_export: Option<String>,
+    pub research_samples: usize,
+    pub research_every: usize,
+    pub research_plan: Option<String>,
+    pub research_batch: Option<String>,
 }
 
 impl Args {
@@ -62,7 +67,7 @@ impl Args {
     }
 
     fn parse_from(args: impl Iterator<Item = String>) -> Self {
-        let mut a = Args { capture_after: 90, profile_frames: 600, profile_warmup: 120, ..Default::default() };
+        let mut a = Args { capture_after: 90, profile_frames: 600, profile_warmup: 120, research_samples: 60, research_every: 20, ..Default::default() };
         let mut it = args;
         while let Some(flag) = it.next() {
             let mut val = || it.next().unwrap_or_default();
@@ -110,6 +115,11 @@ impl Args {
                     "hybrid" => Some(crate::audio::SoundMode::Hybrid),
                     _ => None,
                 },
+                "--research-export" => a.research_export = Some(val()),
+                "--research-plan" => a.research_plan = Some(val()),
+                "--research-batch" => a.research_batch = Some(val()),
+                "--research-samples" => a.research_samples = val().parse::<usize>().unwrap_or(60).clamp(2, 4096),
+                "--research-every" => a.research_every = val().parse::<usize>().unwrap_or(20).clamp(1, 600),
                 "--profile" => a.profile = Some(val()),
                 "--profile-frames" => a.profile_frames = val().parse::<usize>().unwrap_or(600).clamp(1, 3600),
                 "--profile-warmup" => a.profile_warmup = val().parse::<usize>().unwrap_or(120).min(36_000),
@@ -125,7 +135,7 @@ impl Args {
                 f => eprintln!("ignoring unknown argument {f}"),
             }
         }
-        if a.profile.is_some() && a.new.is_none() && a.load.is_none() && !a.continue_latest {
+        if (a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
             a.new = Some(Scenario::SolarSystemLab);
         }
         a
@@ -135,6 +145,13 @@ impl Args {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn research_limits_and_default_scene_are_bounded() {
+        let a = Args::parse_from(["--research-export", "out", "--research-samples", "99999", "--research-every", "0"].into_iter().map(String::from));
+        assert_eq!(a.research_samples, 4096); assert_eq!(a.research_every, 1);
+        assert!(matches!(a.new, Some(Scenario::SolarSystemLab)));
+    }
 
     #[test]
     fn profile_limits_are_bounded_and_a_scene_is_selected() {

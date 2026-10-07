@@ -161,6 +161,8 @@ fn record(
     pending: Query<(), With<PendingBake>>,
     windows: Query<&Window>,
     mut exit: MessageWriter<AppExit>,
+    research: Option<Res<crate::research::Research>>,
+    batch: Option<Res<crate::research_batch::ResearchBatch>>,
 ) {
     perf.observing_frames += 1;
     let automatic = args.profile.is_some() && !perf.automatic_done;
@@ -241,7 +243,7 @@ fn record(
         });
         if ready {
             perf.automatic_done = true;
-            if args.quit_after_capture && (args.capture.is_none() || failed) {
+            if args.quit_after_capture && (failed || (args.capture.is_none() && (args.research_export.is_none() || research.as_ref().is_some_and(|r| r.automatic_done)) && (args.research_batch.is_none() || batch.as_ref().is_some_and(|b|b.automatic_done)))) {
                 exit.write(if failed { AppExit::error() } else { AppExit::Success });
             }
         }

@@ -144,6 +144,7 @@ pub fn top_bar(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut si
                 }
                 ui.menu_button(egui::RichText::new(icon::EYE).size(17.0), |ui| {
                     ui.label(egui::RichText::new("SHOW").size(10.0).color(ACCENT));
+                    if ui.button("Control Panel & Research").clicked() { ui_state.research_requested = Some(0); ui.close(); }
                     ui.checkbox(&mut ui_state.performance_open, "Performance");
                     ui.checkbox(&mut ui_state.camera_open, "Camera & Photo");
                     ui.checkbox(&mut ui_state.alerts_open, "Sound & Alerts");

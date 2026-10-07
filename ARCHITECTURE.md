@@ -117,3 +117,11 @@ routed history. Routing and severity labels do not create a new simulation hazar
 spawn and to active sinks. Realistic mode disables external cinematic effects; Hybrid softens them.
 Leaving Observing removes all session audio. Mode/mix/category preferences serialize only in app
 settings. New simulated environment audio will require explicit context/model producers.
+
+## Shared research adapters
+
+cosmogon_sim::research owns static parameter/model/source descriptors, read-only readings,
+validated adapters to existing Edit commands and bounded observer recordings. It has no Bevy
+dependency and is shared with the CLI. Native research state/UI owns selection snapshots, real-time
+recording cadence and export feedback; it edits only through Sim::edit. Registries/recordings are
+not serialized into Universe. See [RESEARCH](docs/RESEARCH.md) for limits and the bundle contract.

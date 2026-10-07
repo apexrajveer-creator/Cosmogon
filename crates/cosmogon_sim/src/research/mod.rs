@@ -1,0 +1,11 @@
+//! Read-only scientific descriptions and parameter adapters shared by native UI and tools.
+//! Registries are not serialized into Universe; edits use the existing sandbox journal.
+mod definition;
+mod parameters;
+mod recording;
+mod registry;
+
+pub use definition::*;
+pub use parameters::*;
+pub use recording::*;
+pub use registry::*;

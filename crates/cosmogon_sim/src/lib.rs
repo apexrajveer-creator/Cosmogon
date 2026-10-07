@@ -34,6 +34,7 @@ pub mod params;
 pub mod planet;
 pub mod present_day;
 pub mod rng;
+pub mod research;
 pub mod sandbox;
 pub mod save;
 pub mod scheduler;

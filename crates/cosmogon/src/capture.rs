@@ -81,7 +81,7 @@ fn take_photo(mut commands: Commands, mut photo: ResMut<Photo>, mut ui: ResMut<c
 }
 
 #[allow(clippy::too_many_arguments)]
-fn capture(mut commands: Commands, args: Res<Args>, mut frames: Local<u32>, mut done: Local<bool>, mut exit: MessageWriter<AppExit>, state: Res<State<AppState>>, perf: Res<crate::performance::Performance>, outcome: Res<CaptureOutcome>, sim: Option<Res<crate::sim::Sim>>, rig: Res<crate::camera::CameraRig>, settings: Res<crate::persistence::UserSettings>) {
+fn capture(mut commands: Commands, args: Res<Args>, mut frames: Local<u32>, mut done: Local<bool>, mut exit: MessageWriter<AppExit>, state: Res<State<AppState>>, perf: Res<crate::performance::Performance>, research: Res<crate::research::Research>, batch: Res<crate::research_batch::ResearchBatch>, outcome: Res<CaptureOutcome>, sim: Option<Res<crate::sim::Sim>>, rig: Res<crate::camera::CameraRig>, settings: Res<crate::persistence::UserSettings>) {
     let Some(path) = &args.capture else { return };
     // Wait for the requested universe rather than capturing the menu.
     if (args.new.is_some() || args.load.is_some() || args.continue_latest) && *state.get() != AppState::Observing {
@@ -96,7 +96,7 @@ fn capture(mut commands: Commands, args: Res<Args>, mut frames: Local<u32>, mut 
     }
     if *done && args.quit_after_capture && outcome.0.is_none() && *frames > args.capture_after.saturating_add(2000) { error!("Screenshot capture timed out"); exit.write(AppExit::error()); return; }
     if *done && args.quit_after_capture && outcome.0 == Some(false) { exit.write(AppExit::error()); return; }
-    if *done && args.quit_after_capture && (args.profile.is_none() || perf.automatic_done) && *frames > args.capture_after + 20 && outcome.0 == Some(true) {
+    if *done && args.quit_after_capture && (args.profile.is_none() || perf.automatic_done) && (args.research_export.is_none() || research.automatic_done) && (args.research_batch.is_none() || batch.automatic_done) && *frames > args.capture_after + 20 && outcome.0 == Some(true) {
         exit.write(AppExit::Success);
     }
 }

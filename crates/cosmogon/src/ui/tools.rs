@@ -54,6 +54,7 @@ pub enum Cmd {
     OpenCreate,
     OpenLaunch,
     OpenPhysics,
+    OpenResearch(usize),
     OpenPerformance,
     OpenCamera(usize),
     OpenAlerts(usize),
@@ -400,6 +401,11 @@ pub fn tool_windows(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, m
             };
             add("Create object…".into(), Act::Command(Cmd::OpenCreate));
             add("Launch an asteroid / comet…".into(), Act::Command(Cmd::OpenLaunch));
+            add("Control Panel: searchable parameters and dependencies".into(), Act::Command(Cmd::OpenResearch(0)));
+            add("Research: models, assumptions and validation".into(), Act::Command(Cmd::OpenResearch(1)));
+            add("Research: scientific sources and value states".into(), Act::Command(Cmd::OpenResearch(2)));
+            add("Research: plots, CSV and experiment export".into(), Act::Command(Cmd::OpenResearch(3)));
+            add("Research: frozen experiments and parameter sweeps".into(), Act::Command(Cmd::OpenResearch(4)));
             add("Physics settings".into(), Act::Command(Cmd::OpenPhysics));
             add("Camera: free flight and navigation controls".into(), Act::Command(Cmd::OpenCamera(0)));
             add("Photo: exposure, lens and colour".into(), Act::Command(Cmd::OpenCamera(1)));
@@ -548,6 +554,7 @@ pub fn run_command(c: Cmd, s: &mut UiState, sim: &mut Sim, settings: &mut UserSe
         Cmd::OpenCreate => s.create_open = true,
         Cmd::OpenLaunch => sim.tool = Tool::Launch(LaunchSpec::default()),
         Cmd::OpenPhysics => s.physics_open = true,
+        Cmd::OpenResearch(tab) => s.research_requested = Some(tab),
         Cmd::OpenPerformance => s.performance_open = true,
         Cmd::OpenCamera(tab) => { s.camera_open = true; s.camera_tab = tab; }
         Cmd::OpenAlerts(tab) => { s.alerts_open = true; s.alerts_tab = tab; }

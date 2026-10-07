@@ -20,6 +20,16 @@ viewpoint controls. G detaches; F returns to the selected object. No universe sc
 fingerprint change. Current branch verification is in VALIDATION; the 173-test figure below is
 the released baseline.
 
+The next build adds [research controls and recordings](docs/RESEARCH.md): searchable typed parameters,
+model/source context, explicit data states, live plots and protected CSV/reproducibility bundles.
+View → Control Panel & Research opens the workspace; developer --panel control|models|sources|plots
+supports captures; experiments opens frozen-state studies. cosmogon-cli models, experiment,
+sweep and replay expose the same engine-independent registry
+and observer/definition runner. The owner additionally requires autonomous feature improvement
+through primary-source research and product reasoning across student-to-researcher use; see
+[RESEARCH_DESIGN](docs/RESEARCH_DESIGN.md). Keep building successive connected slices. This does not change Universe/save state or the golden fingerprint. Research verification:
+[RESEARCH_VALIDATION](docs/RESEARCH_VALIDATION.md), 208 passed plus 1 existing ignored.
+
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
   [GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases) with macOS, Windows and Linux builds.
@@ -56,6 +66,7 @@ Map of the 1.0 features (start here when changing one):
 | Timeline and rewind | — | `timeline.rs` |
 | Camera, free flight, viewpoints | — | `camera.rs`, `navigation.rs`, `ui/navigation.rs` |
 | Photo mode, lens/colour, dev capture | — | `capture.rs`, `navigation.rs`, `ui/navigation.rs` |
+| Research controls/models/sources/CSV | `research/` | `research.rs`, `ui/research.rs`; CLI `experiment`, `models` |
 | Performance recordings | — | `performance.rs`, `ui/performance.rs` |
 | Sound modes/mixer | — | `audio.rs`, `ui/alerts.rs` (synthesised; no audio files) |
 | Notification inbox/routing | — | `notifications.rs`, `ui/alerts.rs`, `sim.rs` |

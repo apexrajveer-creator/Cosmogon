@@ -264,6 +264,7 @@ pub fn right_panel(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mu
                         fly = true;
                     }
                 });
+                if ui.small_button("Control Panel & Research").clicked() { ui_state.research_requested = Some(0); }
                 star_card(ui, u, s, &mut ctx);
             }
             Target::Body(r) => {
@@ -289,6 +290,7 @@ pub fn right_panel(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mu
                     ui.colored_label(DANGER, format!("{how} — {}", format_date(rm.time, u.start_time, u.gregorian())));
                     return;
                 }
+                if ui.small_button("Control Panel & Research").clicked() { ui_state.research_requested = Some(0); }
                 for w in warnings(u, r) {
                     ui.colored_label(DANGER, format!("⚠ {w}"));
                 }
@@ -353,15 +355,20 @@ fn star_card(ui: &mut egui::Ui, u: &Universe, s: u32, ctx: &mut Ctx) {
     let st = &sys.star;
     let t = u.time;
     ui.label(egui::RichText::new(format!("{} star · {}", st.spectral_type(t), st.phase(t).label())).color(MUTED));
-    let measured = sys.bodies.iter().any(|b| b.real);
-    let q = |user: bool| Some(if user { Quality::UserModified } else if measured { Quality::Measured } else { Quality::Procedural });
+    let q = |id| Some(match cosmogon_sim::research::star_reading_state(u,s,id).0 {
+        cosmogon_sim::research::DataState::UserModified => Quality::UserModified,
+        cosmogon_sim::research::DataState::Estimated => Quality::Estimated,
+        cosmogon_sim::research::DataState::Measured => Quality::Measured,
+        cosmogon_sim::research::DataState::Modelled => Quality::Derived,
+        _ => Quality::Procedural,
+    });
+    ui.label(egui::RichText::new(cosmogon_sim::research::star_reading_state(u,s,cosmogon_sim::research::ParameterId::StarMass).1).small().color(MUTED));
     let derived = Some(Quality::Derived);
     egui::Grid::new("star").num_columns(2).striped(true).show(ui, |ui| {
-        let user = u.edits.iter().any(|e| matches!(&e.edit, Edit::SetStar { system, .. } if *system == s));
-        if let Some(v) = row(ui, ctx, "Mass", "star_mass", st.mass * SOLAR_MASS, Quantity::Mass, 3, q(user), true) {
+        if let Some(v) = row(ui, ctx, "Mass", "star_mass", st.mass * SOLAR_MASS, Quantity::Mass, 3, q(cosmogon_sim::research::ParameterId::StarMass), true) {
             ctx.edits.push(Edit::SetStar { system: s, property: StarProperty::Mass(v / SOLAR_MASS) });
         }
-        if let Some(v) = row(ui, ctx, "Age", "star_age", st.age(t), Quantity::Duration, 3, q(user), true) {
+        if let Some(v) = row(ui, ctx, "Age", "star_age", st.age(t), Quantity::Duration, 3, q(cosmogon_sim::research::ParameterId::StarAge), true) {
             ctx.edits.push(Edit::SetStar { system: s, property: StarProperty::Age(v) });
         }
         ui.label(egui::RichText::new("Metallicity [Fe/H]").color(MUTED));

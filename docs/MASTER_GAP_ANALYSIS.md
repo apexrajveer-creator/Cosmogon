@@ -11,7 +11,7 @@ The old `GAP_ANALYSIS.md` describes the pre-sandbox baseline and is historical.
 | 3 Camera + UX | Orbit/track, free flight, speed/inertia/sensitivity, object-relative viewpoints, command palette, inspector | Key rebinding, cinematic paths, complete reference-frame precision; notification foundation is present in phase 5 |
 | 4 Photo | Clean native PNG, FOV/exposure/warmth/saturation, separate preferences, camera/dataset sidecars | DOF, advanced grading, high-resolution/tiled export, camera paths/video |
 | 5 Audio/alerts | Realistic/cinematic/hybrid modes; music/effects/alert mix; inbox, routing, quiet settings and optional pause | Physical environment/interior/weather audio, custom sounds, durable read marks and new event producers |
-| 6 Solar sandbox | Horizons states, N-body, edits, throw, launch, predictions, undo | Model-registry and research control completeness; validation of additional regimes |
+| 6 Solar sandbox | Horizons states, N-body, edits, throw, launch, predictions, undo | Shared parameter/model registry, source context and observer export built; broader control/regime validation remains |
 | 7–8 Mars rendering/data | Quadtree surfaces, atmosphere; Earth relief pipeline | Licensed Mars terrain ingest/versioning/LOD, mission sites, surface travel and observed/generated labels |
 | 9 Settlement | Civilization sites/resources | Actual engineering state/balances, habitat/power/water/air/thermal, hazards and explainable causes |
 | 10 Supply chain | Abstract missions and travel | Vehicle design and dynamics, cargo, entry/landing, integration with the same settlement state |
@@ -20,7 +20,7 @@ The old `GAP_ANALYSIS.md` describes the pre-sandbox baseline and is historical.
 | 13 Real universe | Embedded Horizons and ingestion script | Catalogue registry, spatial index, streaming, dataset manager and rights review |
 | 14 Exotic universe | Stellar evolution, compact-object visuals, nurseries | Per-model validation and advanced effects; no wholesale reimplementation |
 | 15 Interstellar | Reduced generation ships, terraforming, Dyson swarm | Richer shared consequences, branching civilizations and communication models |
-| 16 Research | CLI, diagnostics and some graphs | PhysicsModelRegistry, uncertainty, experiments/sweeps, trajectories/CSV/manifests |
+| 16 Research | Typed model/source/parameter registry, native controls/interactive plots, observer CSV/initial-state bundles, frozen definitions/replay/sweeps and guided comparisons | Broader comparison workflows, uncertainty propagation and independent model validation |
 | 17–19 Polish/product | Native distribution pipeline and broad usable app | Cinematics/audio/accessibility/control completeness, signing, dataset delivery, product QA |
 
 ## Immediate sequence
@@ -32,7 +32,7 @@ The old `GAP_ANALYSIS.md` describes the pre-sandbox baseline and is historical.
    Terrain follows nearby bodies. Input rebinding, swept collision and cinematic paths remain.
 3. **Photo foundation (built, partial phase):** presentation-only lens/colour settings, separate
    persistence, clean PNG action and metadata sidecars. No DOF or tiled/high-resolution output yet.
-4. **Research truth and controls:** typed model/source registries, provenance repair and consistent
+4. **Research truth and controls (built, partial phase):** typed model/source registries, provenance repair and consistent
    parameter descriptors before wide editing UI. Add only models backed by sources/validation.
 5. **Notification/audio foundation (built, partial phase):** persisted category routing, thresholds,
    quiet options, searchable recent inbox and optional pauses; mode/channel mixer with realistic

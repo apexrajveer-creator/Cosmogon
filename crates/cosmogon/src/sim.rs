@@ -445,7 +445,7 @@ fn start_from_args(mut commands: Commands, args: Res<Args>, mut next: ResMut<Nex
     if args.continue_latest {
         if let Some(l) = persistence::list_sandboxes().into_iter().next() {
             begin_open_sandbox(&mut commands, &mut next, l.manifest, None);
-        } else if args.quit_after_capture && (args.profile.is_some() || args.capture.is_some()) {
+        } else if args.quit_after_capture && (args.profile.is_some() || args.capture.is_some() || args.research_export.is_some() || args.research_batch.is_some()) {
             error!("Cannot start automated run: no saved sandbox to continue");
             exit.write(AppExit::error());
         }
@@ -491,7 +491,7 @@ fn poll_pending(mut commands: Commands, pending: Option<ResMut<PendingUniverse>>
                 next.set(AppState::Observing);
             }
             Err(e) => {
-                if args.quit_after_capture && (args.profile.is_some() || args.capture.is_some()) {
+                if args.quit_after_capture && (args.profile.is_some() || args.capture.is_some() || args.research_export.is_some() || args.research_batch.is_some()) {
                     error!("Cannot start automated run: {e}");
                     exit.write(AppExit::error());
                 }

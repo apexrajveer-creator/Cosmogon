@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — native exploration, photography, sound and notifications
+## Unreleased — native exploration and research
 
 * Adopt the owner's master development directive; add current-state audit, evidence/limitations,
   product vision, source/asset inventories and active phased gap analysis while preserving historical plans.
@@ -34,6 +34,19 @@
   on exit. The disk image remains standalone.
 * Propagate Bevy AppExit from the native entry point so failed developer exports, captures and
   loads return a nonzero process status. Native verification exposed the previously discarded status.
+* Add searchable native research controls over 36 shared typed parameters, dependency/formula info,
+  locked derived values and undoable input changes. Read-only reference views retain protection.
+* Add seven model descriptions with methods, assumptions, fidelity/cost, error limits and primary
+  sources; distinguish estimated catalogue inputs from procedural stars and modelled outputs.
+* Add bounded native observer plots and protected six-file CSV/initial-state/edit/event/model bundles.
+  Paused edits have distinct edit_count rows; rewind stops a recording. Missing uncertainty is null.
+* Add CLI model registry export and uniform-simulation-time experiments, plus coordinated native
+  developer research/capture/profile exports. Add frozen-state definition replay and bounded independent parameter sweeps; no independent scientific validation claimed.
+* Add parent-relative orbital measurements and bounded dynamic-particle Newtonian diagnostics.
+  Charts support nearest-state inspection, zoom/pan, log scale, fractional changes and event markers.
+* Add cancellable native background studies with guided questions, saved prepared definitions,
+  ordered sweep values and canonical-unit outcome comparison. CLI sweep/replay shares the runner.
+  Frozen-state fingerprints reject a changed base; incomplete batches retain completed runs.
 * Simulation state and save format unchanged; **golden fingerprint unchanged**.
 
 ## 1.0.0 — The whole universe (2026-10-04)

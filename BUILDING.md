@@ -81,3 +81,19 @@ The disk image contains a standalone app. This avoids Finder metadata being re-a
 file-provider folders during or after signing. Apple documents the forbidden metadata in
 [QA1940](https://developer.apple.com/library/archive/qa/qa1940/_index.html). Temporary staging is
 removed on success or failure. Local builds are ad-hoc signed unless a Developer ID is supplied.
+
+## Research recordings
+
+See [RESEARCH](docs/RESEARCH.md) for native controls, provenance, scientific limits and bundle layout.
+
+```sh
+./target/release/cosmogon-cli experiment --scenario lab --target Earth --samples 32 \
+  --interval-days 1 --output /tmp/earth-research-1
+./target/release/cosmogon --new lab --focus Earth --speed 0 --quiet --panel plots \
+  --research-export /tmp/native-research-1 --research-samples 60 --research-every 20 \
+  --capture /tmp/research.png --capture-after 1300 --quit
+```
+
+Use new output directories. Native cadence counts app frames; CLI cadence requests simulation days.
+`--panel control|models|sources|plots` opens a research tab. Models prints registry JSON without
+creating a universe. No additional installation or network service is required.
