@@ -45,4 +45,6 @@ Nothing from that candidate is included in the current product. A shaded-relief 
 interchangeable height grid. Local stereo/mission products and their rights/registration need separate
 review; even a finer global DEM does not supply landing safety, engineering slopes or current rover paths.
 
-This section is building direction, not a claim of implemented transect/profile functionality.
+The shared section engine, native graph/row/probe path, protected export and headless replay are now
+implemented; see [MARS_TERRAIN_STUDIES](MARS_TERRAIN_STUDIES.md). Native definition import, durable
+study preferences and finer terrain delivery remain unimplemented. Validation is recorded separately.

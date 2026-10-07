@@ -11,6 +11,7 @@ mod markers;
 mod performance;
 mod research;
 mod research_chart;
+mod surface_study;
 mod navigation;
 mod tools;
 pub mod tour;
@@ -77,6 +78,7 @@ pub struct UiState {
     pub pause_menu: bool,
     pub left_tab: LeftTab,
     pub body_tab: BodyTab,
+    pub surface_study_open: bool,
     pub surface_latitude: f64,
     pub surface_longitude: f64,
     pub surface_site: Option<String>,
@@ -149,6 +151,7 @@ impl Default for UiState {
             pause_menu: false,
             left_tab: LeftTab::Systems,
             body_tab: BodyTab::Overview,
+            surface_study_open: false,
             surface_latitude: 18.65,
             surface_longitude: 226.2,
             surface_site: None,
@@ -191,6 +194,7 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UiState>()
+            .init_resource::<surface_study::Study>()
             .add_systems(Startup, init_ui_state)
             .add_systems(EguiPrimaryContextPass, apply_theme)
             .add_systems(EguiPrimaryContextPass, (home::main_menu).after(apply_theme).run_if(in_state(AppState::MainMenu)))
@@ -202,6 +206,7 @@ impl Plugin for UiPlugin {
                     .after(apply_theme)
                     .run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)),
             )
+            .add_systems(EguiPrimaryContextPass,surface_study::panel.after(research::panel).run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)))
             .add_plugins(home::MenuScenePlugin);
     }
 }
@@ -237,6 +242,7 @@ fn init_ui_state(mut ui: ResMut<UiState>, args: Res<crate::args::Args>) {
         Some("create") => ui.create_open = true,
         Some("physics") => ui.physics_open = true,
         Some("surface") => ui.body_tab = BodyTab::Surface,
+        Some("section") => ui.surface_study_open = true,
         Some("alerts") => ui.alerts_open = true,
         Some("sound") => { ui.alerts_open = true; ui.alerts_tab = 1; }
         Some("routing") => { ui.alerts_open = true; ui.alerts_tab = 2; }

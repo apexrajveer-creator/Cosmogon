@@ -2,6 +2,8 @@
 
 ## Unreleased — native exploration and research
 
+- Add shared deterministic MOLA terrain sections between historical/custom endpoints, actual native height-distance graphs and row-to-probe/travel actions. Protect source-supported CSV/definition/JSON exports and headless replay; retain source-cell weights/counts, checksums, unavailable uncertainty and overview/geodesic limits. No Universe or golden change.
+
 - Add four cited historical Mars landing references, native surface selection/markers, shared f64 geographic camera transforms, radial-altitude travel and explicit snapshot/tracked modes. Tracked viewpoint anchors follow spin/translation and restore lens/site identity without rewinding; version-1 libraries still load and unknown versions remain protected. Native/headless probe JSON and photo sidecars retain provenance/registration limits. No Universe schema or golden change.
 
 - New Solar System worlds attach NASA PDS MOLA 4-pixels/degree observed-derived Mars relief with observation-count coverage, source/checksum metadata and native/headless coordinate probes. Mars no longer uses generated elevation; colours/climate/fine shading remain generated/modelled. Existing saves keep their stored terrain identifier. This deliberate new-state change re-pins the deterministic golden fingerprint from `0x579903fd05a28945` to `0xf2c4140a45ae509b`.

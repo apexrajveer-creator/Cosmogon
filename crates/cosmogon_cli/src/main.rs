@@ -25,6 +25,8 @@ struct Args {
     recording: Option<String>,
     reference: Option<String>,
     site: Option<String>,
+    from_site: Option<String>,
+    to_site: Option<String>,
     latitude: f64,
     longitude: f64,
     definition: Option<String>,
@@ -59,6 +61,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         recording: None,
         reference: None,
         site: None,
+        from_site: None,
+        to_site: None,
         latitude: 0.0,
         longitude: 0.0,
         definition: None,
@@ -81,6 +85,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut explicit_scenario = false;
     let mut explicit_target = false;
     let mut explicit_coordinates = false;
+    let mut explicit_samples = false;
     if let Some(c) = it.next() {
         a.cmd = c;
     }
@@ -99,10 +104,16 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
                 .ok_or_else(|| format!("{flag} needs a value"))
         };
         match flag.as_str() {
-            "--samples" => a.samples = number::<usize>(val()?, &flag)?.clamp(2, 4096),
+            "--samples" => {
+                let requested=number::<usize>(val()?,&flag)?;explicit_samples=true;
+                if a.cmd=="section" && !(2..=1024).contains(&requested) {return Err("Section samples must be between 2 and 1024".into());}
+                a.samples=requested.clamp(2,4096);
+            },
             "--interval-days" => a.interval_days = number(val()?, &flag)?,
             "--target" => { a.target = val()?; explicit_target = true; },
             "--site" => a.site = Some(val()?),
+            "--from-site" => a.from_site = Some(val()?),
+            "--to-site" => a.to_site = Some(val()?),
             "--output" => a.output = Some(val()?),
             "--latitude" => { a.latitude = number(val()?, &flag)?; explicit_coordinates = true; },
             "--longitude" => { a.longitude = number(val()?, &flag)?; explicit_coordinates = true; },
@@ -144,6 +155,13 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             unknown => return Err(format!("Unknown flag {unknown}; use --help")),
         }
     }
+    if a.cmd != "section" && (a.from_site.is_some() || a.to_site.is_some()) {return Err("--from-site and --to-site are terrain section options".into());}
+    if a.cmd == "section" {
+        if explicit_target && !a.target.eq_ignore_ascii_case("Mars") {return Err("Terrain sections require Mars with the pinned MOLA field".into());}
+        a.target="Mars".into();
+        if explicit_coordinates {return Err("For custom section endpoints supply a section --definition file".into());}
+        if a.definition.is_some() && (explicit_samples || a.from_site.is_some() || a.to_site.is_some()) {return Err("Choose a saved section definition or endpoint/sample flags".into());}
+    }
     if let Some(id) = &a.site {
         if a.cmd != "surface" { return Err("--site is a surface probe option".into()); }
         let site = cosmogon_sim::planet::landing::find(id).ok_or_else(||format!("Unknown landing reference: {id}"))?;
@@ -170,6 +188,7 @@ fn help() {
     println!(
         r#"Cosmogon headless tools
   surface --target Mars          Sample authoritative MOLA height and source-cell coverage JSON
+  section [--output NEW_DIR]      Calculate/export a source-supported MOLA terrain section
   sites                          Print historical landing references, sources and registration limits
   datasets                       Print embedded MOLA source/version/checksum metadata
   models                         Print model/source/parameter registry JSON
@@ -182,6 +201,10 @@ fn help() {
 
 Surface coordinates: --latitude -90..90 --longitude -360..360 (degrees, east positive)
 Or: surface --site perseverance|curiosity|insight|viking-1 (historical touchdown, not current rover position)
+Sections: --from-site curiosity --to-site insight --samples 2..1024
+  Or --definition definition.json; keeps its chosen reference sphere radius and samples.
+  Named sections use the selected Mars body radius (default Sol); --initial can supply a saved state.
+  Exports contain definition.json, section.json, samples.csv and sources.json. No local-route safety claim.
 
 Research inputs:
   --initial BASE.cosmo           Use a complete saved state; overrides scenario/seed
@@ -224,6 +247,7 @@ fn main() {
     };
     match a.cmd.as_str() {
         "help" => help(),
+        "section" => {if let Err(e)=section(&a) {eprintln!("Terrain section failed: {e}");std::process::exit(1);}},
         "sites" => println!("{}", serde_json::to_string_pretty(&cosmogon_sim::planet::landing::registry()).unwrap()),
         "datasets" => println!("{}", cosmogon_sim::planet::mola::METADATA),
         "surface" => { if let Err(e) = surface(&a) { eprintln!("Surface probe failed: {e}"); std::process::exit(1); } }
@@ -568,6 +592,12 @@ mod argument_tests {
         assert_eq!(args(&["sweep", "--help"]).unwrap().cmd, "help");
     }
     #[test]
+    fn terrain_sections_reject_ignored_parameters_and_keep_definition_settings() {
+        for values in [vec!["section","--samples","1"],vec!["section","--samples","1025"],vec!["section","--definition","saved.json","--samples","20"],vec!["section","--latitude","1"],vec!["section","--target","Earth"],vec!["run","--from-site","curiosity"]] {assert!(args(&values).is_err());}
+        assert_eq!(args(&["section","--from-site","curiosity","--to-site","insight","--samples","1024"]).unwrap().samples,1024);
+        assert_eq!(args(&["section","--definition","saved.json"]).unwrap().target,"Mars");
+    }
+    #[test]
     fn named_surface_probes_use_verified_coordinates_and_reject_conflicts() {
         let a=args(&["surface","--site","curiosity"]).unwrap();
         assert_eq!(a.target,"Mars");assert_eq!(a.latitude,-4.59);assert_eq!(a.longitude,137.44);
@@ -585,4 +615,15 @@ fn surface(a: &Args) -> Result<(), String> {
     record["target"]=serde_json::json!(body.name);
     println!("{}",serde_json::to_string_pretty(&record).map_err(|e|e.to_string())?);
     Ok(())
+}
+
+fn section(a: &Args) -> Result<(),String> {
+    use cosmogon_sim::planet::{section::{Definition,Point},terrain::ElevationData};
+    let u=if let Some(path)=&a.initial {save::read_file(std::path::Path::new(path)).map_err(|e|e.to_string())?} else {Universe::new(settings(a,a.seed))};
+    let body=u.systems.iter().flat_map(|s|&s.bodies).find(|b|b.exists() && b.name.eq_ignore_ascii_case("Mars")).ok_or("Mars is absent from this world")?;
+    if body.elevation_data != Some(ElevationData::MarsMola) {return Err("Terrain sections require the pinned MOLA field; this saved terrain is preserved".into());}
+    let definition=if let Some(path)=&a.definition {Definition::read(std::path::Path::new(path))?} else {Definition {start:Point::site(a.from_site.as_deref().unwrap_or("curiosity"))?,end:Point::site(a.to_site.as_deref().unwrap_or("insight"))?,reference_radius_m:body.radius,samples:a.samples,..Default::default()}};
+    let section=definition.calculate()?;
+    if let Some(path)=&a.output {section.export(std::path::Path::new(path))?;}
+    println!("{}",serde_json::to_string_pretty(&section).map_err(|e|e.to_string())?);Ok(())
 }

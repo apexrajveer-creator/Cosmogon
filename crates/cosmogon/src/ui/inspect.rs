@@ -1135,6 +1135,7 @@ fn surface_tab(ui: &mut egui::Ui, body: &cosmogon_sim::astro::Body, r: BodyRef, 
             ui.label("NASA MGS / MOLA · derived observed topography");
             ui.hyperlink_to("Dataset and citation · DOI 10.17189/1z1b-kv84",mola::SOURCE_URL);
             ui.label(egui::RichText::new("Global overview: 0.25° cells, about 14.82 km at the equator. No landing-safety or local-resolution claim.").small().color(ACCENT));
+            if ui.small_button("Measure a terrain section").clicked() {state.surface_study_open=true;}
             heading(ui,"Explore a landing reference");
             let old_site = state.surface_site.clone();
             egui::ComboBox::from_id_salt("landing_reference").selected_text(state.surface_site.as_deref().and_then(landing::find).map(|s|s.mission).unwrap_or("Custom coordinate")).show_ui(ui,|ui| {

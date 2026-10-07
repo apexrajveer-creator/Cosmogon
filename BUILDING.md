@@ -126,3 +126,18 @@ uses a horizon composition instead of the footprint overview. The automation ren
 runs on the main thread for `--surface-site --quit`, as for imported-recording captures, to avoid early
 GPU teardown waits. Ordinary interactive starts retain pipelined rendering. Historical coordinates,
 coarse terrain and unverified registration do not provide current rover position or landing safety.
+
+### Numeric Mars terrain sections
+
+```bash
+./target/release/cosmogon-cli section --from-site curiosity --to-site insight --samples 64 \
+    --output /tmp/new-mars-section
+./target/release/cosmogon-cli section --definition /tmp/new-mars-section/definition.json
+./target/release/cosmogon --new lab --focus Mars --panel section --quiet \
+    --capture /tmp/mars-section.png --capture-after 300 --quit
+```
+
+`section` requires the pinned observed Mars field, rejects ambiguous endpoints and protects existing
+output folders. An exported definition retains its chosen reference sphere/sample count. Native
+`--panel section` shows the actual graph, row values and probe/travel/export controls; see
+[MARS_TERRAIN_STUDIES](docs/MARS_TERRAIN_STUDIES.md) for schema and limitations.
