@@ -20,7 +20,7 @@ viewpoint controls. G detaches; F returns to the selected object. No universe sc
 fingerprint change. Current branch verification is in VALIDATION; the 173-test figure below is
 the released baseline.
 
-The next build adds [research controls and recordings](docs/RESEARCH.md): searchable typed parameters,
+The research build adds [research controls and recordings](docs/RESEARCH.md): searchable typed parameters,
 model/source context, explicit data states, live plots and protected CSV/reproducibility bundles.
 View → Control Panel & Research opens the workspace; developer --panel control|models|sources|plots
 supports captures; experiments opens frozen-state studies. cosmogon-cli models, experiment,
@@ -28,7 +28,7 @@ sweep and replay expose the same engine-independent registry
 and observer/definition runner. The owner additionally requires autonomous feature improvement
 through primary-source research and product reasoning across student-to-researcher use; see
 [RESEARCH_DESIGN](docs/RESEARCH_DESIGN.md). Keep building successive connected slices. This does not change Universe/save state or the golden fingerprint. Research verification:
-[RESEARCH_VALIDATION](docs/RESEARCH_VALIDATION.md), 208 passed plus 1 existing ignored.
+[RESEARCH_VALIDATION](docs/RESEARCH_VALIDATION.md), 208 passed plus 1 existing ignored at checkpoint 6e6da11. The following measured-validation slice adds cross-object studies and actual analytic/JPL reports; see [SCIENTIFIC_VALIDATION](docs/SCIENTIFIC_VALIDATION.md), 212 passed plus 1 existing ignored.
 
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on

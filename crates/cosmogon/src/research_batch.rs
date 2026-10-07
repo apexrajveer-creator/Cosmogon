@@ -38,10 +38,13 @@ pub struct ResearchBatch {
     pub definition_path: String,
     pub sweep_enabled: bool,
     pub sweep_parameter: ParameterId,
+    pub sweep_target: Option<ResearchTarget>,
     pub sweep_from: f64,
     pub sweep_to: f64,
     pub sweep_count: usize,
     pub compare_parameter: ParameterId,
+    pub results_mode: bool,
+    pub finished_success: Option<bool>,
     pub automatic_done: bool,
     automatic_started: bool,
     job: Option<Job>,
@@ -59,10 +62,13 @@ impl Default for ResearchBatch {
             definition_path: String::new(),
             sweep_enabled: false,
             sweep_parameter: ParameterId::Albedo,
+            sweep_target: None,
             sweep_from: 0.2,
             sweep_to: 0.4,
             sweep_count: 5,
             compare_parameter: ParameterId::Temperature,
+            results_mode: false,
+            finished_success: None,
             automatic_done: false,
             automatic_started: false,
             job: None,
@@ -89,9 +95,12 @@ impl ResearchBatch {
             Some(cosmogon_sim::research::state_fingerprint(u)?);
         self.target_name = name;
         self.results.clear();
+        self.finished_success = None;
+        self.results_mode = false;
         self.output = None;
         self.progress = None;
         self.sweep_enabled = false;
+        self.sweep_target = Some(target);
         if let Some(p) = cosmogon_sim::research::PARAMETERS.iter().find(|p| {
             p.editable && cosmogon_sim::research::read_parameter(u, target, p.id).is_some()
         }) {
@@ -150,6 +159,7 @@ impl ResearchBatch {
         });
         self.output = Some(directory);
         self.results.clear();
+        self.finished_success = None;
         self.progress = None;
         self.status = Some("Running an independent frozen-state experiment…".into());
         Ok(())
@@ -175,12 +185,36 @@ impl ResearchBatch {
                 Update::Progress(p) => self.progress = Some(p),
                 Update::Finished(result) => {
                     self.job = None;
+                    self.finished_success = Some(result.is_ok());
+                    self.results_mode = true;
                     match result {
                         Ok(r) => {
                             self.status=Some(format!("Completed {} independent runs. CSV and replay definition are saved.",r.len()));
                             self.results = r;
                         }
-                        Err(e) => self.status = Some(e),
+                        Err(e) => {
+                            self.status = Some(e);
+                            // A failed/cancelled batch still has genuine completed results on disk.
+                            if let Some(path) = self.output.as_ref().map(|p| p.join("batch.json")) {
+                                if std::fs::metadata(&path).is_ok_and(|m| m.len() <= 1024 * 1024) {
+                                    if let Ok(bytes) = std::fs::read(path) {
+                                        if let Ok(value) =
+                                            serde_json::from_slice::<serde_json::Value>(&bytes)
+                                        {
+                                            if value["format"] == "cosmogon-experiment-batch"
+                                                && value["schema_version"] == 1
+                                            {
+                                                if let Ok(runs) =
+                                                    serde_json::from_value(value["runs"].clone())
+                                                {
+                                                    self.results = runs;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -221,6 +255,7 @@ fn automatic(
             let target = definition.measurement_target;
             batch.freeze(&sim.universe, target)?;
             if let Some(s) = &definition.sweep {
+                batch.sweep_target = Some(s.target);
                 batch.sweep_enabled = true;
                 batch.sweep_parameter = s.parameter;
                 batch.sweep_from = s.values.first().copied().unwrap_or(0.0);
@@ -228,6 +263,13 @@ fn automatic(
                 batch.sweep_count = s.values.len();
             }
             batch.definition = Some(definition);
+            if let Some(p) = batch
+                .definition
+                .as_ref()
+                .and_then(|d| d.primary_measurement)
+            {
+                batch.compare_parameter = p;
+            }
             batch.start(PathBuf::from(args.research_batch.as_ref().unwrap()))
         })();
         if let Err(e) = result {
@@ -242,7 +284,7 @@ fn automatic(
     }
     if !batch.running() && !batch.automatic_done {
         batch.automatic_done = true;
-        let failed = batch.results.is_empty();
+        let failed = batch.finished_success != Some(true);
         if failed {
             error!("Research batch failed: {:?}", batch.status);
         }
@@ -264,6 +306,60 @@ fn automatic(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn incomplete_results_are_visible_but_never_marked_successful() {
+        use cosmogon_sim::research::ParameterSweep;
+        let u = Universe::new(cosmogon_sim::UniverseSettings {
+            scenario: cosmogon_sim::Scenario::SolarSystemLab,
+            ..Default::default()
+        });
+        let target = ResearchTarget::Body(cosmogon_sim::BodyRef { system: 0, body: 2 });
+        let mut d = ExperimentDefinition::new(target);
+        d.samples = 2;
+        d.interval_s = 60.0;
+        d.sweep = Some(ParameterSweep {
+            target,
+            parameter: ParameterId::Albedo,
+            values: vec![0.2, 0.4],
+        });
+        let path = std::env::temp_dir().join(format!(
+            "cosmogon-partial-native-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let stop = std::cell::Cell::new(false);
+        let error = cosmogon_sim::research::run_batch(
+            &u,
+            &d,
+            &path,
+            || stop.get(),
+            |p| {
+                if p.completed_runs == 1 {
+                    stop.set(true);
+                }
+            },
+        )
+        .unwrap_err();
+        let (sender, receiver) = mpsc::sync_channel(8);
+        sender.send(Update::Finished(Err(error))).unwrap();
+        let mut batch = ResearchBatch {
+            output: Some(path.clone()),
+            job: Some(Job {
+                receiver: Mutex::new(receiver),
+                cancel: Arc::new(AtomicBool::new(false)),
+            }),
+            ..Default::default()
+        };
+        batch.poll();
+        assert!(!batch.running());
+        assert_eq!(batch.results.len(), 1);
+        assert_eq!(batch.finished_success, Some(false));
+        assert!(batch.results_mode);
+        std::fs::remove_dir_all(path).unwrap();
+    }
     #[test]
     fn frozen_branch_does_not_follow_live_edits_or_time() {
         let mut u = Universe::new(cosmogon_sim::UniverseSettings {

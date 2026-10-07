@@ -128,6 +128,9 @@ observed events are separate JSON; CSV includes absolute simulation seconds, edi
 keys. Existing destination directories are refused. This adds no Universe fields or save migration.
 
 Experiment definitions and batch roots have separate schema 1 formats. Definitions carry typed
-canonical-unit overrides, ordered sweeps and an optional frozen-state fingerprint; batch.json records
+canonical-unit overrides, independent input/measurement targets, an optional primary measurement
+(default absent for older definitions), ordered sweeps and an optional frozen-state fingerprint; batch.json records
 prepared/running/complete/incomplete status and completed-run outcomes. base.cosmo is a normal save.
 See RESEARCH for replay compatibility and partial/cancelled export semantics.
+
+Measured orbital reports use cosmogon-model-validation schema 1 outside Universe/saves. They contain fixed fixture inputs and reference coordinates, computed metrics and regression guards, with coverage limitations.

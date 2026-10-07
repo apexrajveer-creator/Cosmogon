@@ -1,17 +1,16 @@
 # Physics engine
 
-How Cosmogon moves things. Every model states its fidelity tier, assumptions, valid range and
-measured error. Simulation results are never tuned "to look right".
+How Cosmogon moves things. The research registry states implemented methods, assumptions and limitations; measured checks cover specific fixtures only. Unknown error remains unknown.
 
 ## Fidelity tiers
 
 | Tier | Meaning | Used for |
 |---|---|---|
-| 0 | Visual approximation only | Background starfield, cloud drift, comet-tail shape (later) |
+| 0 | Visual approximation only | Background starfield, cloud drift, comet-tail shape |
 | 1 | Analytic physical model | Kepler orbits of untouched systems and "rails" moons; stellar relations; zero-dimensional climate |
 | 2 | Numerical simulation | N-body gravity of an active sandbox system |
 | 3 | High-accuracy local numerical simulation | Automatic encounter substepping; *Accurate* preset |
-| 4 | Specialised precision mode | *Research* preset (+ optional 1PN relativity) |
+| 4 | Higher step-count preset; no accuracy certification | *Research* preset (+ optional 1PN relativity) |
 
 The inspector shows the model and tier for each object (PHYSICS tab).
 
@@ -93,8 +92,7 @@ motion over the substep, which is very short during encounters). On contact:
    `removed: merged into …` record.
 3. The simulation turns the record into an **impact event** (below).
 
-Bounce, fragmentation, cratering-without-merger and catastrophic disruption regimes are
-milestone S3 (Leinhardt & Stewart 2012 scaling laws are the planned basis).
+The simulation’s contact handler then applies the released Leinhardt–Stewart-inspired disruption scaling: sufficiently energetic solid-body impacts leave a survivor and bounded debris. This reduced model is not a hydrodynamics/material-strength solver. See `collision.rs` and the research registry for its assumptions. Bounce and atmospheric fragmentation remain unimplemented.
 
 ## Relativity (optional)
 
@@ -105,8 +103,7 @@ First post-Newtonian correction for test bodies around the most massive body
 
 Valid when `GM/(rc²) ≪ 1`. Reproduces Mercury's perihelion advance (test: 43 ± 1.5″/century).
 It is not a general-relativity solver: no frame dragging, no radiation reaction, no strong
-field. Black holes (milestone S6) will use pseudo-Newtonian potentials plus explicit
-labelling.
+field. Released compact-object visuals use approximate gravitational lensing; they do not imply a strong-field trajectory solver.
 
 ## Impacts → consequences (first-order models)
 
@@ -130,6 +127,8 @@ Not yet modelled (later milestones): atmospheric entry, airbursts, ablation and
 fragmentation (S3), ejecta and tsunamis (S8), impact-generated atmospheric loss.
 
 ## Validation tests (measured)
+
+`cosmogon-cli validate` and the native Models panel now calculate a subset of these fixtures and export actual residuals plus initial/reference conditions; see [SCIENTIFIC_VALIDATION](SCIENTIFIC_VALIDATION.md). Historical tables below are not a blanket error budget.
 
 From `cargo test -p cosmogon_physics nbody -- --nocapture`:
 

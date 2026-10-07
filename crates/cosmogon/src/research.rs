@@ -5,6 +5,7 @@ use crate::{
     state::AppState,
 };
 use bevy::prelude::*;
+use bevy::tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task};
 use cosmogon_sim::research::{read_parameter, Experiment, ParameterId, ResearchTarget, PARAMETERS};
 use std::collections::BTreeMap;
 
@@ -29,6 +30,9 @@ pub struct Research {
     pub automatic_done: bool,
     pub sample_interval_s: f64,
     pub plot: ParameterId,
+    pub validation_requested: bool,
+    pub validation_report: Option<cosmogon_sim::research::ValidationReport>,
+    pub validation_task: Option<Task<cosmogon_sim::research::ValidationReport>>,
     generation: u64,
     frames: usize,
     automatic_started: bool,
@@ -50,6 +54,9 @@ impl Default for Research {
             automatic_done: false,
             sample_interval_s: 1.0,
             plot: ParameterId::Temperature,
+            validation_requested: false,
+            validation_report: None,
+            validation_task: None,
             generation: 0,
             frames: 0,
             automatic_started: false,
@@ -114,6 +121,7 @@ impl Plugin for ResearchPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Research>()
             .add_systems(Startup, init)
+            .add_systems(Update, poll_validation)
             .add_systems(
                 Last,
                 record
@@ -137,10 +145,46 @@ fn init(mut research: ResMut<Research>, args: Res<Args>) {
             research.open = true;
             research.tab = 3;
         }
-        Some("experiments") => {research.open=true;research.tab=4;}
+        Some("experiments") => {
+            research.open = true;
+            research.tab = 4;
+        }
+        Some("validation") => {
+            research.open = true;
+            research.tab = 1;
+            research.validation_requested = true;
+        }
         _ => {}
     }
 }
+fn poll_validation(mut research: ResMut<Research>) {
+    if research.validation_requested && research.validation_task.is_none() {
+        research.validation_requested = false;
+        research.validation_report = None;
+        research.validation_task = Some(
+            AsyncComputeTaskPool::get()
+                .spawn(async move { cosmogon_sim::research::validation_report() }),
+        );
+        research.status =
+            Some("Measuring analytic and cached ephemeris fixtures in the background…".into());
+    }
+    if let Some(task) = &mut research.validation_task {
+        if let Some(report) = block_on(future::poll_once(task)) {
+            research.status = Some(format!(
+                "{} measured validation cases · {}. Applies only to the reported conditions.",
+                report.cases.len(),
+                if report.passes_regression {
+                    "regression guards passed"
+                } else {
+                    "regression guard failed"
+                }
+            ));
+            research.validation_task = None;
+            research.validation_report = Some(report);
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn record(
     mut research: ResMut<Research>,
@@ -224,7 +268,9 @@ fn record(
         }
         if args.quit_after_capture
             && (failed
-                || (args.capture.is_none() && (args.profile.is_none() || perf.automatic_done) && (args.research_batch.is_none() || batch.automatic_done)))
+                || (args.capture.is_none()
+                    && (args.profile.is_none() || perf.automatic_done)
+                    && (args.research_batch.is_none() || batch.automatic_done)))
         {
             exit.write(if failed {
                 AppExit::error()

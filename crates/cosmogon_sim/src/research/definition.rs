@@ -30,6 +30,8 @@ pub struct ExperimentDefinition {
     pub schema_version: u32,
     pub name: String,
     pub measurement_target: ResearchTarget,
+    #[serde(default)]
+    pub primary_measurement: Option<ParameterId>,
     pub samples: usize,
     pub interval_s: f64,
     #[serde(default)]
@@ -46,6 +48,7 @@ impl ExperimentDefinition {
             schema_version: 1,
             name: "Exploratory experiment".into(),
             measurement_target: target,
+            primary_measurement: None,
             samples: 32,
             interval_s: 86400.0,
             initial_fingerprint: None,
@@ -73,9 +76,9 @@ impl ExperimentDefinition {
         }
         if !(2..=MAX_RESEARCH_SAMPLES).contains(&self.samples)
             || !self.interval_s.is_finite()
-            || !(0.0864..=315_576_000.0).contains(&self.interval_s)
+            || !(0.0864..=31_557_600_000_000.0).contains(&self.interval_s)
         {
-            return Err("Choose 2–4096 samples and 0.0864–315576000 seconds between them".into());
+            return Err("Choose 2–4096 samples and 0.0864 seconds–1 million years between them; long studies may require substantial computing time".into());
         }
         let end = initial.time + (self.samples - 1) as f64 * self.interval_s;
         if !initial.time.is_finite() || !end.is_finite() || end <= initial.time {
@@ -96,6 +99,12 @@ impl ExperimentDefinition {
         // Validate complete edit sequences before starting a batch, including interactions.
         for run in 0..self.runs() {
             let branch = self.branch(initial, run)?;
+            if self
+                .primary_measurement
+                .is_some_and(|p| read_parameter(&branch, self.measurement_target, p).is_none())
+            {
+                return Err("The primary measurement is unavailable for this branch".into());
+            }
             if self.measurement_target.name(&branch).is_none() {
                 return Err("Measurement target is unavailable in the frozen state".into());
             }
@@ -162,6 +171,7 @@ impl ExperimentDefinition {
         if directory.exists() {
             return Err("Destination already exists; choose a new path".into());
         }
+        self.validate(initial)?;
         let mut definition = self.clone();
         definition.initial_fingerprint = Some(super::state_fingerprint(initial)?);
         definition.validate(initial)?;
@@ -185,7 +195,7 @@ impl ExperimentDefinition {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BatchRunSummary {
     pub run: usize,
     pub input_value: Option<f64>,
@@ -472,5 +482,49 @@ mod tests {
         for p in [out, replay, partial, prepared] {
             std::fs::remove_dir_all(p).unwrap();
         }
+    }
+    #[test]
+    fn study_can_change_jupiter_and_measure_earth_without_carryover() {
+        let u = lab();
+        let before = serde_json::to_string(&u).unwrap();
+        let j = u.systems[0]
+            .bodies
+            .iter()
+            .position(|b| b.name == "Jupiter")
+            .unwrap();
+        let jupiter = ResearchTarget::Body(BodyRef {
+            system: 0,
+            body: j as u32,
+        });
+        let mass = read_parameter(&u, jupiter, ParameterId::Mass)
+            .unwrap()
+            .value;
+        let mut d = ExperimentDefinition::new(earth());
+        d.primary_measurement = Some(ParameterId::Eccentricity);
+        d.samples = 2;
+        d.interval_s = 30.0 * 86400.0;
+        d.sweep = Some(ParameterSweep {
+            target: jupiter,
+            parameter: ParameterId::Mass,
+            values: vec![mass * 0.5, mass * 2.0],
+        });
+        let out = path();
+        let results = run_batch(&u, &d, &out, || false, |_| {}).unwrap();
+        assert_ne!(
+            results[0].final_values["eccentricity"],
+            results[1].final_values["eccentricity"]
+        );
+        assert_eq!(
+            results[0].final_values["mass_kg"],
+            u.body(BodyRef { system: 0, body: 2 }).mass
+        );
+        assert_eq!(serde_json::to_string(&u).unwrap(), before);
+        d.initial_fingerprint = Some(super::super::state_fingerprint(&u).unwrap());
+        let mut changed = u.clone();
+        changed.advance_by(1.0);
+        let wrong = path();
+        assert!(d.save_bundle(&changed, &wrong).is_err());
+        assert!(!wrong.exists());
+        std::fs::remove_dir_all(out).unwrap();
     }
 }

@@ -27,6 +27,8 @@ struct Args {
     sweep_start: Option<f64>,
     sweep_end: Option<f64>,
     sweep_runs: usize,
+    measure_target: Option<String>,
+    measure: Option<String>,
     seed: u64,
     seeds: u64,
     scenario: Scenario,
@@ -37,80 +39,207 @@ struct Args {
     save: Option<String>,
 }
 
-fn parse() -> Args {
-    let mut a = Args { cmd: "run".into(), samples: 60, interval_days: 1.0, target: "Earth".into(), output: None, initial: None, definition: None, parameter: "albedo".into(), sweep_start: None, sweep_end: None, sweep_runs: 5, seed: 1, seeds: 10, scenario: Scenario::Sol, years: 200_000.0, life: 0, systems: 24, min_importance: 3, save: None };
-    let mut it = std::env::args().skip(1);
+fn number<T: std::str::FromStr>(text: String, flag: &str) -> Result<T, String> {
+    text.parse()
+        .map_err(|_| format!("{flag}: invalid number {text}"))
+}
+fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
+    let mut a = Args {
+        cmd: "run".into(),
+        samples: 60,
+        interval_days: 1.0,
+        target: "Earth".into(),
+        output: None,
+        initial: None,
+        definition: None,
+        parameter: "albedo".into(),
+        sweep_start: None,
+        sweep_end: None,
+        sweep_runs: 5,
+        measure_target: None,
+        measure: None,
+        seed: 1,
+        seeds: 10,
+        scenario: Scenario::Sol,
+        years: 200_000.0,
+        life: 0,
+        systems: 24,
+        min_importance: 3,
+        save: None,
+    };
+    let mut it = args;
+    let mut explicit_scenario = false;
     if let Some(c) = it.next() {
         a.cmd = c;
     }
+    if matches!(a.cmd.as_str(), "--help" | "-h" | "help") {
+        a.cmd = "help".into();
+        return Ok(a);
+    }
     while let Some(flag) = it.next() {
-        let mut val = || it.next().unwrap_or_else(|| panic!("{flag} needs a value"));
+        if matches!(flag.as_str(), "--help" | "-h") {
+            a.cmd = "help".into();
+            return Ok(a);
+        }
+        let mut val = || {
+            it.next()
+                .filter(|v| !v.starts_with("--"))
+                .ok_or_else(|| format!("{flag} needs a value"))
+        };
         match flag.as_str() {
-            "--samples" => a.samples = val().parse::<usize>().expect("samples").clamp(2,4096),
-            "--interval-days" => a.interval_days = val().parse().expect("interval days"),
-            "--target" => a.target = val(),
-            "--output" => a.output = Some(val()),
-            "--initial" => a.initial = Some(val()),
-            "--definition" => a.definition = Some(val()),
-            "--parameter" => a.parameter = val(),
-            "--from" => a.sweep_start = Some(val().parse().expect("sweep start")),
-            "--to" => a.sweep_end = Some(val().parse().expect("sweep end")),
-            "--runs" => a.sweep_runs = val().parse().expect("sweep runs"),
-            "--seed" => a.seed = val().parse().expect("seed"),
-            "--seeds" => a.seeds = val().parse().expect("seeds"),
-            "--years" => a.years = val().parse().expect("years"),
-            "--systems" => a.systems = val().parse().expect("systems"),
-            "--min-importance" => a.min_importance = val().parse().expect("importance"),
-            "--save" => a.save = Some(val()),
+            "--samples" => a.samples = number::<usize>(val()?, &flag)?.clamp(2, 4096),
+            "--interval-days" => a.interval_days = number(val()?, &flag)?,
+            "--target" => a.target = val()?,
+            "--output" => a.output = Some(val()?),
+            "--initial" => a.initial = Some(val()?),
+            "--definition" => a.definition = Some(val()?),
+            "--parameter" => a.parameter = val()?,
+            "--from" => a.sweep_start = Some(number(val()?, &flag)?),
+            "--to" => a.sweep_end = Some(number(val()?, &flag)?),
+            "--runs" => a.sweep_runs = number(val()?, &flag)?,
+            "--measure-target" => a.measure_target = Some(val()?),
+            "--measure" => a.measure = Some(val()?),
+            "--seed" => a.seed = number(val()?, &flag)?,
+            "--seeds" => a.seeds = number(val()?, &flag)?,
+            "--years" => a.years = number(val()?, &flag)?,
+            "--systems" => a.systems = number(val()?, &flag)?,
+            "--min-importance" => a.min_importance = number(val()?, &flag)?,
+            "--save" => a.save = Some(val()?),
             "--scenario" => {
-                a.scenario = match val().as_str() {
+                explicit_scenario = true;
+                a.scenario = match val()?.as_str() {
                     "neighbourhood" | "neighborhood" => Scenario::Neighbourhood,
                     "garden" => Scenario::GardenWorld,
                     "sol" => Scenario::Sol,
                     "lab" => Scenario::SolarSystemLab,
                     "system" => Scenario::StarSystem,
                     "empty" => Scenario::EmptySystem,
-                    s => panic!("unknown scenario {s}"),
-                }
+                    name => return Err(format!("Unknown scenario {name}")),
+                };
             }
             "--life" => {
-                let v = val();
-                a.life = LIFE_PRESETS.iter().position(|p| p.0.eq_ignore_ascii_case(&v)).expect("life preset: realistic | hopeful | teeming")
+                let v = val()?;
+                a.life = LIFE_PRESETS
+                    .iter()
+                    .position(|p| p.0.eq_ignore_ascii_case(&v))
+                    .ok_or("Choose life: realistic, hopeful or teeming")?;
             }
-            f => panic!("unknown flag {f}"),
+            unknown => return Err(format!("Unknown flag {unknown}; use --help")),
         }
     }
-    a
+    if !explicit_scenario && matches!(a.cmd.as_str(), "experiment" | "sweep") {
+        a.scenario = Scenario::SolarSystemLab;
+    }
+    if matches!(a.cmd.as_str(), "run" | "check" | "survey" | "profile")
+        && (!a.years.is_finite() || a.years < 0.0)
+    {
+        return Err("--years must be finite and nonnegative".into());
+    }
+    if !(1..=4096).contains(&a.systems) {
+        return Err("--systems must be between 1 and 4096".into());
+    }
+    if a.cmd == "survey" && !(1..=1_000_000).contains(&a.seeds) {
+        return Err("--seeds must be between 1 and 1000000".into());
+    }
+    Ok(a)
+}
+fn help() {
+    println!(
+        r#"Cosmogon headless tools
+  models                         Print model/source/parameter registry JSON
+  experiment --output NEW_DIR    Record a saved or new universe at uniform simulation times
+  sweep --output NEW_DIR         Run independent branches from the same starting state
+  replay --output NEW_DIR        Run an exported definition against its frozen base
+  validate [--output NEW_FILE]   Calculate analytic and cached JPL regression measurements
+  run | check | survey | profile Run the released simulation/determinism tools
+
+Research inputs:
+  --initial BASE.cosmo           Use a complete saved state; overrides scenario/seed
+  --scenario lab|sol|garden|neighbourhood|system|empty --seed N
+  --target NAME                  Observed object, or changed object for a sweep
+  --samples 2..4096 --interval-days DAYS (86400 seconds per day)
+  --parameter KEY --from VALUE --to VALUE --runs 2..64
+  --measure-target NAME --measure KEY
+  --definition definition.json   Replay requires this and --initial
+Values use canonical units listed by models. Missing uncertainty is not inferred.
+Research creation defaults to Solar System Lab. Results are exploratory implemented models;
+use measured validation conditions to assess suitability. Existing exports are protected.
+
+Simulation inputs: --years Y --life realistic|hopeful|teeming --systems N
+                   --seeds N --min-importance N --save FILE
+"#
+    );
 }
 
 fn settings(a: &Args, seed: u64) -> UniverseSettings {
     let (_, life, intel, _) = LIFE_PRESETS[a.life];
-    UniverseSettings { seed, scenario: a.scenario, system_count: a.systems, life_rate: life, intelligence_rate: intel, ..Default::default() }
+    UniverseSettings {
+        seed,
+        scenario: a.scenario,
+        system_count: a.systems,
+        life_rate: life,
+        intelligence_rate: intel,
+        ..Default::default()
+    }
 }
 
 fn main() {
-    let a = parse();
+    let a = match parse_args(std::env::args().skip(1)) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
     match a.cmd.as_str() {
+        "help" => help(),
         "models" => println!("{}", serde_json::to_string_pretty(&serde_json::json!({"format":"cosmogon-model-registry", "schema_version":1, "models":cosmogon_sim::research::PhysicsModelRegistry::models(), "sources":cosmogon_sim::research::SCIENTIFIC_SOURCES, "parameters":cosmogon_sim::research::PARAMETERS})).unwrap()),
         "experiment" => { if let Err(e) = experiment(&a) { eprintln!("Experiment failed: {e}"); std::process::exit(1); } }
         "sweep" | "replay" => { if let Err(e) = batch(&a) { eprintln!("Batch failed: {e}"); std::process::exit(1); } }
+        "validate" => {
+            let report=cosmogon_sim::research::validation_report();
+            if let Some(path)=&a.output {if let Err(e)=report.export(std::path::Path::new(path)){eprintln!("Validation export failed: {e}");std::process::exit(1);}}
+            else {println!("{}",serde_json::to_string_pretty(&report).unwrap());}
+            if !report.passes_regression {std::process::exit(1);}
+        }
         "run" => run(&a),
         "check" => check(&a),
         "survey" => survey(&a),
         "profile" => profile(&a),
-        c => { eprintln!("unknown command {c}; use run | check | survey | profile | models | experiment | sweep | replay"); std::process::exit(1); }
+        c => { eprintln!("unknown command {c}; use run | check | survey | profile | models | experiment | sweep | replay | validate"); std::process::exit(1); }
     }
 }
 
 fn run(a: &Args) {
     let t0 = Instant::now();
     let mut u = Universe::new(settings(a, a.seed));
-    println!("Created {} in {:.2?}: {} systems, {} biospheres", a.scenario.label(), t0.elapsed(), u.systems.len(), u.biospheres.len());
+    println!(
+        "Created {} in {:.2?}: {} systems, {} biospheres",
+        a.scenario.label(),
+        t0.elapsed(),
+        u.systems.len(),
+        u.biospheres.len()
+    );
     let t1 = Instant::now();
     u.advance_by(a.years * SECONDS_PER_YEAR);
-    println!("Simulated {} in {:.2?}\n", format_duration(a.years * SECONDS_PER_YEAR), t1.elapsed());
-    for e in u.history.events.iter().filter(|e| e.importance >= a.min_importance) {
-        println!("[{:>26}] {:<12} {}{}", cosmogon_sim::time::format_date(e.time, u.start_time, u.gregorian()), e.category.label(), e.title, if e.importance >= 5 { "  ★" } else { "" });
+    println!(
+        "Simulated {} in {:.2?}\n",
+        format_duration(a.years * SECONDS_PER_YEAR),
+        t1.elapsed()
+    );
+    for e in u
+        .history
+        .events
+        .iter()
+        .filter(|e| e.importance >= a.min_importance)
+    {
+        println!(
+            "[{:>26}] {:<12} {}{}",
+            cosmogon_sim::time::format_date(e.time, u.start_time, u.gregorian()),
+            e.category.label(),
+            e.title,
+            if e.importance >= 5 { "  ★" } else { "" }
+        );
     }
     let graph = TechGraph::embedded();
     for c in &u.civs {
@@ -128,7 +257,10 @@ fn run(a: &Args) {
             c.sites.iter().filter(|s| s.active()).count(),
             c.total_power_w()
         );
-        let k: Vec<String> = cosmogon_sim::civ::knowledge::Domain::ALL.iter().map(|d| format!("{}={:.2e}", &d.name()[..4], c.knowledge[d.index()])).collect();
+        let k: Vec<String> = cosmogon_sim::civ::knowledge::Domain::ALL
+            .iter()
+            .map(|d| format!("{}={:.2e}", &d.name()[..4], c.knowledge[d.index()]))
+            .collect();
         println!("  knowledge: {}", k.join(" "));
     }
     if let Some(path) = &a.save {
@@ -182,8 +314,17 @@ fn survey(a: &Args) {
         life += any(cosmogon_sim::life::Stage::Microbial) as u32;
         complex += any(cosmogon_sim::life::Stage::ComplexEcosystems) as u32;
         intelligent += !u.civs.is_empty() as u32;
-        let best = u.civs.iter().map(|c| c.discoveries.len()).max().unwrap_or(0);
-        println!("seed {seed:>3}: civs {} (most techs {best}), events {}", u.civs.len(), u.history.events.len());
+        let best = u
+            .civs
+            .iter()
+            .map(|c| c.discoveries.len())
+            .max()
+            .unwrap_or(0);
+        println!(
+            "seed {seed:>3}: civs {} (most techs {best}), events {}",
+            u.civs.len(),
+            u.history.events.len()
+        );
     }
     println!("\nuniverses with microbial life {life}/{0}, complex life {complex}/{0}, intelligence {intelligent}/{0}", a.seeds);
 }
@@ -201,63 +342,181 @@ fn profile(a: &Args) {
             .iter()
             .map(|c| format!("{}:{:?} stride {} pop {} techs {} press f{:.2} d{:.2} w{:.2} short {:.2} cap% {:.0}", c.species.name, c.status, c.stride_years, cosmogon_sim::time::group_digits(c.population), c.discoveries.len(), c.pressures.food, c.pressures.disease, c.pressures.war, c.energy_shortfall, 100.0 * c.population / c.capacity.max(1.0)))
             .collect();
-        println!("{:>14} {:>8.1?} steps {:>9}  {}", format_duration(u.time - u.start_time), t0.elapsed(), r.steps, civs.join(" | "));
+        println!(
+            "{:>14} {:>8.1?} steps {:>9}  {}",
+            format_duration(u.time - u.start_time),
+            t0.elapsed(),
+            r.steps,
+            civs.join(" | ")
+        );
     }
 }
 
 /// Offline observer samples use exact requested simulation times; there is no renderer.
 fn experiment(a: &Args) -> Result<(), String> {
     use cosmogon_sim::research::Experiment;
-    if !a.interval_days.is_finite() || !(1e-6..=3652.5).contains(&a.interval_days) { return Err("Choose 0.000001–3652.5 days between samples".into()); }
-    let output = a.output.as_deref().ok_or("experiment requires --output NEW_DIRECTORY")?;
-    if std::path::Path::new(output).exists() { return Err("The output directory already exists; choose a new path".into()); }
+    if !a.interval_days.is_finite() || !(1e-6..=3652.5).contains(&a.interval_days) {
+        return Err("Choose 0.000001–3652.5 days between samples".into());
+    }
+    let output = a
+        .output
+        .as_deref()
+        .ok_or("experiment requires --output NEW_DIRECTORY")?;
+    if std::path::Path::new(output).exists() {
+        return Err("The output directory already exists; choose a new path".into());
+    }
     let mut u = initial_universe(a)?;
-    let t = find_target(&u,&a.target).ok_or_else(|| format!("No object named {}",a.target))?;
-    let mut recording = Experiment::new(&u,t,a.samples)?;
-    recording.sampling_policy = format!("Offline observer: uniform requested interval {} days (86400 seconds per day)",a.interval_days);
+    let t = find_target(&u, &a.target).ok_or_else(|| format!("No object named {}", a.target))?;
+    let mut recording = Experiment::new(&u, t, a.samples)?;
+    recording.sampling_policy = format!(
+        "Offline observer: uniform requested interval {} days (86400 seconds per day)",
+        a.interval_days
+    );
     let start = u.time;
     for i in 1..a.samples {
-        u.advance_to(start + i as f64 * a.interval_days * 86400.0,None,None);
+        u.advance_to(start + i as f64 * a.interval_days * 86400.0, None, None);
         recording.capture(&u)?;
     }
     recording.stop_reason = Some("Requested offline sample count reached".into());
     recording.export(std::path::Path::new(output))?;
-    println!("Recorded {} states of {} to {}",recording.samples.len(),recording.target_name,output);
+    println!(
+        "Recorded {} states of {} to {}",
+        recording.samples.len(),
+        recording.target_name,
+        output
+    );
     Ok(())
 }
 fn initial_universe(a: &Args) -> Result<Universe, String> {
-    if let Some(path) = &a.initial { save::read_file(std::path::Path::new(path)).map_err(|e| e.to_string()) }
-    else { Ok(Universe::new(settings(a,a.seed))) }
+    if let Some(path) = &a.initial {
+        save::read_file(std::path::Path::new(path)).map_err(|e| e.to_string())
+    } else {
+        Ok(Universe::new(settings(a, a.seed)))
+    }
 }
 fn batch(a: &Args) -> Result<(), String> {
     use cosmogon_sim::research::{ExperimentDefinition, ParameterSweep, PARAMETERS};
-    let output = a.output.as_deref().ok_or("Batch requires --output NEW_DIRECTORY")?;
+    let output = a
+        .output
+        .as_deref()
+        .ok_or("Batch requires --output NEW_DIRECTORY")?;
     let u = initial_universe(a)?;
     let definition = if a.cmd == "replay" {
-        if a.initial.is_none() { return Err("Replay requires --initial base.cosmo and --definition definition.json".into()); }
-        ExperimentDefinition::read(std::path::Path::new(a.definition.as_deref().ok_or("Replay requires --definition definition.json")?))?
+        if a.initial.is_none() {
+            return Err(
+                "Replay requires --initial base.cosmo and --definition definition.json".into(),
+            );
+        }
+        ExperimentDefinition::read(std::path::Path::new(
+            a.definition
+                .as_deref()
+                .ok_or("Replay requires --definition definition.json")?,
+        ))?
     } else {
-        let target = find_target(&u,&a.target).ok_or_else(||format!("No object named {}",a.target))?;
-        let parameter = PARAMETERS.iter().find(|p|p.key==a.parameter || format!("{:?}",p.id).eq_ignore_ascii_case(&a.parameter)).ok_or("Unknown parameter; use a canonical key from models")?.id;
-        let mut d = ExperimentDefinition::new(target);
+        let target =
+            find_target(&u, &a.target).ok_or_else(|| format!("No object named {}", a.target))?;
+        let parameter = PARAMETERS
+            .iter()
+            .find(|p| {
+                p.key == a.parameter || format!("{:?}", p.id).eq_ignore_ascii_case(&a.parameter)
+            })
+            .ok_or("Unknown parameter; use a canonical key from models")?
+            .id;
+        let measured = if let Some(name) = &a.measure_target {
+            find_target(&u, name).ok_or_else(|| format!("No measurement object named {name}"))?
+        } else {
+            target
+        };
+        let mut d = ExperimentDefinition::new(measured);
+        if let Some(key) = &a.measure {
+            d.primary_measurement = Some(
+                PARAMETERS
+                    .iter()
+                    .find(|p| p.key == key || format!("{:?}", p.id).eq_ignore_ascii_case(key))
+                    .ok_or("Unknown measurement; use a canonical key from models")?
+                    .id,
+            );
+        }
         d.initial_fingerprint = Some(cosmogon_sim::research::state_fingerprint(&u)?);
-        d.name = format!("{} {} sweep",a.target,parameter.descriptor().name);
-        d.samples = a.samples; d.interval_s = a.interval_days * 86400.0;
-        d.sweep = Some(ParameterSweep { target, parameter, values: ExperimentDefinition::linear_values(a.sweep_start.ok_or("Sweep requires --from")?,a.sweep_end.ok_or("Sweep requires --to")?,a.sweep_runs)? });
+        d.name = format!(
+            "{} {} sweep → {}",
+            a.target,
+            parameter.descriptor().name,
+            measured.name(&u).unwrap_or("measurement")
+        );
+        d.samples = a.samples;
+        d.interval_s = a.interval_days * 86400.0;
+        d.sweep = Some(ParameterSweep {
+            target,
+            parameter,
+            values: ExperimentDefinition::linear_values(
+                a.sweep_start.ok_or("Sweep requires --from")?,
+                a.sweep_end.ok_or("Sweep requires --to")?,
+                a.sweep_runs,
+            )?,
+        });
         d
     };
     let mut last = 0;
-    let results = cosmogon_sim::research::run_batch(&u,&definition,std::path::Path::new(output),||false,|p| {
-        if p.completed_runs>last { last=p.completed_runs; eprintln!("Completed {} / {} runs",last,p.total_runs); }
-    })?;
-    println!("Exported {} independent runs to {}",results.len(),output);
+    let results = cosmogon_sim::research::run_batch(
+        &u,
+        &definition,
+        std::path::Path::new(output),
+        || false,
+        |p| {
+            if p.completed_runs > last {
+                last = p.completed_runs;
+                eprintln!("Completed {} / {} runs", last, p.total_runs);
+            }
+        },
+    )?;
+    println!("Exported {} independent runs to {}", results.len(), output);
     Ok(())
 }
 fn find_target(u: &Universe, name: &str) -> Option<cosmogon_sim::research::ResearchTarget> {
     use cosmogon_sim::research::ResearchTarget;
-    for (s,sys) in u.systems.iter().enumerate() {
-        if sys.star.name.eq_ignore_ascii_case(name) { return Some(ResearchTarget::Star(s as u32)); }
-        if let Some((b,_)) = sys.bodies.iter().enumerate().find(|(_,b)| b.exists() && b.name.eq_ignore_ascii_case(name)) { return Some(ResearchTarget::Body(cosmogon_sim::BodyRef { system:s as u32,body:b as u32 })); }
+    for (s, sys) in u.systems.iter().enumerate() {
+        if sys.star.name.eq_ignore_ascii_case(name) {
+            return Some(ResearchTarget::Star(s as u32));
+        }
+        if let Some((b, _)) = sys
+            .bodies
+            .iter()
+            .enumerate()
+            .find(|(_, b)| b.exists() && b.name.eq_ignore_ascii_case(name))
+        {
+            return Some(ResearchTarget::Body(cosmogon_sim::BodyRef {
+                system: s as u32,
+                body: b as u32,
+            }));
+        }
     }
     None
+}
+
+#[cfg(test)]
+mod argument_tests {
+    use super::*;
+    fn args(values: &[&str]) -> Result<Args, String> {
+        parse_args(values.iter().map(|s| s.to_string()))
+    }
+    #[test]
+    fn malformed_requests_return_errors_and_research_defaults_to_lab() {
+        for values in [
+            vec!["sweep", "--samples", "bad"],
+            vec!["sweep", "--target"],
+            vec!["run", "--years", "NaN"],
+            vec!["run", "--systems", "999999999"],
+            vec!["run", "--scenario", "missing"],
+        ] {
+            assert!(args(&values).is_err());
+        }
+        assert_eq!(args(&["sweep"]).unwrap().scenario, Scenario::SolarSystemLab);
+        assert_eq!(args(&["run"]).unwrap().scenario, Scenario::Sol);
+        assert_eq!(
+            args(&["sweep", "--scenario", "sol"]).unwrap().scenario,
+            Scenario::Sol
+        );
+        assert_eq!(args(&["sweep", "--help"]).unwrap().cmd, "help");
+    }
 }

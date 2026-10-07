@@ -53,3 +53,5 @@ notes remain in version control. Review export limitations in [RESEARCH](RESEARC
 
 Measured analytic/JPL benchmark reports are the next connected slice, with independent scientific
 validation, covariance propagation and wider regime coverage still open acceptance work.
+
+The subsequent measured-validation/cross-object slice is documented in [SCIENTIFIC_VALIDATION](SCIENTIFIC_VALIDATION.md); the 208-test count above remains the historical first research checkpoint.

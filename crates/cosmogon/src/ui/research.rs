@@ -190,6 +190,7 @@ fn models(
     target: ResearchTarget,
     ui_state: &mut UiState,
 ) {
+    validation(ui, research);
     let sys = sim.universe.system(target.system());
     ui.label(
         egui::RichText::new(format!(
@@ -255,6 +256,103 @@ fn models(
         }
     }
 }
+fn validation(ui: &mut egui::Ui, research: &mut Research) {
+    use egui::RichText;
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(
+                research.validation_task.is_none(),
+                egui::Button::new("Check orbit models against reference cases"),
+            )
+            .clicked()
+        {
+            research.validation_requested = true;
+        }
+        if research.validation_task.is_some() {
+            ui.spinner();
+        }
+    });
+    ui.label(RichText::new("Measured analytic/reference cases help evaluate a model for a particular use. Regression limits are acceptance guards, not observational uncertainty. Fixed fixture settings apply; these do not test your current edited universe.").small().color(MUTED));
+    if let Some(report) = &research.validation_report {
+        ui.label(
+            RichText::new(format!(
+                "{} computed cases · {}",
+                report.cases.len(),
+                if report.passes_regression {
+                    "regression guards passed"
+                } else {
+                    "a regression guard failed"
+                }
+            ))
+            .strong()
+            .color(ACCENT),
+        );
+        egui::CollapsingHeader::new("Measured results and conditions")
+            .default_open(true)
+            .show(ui, |ui| {
+                for case in &report.cases {
+                    egui::CollapsingHeader::new(&case.name)
+                        .id_salt(&case.id)
+                        .default_open(case.id.contains("horizons"))
+                        .show(ui, |ui| {
+                            ui.label(&case.model);
+                            egui::Grid::new(("validation_metrics", &case.id))
+                                .striped(true)
+                                .show(ui, |ui| {
+                                    ui.strong("Measured quantity");
+                                    ui.strong("Result");
+                                    ui.strong("Regression limit");
+                                    ui.end_row();
+                                    for m in &case.metrics {
+                                        ui.label(&m.quantity);
+                                        ui.vertical(|ui| {
+                                            ui.add(
+                                                egui::Label::new(format!("{:.6e}", m.value))
+                                                    .wrap_mode(egui::TextWrapMode::Extend),
+                                            );
+                                            ui.label(RichText::new(&m.unit).small().color(MUTED));
+                                        });
+                                        ui.label(format!(
+                                            "{} · {}",
+                                            units::fmt_num(m.regression_limit),
+                                            if m.passes_regression { "PASS" } else { "FAIL" }
+                                        ));
+                                        ui.end_row();
+                                    }
+                                });
+                            ui.label(RichText::new(&case.limitations).small().color(MUTED));
+                            egui::CollapsingHeader::new("Inputs and reference")
+                                .id_salt((&case.id, "inputs"))
+                                .show(ui, |ui| {
+                                    ui.label(&case.reference);
+                                    ui.monospace(
+                                        serde_json::to_string_pretty(&case.inputs)
+                                            .unwrap_or_default(),
+                                    );
+                                });
+                        });
+                }
+                for note in &report.limitations {
+                    ui.label(RichText::new(note).small().color(MUTED));
+                }
+            });
+        if ui.button("Export measured validation report").clicked() {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let path = crate::persistence::data_dir()
+                .join("reports")
+                .join(format!("validation-{nanos}.json"));
+            research.status = Some(match report.export(&path) {
+                Ok(()) => format!("Validation report saved to {}", path.display()),
+                Err(e) => format!("Validation export failed: {e}"),
+            });
+        }
+    }
+    ui.separator();
+}
+
 fn sources(ui: &mut egui::Ui, sim: &Sim, target: ResearchTarget) {
     ui.label(egui::RichText::new("Scientific data and source context").strong());
     ui.label(egui::RichText::new("Measured, derived, estimated, modelled, ML inference, procedural, user modified and unknown are distinct states. No ML inference is produced by the current models.").small().color(MUTED));
@@ -390,6 +488,26 @@ fn plots(ui: &mut egui::Ui, research: &mut Research, sim: &Sim, target: Research
         ui.label("Start a recording to compare orbital, physical and environment quantities on the same timeline.");
     }
 }
+fn research_targets(u: &cosmogon_sim::Universe) -> Vec<(ResearchTarget, String)> {
+    let mut targets = Vec::new();
+    for (system, sys) in u.systems.iter().enumerate() {
+        targets.push((
+            ResearchTarget::Star(system as u32),
+            format!("{} · star", sys.star.name),
+        ));
+        for (body, b) in sys.bodies.iter().enumerate().filter(|(_, b)| b.exists()) {
+            targets.push((
+                ResearchTarget::Body(cosmogon_sim::BodyRef {
+                    system: system as u32,
+                    body: body as u32,
+                }),
+                format!("{} · {}", b.name, sys.star.name),
+            ));
+        }
+    }
+    targets
+}
+
 fn experiments(
     ui: &mut egui::Ui,
     batch: &mut crate::research_batch::ResearchBatch,
@@ -410,25 +528,34 @@ fn experiments(
             batch.status = Some(e);
         }
     }
+    ui.horizontal(|ui| {
+        ui.selectable_value(&mut batch.results_mode, false, "Set up study");
+        ui.selectable_value(&mut batch.results_mode, true, "Results");
+    });
+    if batch.running() && batch.results_mode && ui.button("Cancel running study").clicked() {
+        batch.cancel();
+    }
     let running = batch.running();
     let previous_grid = (
         batch.sweep_enabled,
         batch.sweep_parameter,
+        batch.sweep_target,
         batch.sweep_from,
         batch.sweep_to,
         batch.sweep_count,
     );
-    if let (Some(initial), Some(definition)) = (&batch.frozen, &mut batch.definition) {
-        ui.label(
-            egui::RichText::new(format!(
-                "Frozen: {} · {}",
-                batch.target_name,
-                initial.date_label()
-            ))
-            .strong()
-            .color(ACCENT),
-        );
-        ui.add_enabled_ui(!running, |ui| {
+    if !batch.results_mode {
+        if let (Some(initial), Some(definition)) = (&batch.frozen, &mut batch.definition) {
+            ui.label(
+                egui::RichText::new(format!(
+                    "Frozen: {} · {}",
+                    batch.target_name,
+                    initial.date_label()
+                ))
+                .strong()
+                .color(ACCENT),
+            );
+            ui.add_enabled_ui(!running, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Experiment name");ui.text_edit_singleline(&mut definition.name);
             });
@@ -437,21 +564,21 @@ fn experiments(
                     if ui.button("How does radius affect surface gravity?").clicked() {
                         let radius=read_parameter(initial,definition.measurement_target,ParameterId::Radius).unwrap().value;
                         definition.name="Radius and surface gravity".into();definition.samples=2;definition.interval_s=60.0;
-                        batch.sweep_enabled=true;batch.sweep_parameter=ParameterId::Radius;batch.sweep_from=radius*0.5;batch.sweep_to=radius*2.0;batch.sweep_count=4;batch.compare_parameter=ParameterId::Gravity;
+                        batch.sweep_enabled=true;batch.sweep_parameter=ParameterId::Radius;batch.sweep_from=radius*0.5;batch.sweep_to=radius*2.0;batch.sweep_count=4;batch.sweep_target=Some(definition.measurement_target);batch.compare_parameter=ParameterId::Gravity;definition.primary_measurement=Some(ParameterId::Gravity);
                     }
                     ui.label(egui::RichText::new("For a fixed mass, g = GM/R² predicts one quarter of the surface gravity at twice the radius. The run measures the actual model output.").small().color(MUTED));
                 }
                 if read_parameter(initial,definition.measurement_target,ParameterId::Albedo).is_some() {
                     if ui.button("How does reflected sunlight affect temperature?").clicked() {
                         definition.name="Albedo and climate response".into();definition.samples=8;definition.interval_s=86400.0;
-                        batch.sweep_enabled=true;batch.sweep_parameter=ParameterId::Albedo;batch.sweep_from=0.1;batch.sweep_to=0.6;batch.sweep_count=6;batch.compare_parameter=ParameterId::Temperature;
+                        batch.sweep_enabled=true;batch.sweep_parameter=ParameterId::Albedo;batch.sweep_from=0.1;batch.sweep_to=0.6;batch.sweep_count=6;batch.sweep_target=Some(definition.measurement_target);batch.compare_parameter=ParameterId::Temperature;definition.primary_measurement=Some(ParameterId::Temperature);
                     }
                     ui.label(egui::RichText::new("Albedo is the reflected fraction. The global-mean climate approximation includes greenhouse/feedback fits; this is not a weather forecast.").small().color(MUTED));
                 }
                 if read_parameter(initial,definition.measurement_target,ParameterId::Steps).is_some() {
                     if ui.button("Does a finer solver change this result?").clicked() {
                         definition.name="Solver convergence exploration".into();definition.samples=16;definition.interval_s=86400.0;
-                        batch.sweep_enabled=true;batch.sweep_parameter=ParameterId::Steps;batch.sweep_from=128.0;batch.sweep_to=512.0;batch.sweep_count=4;batch.compare_parameter=ParameterId::SystemEnergy;
+                        batch.sweep_enabled=true;batch.sweep_parameter=ParameterId::Steps;batch.sweep_from=128.0;batch.sweep_to=512.0;batch.sweep_count=4;batch.sweep_target=Some(definition.measurement_target);batch.compare_parameter=ParameterId::SystemEnergy;definition.primary_measurement=Some(ParameterId::SystemEnergy);
                     }
                     ui.label(egui::RichText::new("Compare trajectories and energy across step counts. Agreement is a convergence clue; physical model error and missing forces remain.").small().color(MUTED));
                 }
@@ -459,13 +586,33 @@ fn experiments(
             ui.separator();
             ui.horizontal(|ui| {ui.label("States per run");ui.add(egui::DragValue::new(&mut definition.samples).range(2..=4096));});
             let mut days=definition.interval_s/86400.0;
-            ui.horizontal(|ui| {ui.label("Simulation days between states");if ui.add(egui::DragValue::new(&mut days).range(0.000001..=3652.5).speed(0.1)).changed(){definition.interval_s=days*86400.0;}});
+            ui.horizontal(|ui| {ui.label("Simulation days between states");if ui.add(egui::DragValue::new(&mut days).range(0.000001..=365_250_000.0).speed(0.1)).changed(){definition.interval_s=days*86400.0;}});
+            ui.horizontal(|ui| {
+                ui.label("Measure on");
+                egui::ComboBox::from_id_salt("experiment_measure_target").selected_text(definition.measurement_target.name(initial).unwrap_or("Unavailable")).show_ui(ui,|ui| {
+                    for (t,label) in research_targets(initial) {
+                        if ui.selectable_value(&mut definition.measurement_target,t,label).changed(){definition.primary_measurement=None;}
+                    }
+                });
+            });
+            egui::ComboBox::from_id_salt("experiment_primary_measure").selected_text(definition.primary_measurement.map(|p|p.descriptor().name).unwrap_or("Choose a primary measurement")).show_ui(ui,|ui| {
+                for p in PARAMETERS.iter().filter(|p|read_parameter(initial,definition.measurement_target,p.id).is_some()) {
+                    if ui.selectable_value(&mut definition.primary_measurement,Some(p.id),p.name).changed(){batch.compare_parameter=p.id;}
+                }
+            });
             ui.checkbox(&mut batch.sweep_enabled,"Vary one input across independent runs");
             if batch.sweep_enabled {
+                let mut input_target=batch.sweep_target.unwrap_or(definition.measurement_target);
+                egui::ComboBox::from_id_salt("experiment_input_target").selected_text(format!("Change on {}",input_target.name(initial).unwrap_or("Unavailable"))).show_ui(ui,|ui| {
+                    for (t,label) in research_targets(initial) {if ui.selectable_value(&mut input_target,t,label).changed(){
+                        if let Some(p)=PARAMETERS.iter().find(|p|p.editable && read_parameter(initial,t,p.id).is_some()){batch.sweep_parameter=p.id;let v=read_parameter(initial,t,p.id).unwrap().value;batch.sweep_from=v;batch.sweep_to=v;}
+                    }}
+                });
+                batch.sweep_target=Some(input_target);
                 egui::ComboBox::from_id_salt("experiment_input").selected_text(batch.sweep_parameter.descriptor().name).show_ui(ui,|ui| {
-                    for p in PARAMETERS.iter().filter(|p|p.editable && read_parameter(initial,definition.measurement_target,p.id).is_some()) {
+                    for p in PARAMETERS.iter().filter(|p|p.editable && read_parameter(initial,input_target,p.id).is_some()) {
                         if ui.selectable_value(&mut batch.sweep_parameter,p.id,p.name).changed() {
-                            let value=read_parameter(initial,definition.measurement_target,p.id).unwrap().value;batch.sweep_from=value;batch.sweep_to=value;
+                            let value=read_parameter(initial,input_target,p.id).unwrap().value;batch.sweep_from=value;batch.sweep_to=value;
                         }
                     }
                 });
@@ -476,9 +623,9 @@ fn experiments(
                 ui.horizontal(|ui|{ui.label("To");if let Some(v)=units::edit(ui,"sweep_to",batch.sweep_to,q,unit,true,None){batch.sweep_to=v;}});
                 ui.horizontal(|ui|{ui.label("Independent runs");ui.add(egui::DragValue::new(&mut batch.sweep_count).range(2..=64));});
                 if batch.sweep_from==batch.sweep_to {ui.label(egui::RichText::new("Both endpoints match: these will be repeated identical inputs.").small().color(MUTED));}
-                if previous_grid != (batch.sweep_enabled,batch.sweep_parameter,batch.sweep_from,batch.sweep_to,batch.sweep_count) || definition.sweep.is_none() {
+                if previous_grid != (batch.sweep_enabled,batch.sweep_parameter,batch.sweep_target,batch.sweep_from,batch.sweep_to,batch.sweep_count) || definition.sweep.is_none() {
                 match ExperimentDefinition::linear_values(batch.sweep_from,batch.sweep_to,batch.sweep_count) {
-                    Ok(values)=>definition.sweep=Some(ParameterSweep{target:definition.measurement_target,parameter:batch.sweep_parameter,values}),
+                    Ok(values)=>definition.sweep=Some(ParameterSweep{target:input_target,parameter:batch.sweep_parameter,values}),
                     Err(e)=>batch.status=Some(e),
                 }
                 }
@@ -492,31 +639,32 @@ fn experiments(
                 ui.text_edit_singleline(&mut batch.definition_path);
                 if ui.button("Load definition").clicked() {
                     match ExperimentDefinition::read(std::path::Path::new(&batch.definition_path)) {
-                        Ok(d)=>{if let Some(s)=&d.sweep {batch.sweep_enabled=true;batch.sweep_parameter=s.parameter;batch.sweep_from=s.values.first().copied().unwrap_or(0.0);batch.sweep_to=s.values.last().copied().unwrap_or(0.0);batch.sweep_count=s.values.len();}else{batch.sweep_enabled=false;}*definition=d;batch.status=Some("Definition loaded; run validates it against the frozen state.".into());},
+                        Ok(d)=>{if let Some(s)=&d.sweep {batch.sweep_target=Some(s.target);batch.sweep_enabled=true;batch.sweep_parameter=s.parameter;batch.sweep_from=s.values.first().copied().unwrap_or(0.0);batch.sweep_to=s.values.last().copied().unwrap_or(0.0);batch.sweep_count=s.values.len();}else{batch.sweep_enabled=false;}batch.compare_parameter=d.primary_measurement.unwrap_or(batch.compare_parameter);*definition=d;batch.status=Some("Definition loaded; run validates it against the frozen state.".into());},
                         Err(e)=>batch.status=Some(e),
                     }
                 }
                 ui.label(egui::RichText::new("The exported definition preserves fixed overrides and an ordered sweep. Replay it with the exported base.cosmo using the headless tool.").small().color(MUTED));
             });
         });
-        ui.label(
-            egui::RichText::new(format!(
-                "Requested horizon: {} · {} run(s)",
-                cosmogon_sim::time::format_duration(
-                    (definition.samples.saturating_sub(1)) as f64 * definition.interval_s
-                ),
-                definition.runs()
-            ))
-            .color(MUTED),
-        );
-        if batch.running() {
-            if ui.button("Cancel experiment").clicked() {
-                batch.cancel();
-            }
-        } else if ui.button("Run and export experiment").clicked() {
-            let path = crate::research::export_path();
-            if let Err(e) = batch.start(path) {
-                batch.status = Some(e);
+            ui.label(
+                egui::RichText::new(format!(
+                    "Requested horizon: {} · {} run(s)",
+                    cosmogon_sim::time::format_duration(
+                        (definition.samples.saturating_sub(1)) as f64 * definition.interval_s
+                    ),
+                    definition.runs()
+                ))
+                .color(MUTED),
+            );
+            if batch.running() {
+                if ui.button("Cancel experiment").clicked() {
+                    batch.cancel();
+                }
+            } else if ui.button("Run and export experiment").clicked() {
+                let path = crate::research::export_path();
+                if let Err(e) = batch.start(path) {
+                    batch.status = Some(e);
+                }
             }
         }
     }
@@ -526,7 +674,7 @@ fn experiments(
             p.completed_runs, p.total_runs, p.current_sample, p.total_samples
         ));
     }
-    if !batch.results.is_empty() {
+    if batch.results_mode && !batch.results.is_empty() {
         ui.separator();
         ui.heading("Compare completed runs");
         egui::ComboBox::from_id_salt("experiment_output")
@@ -547,8 +695,21 @@ fn experiments(
             .striped(true)
             .show(ui, |ui| {
                 ui.strong("Run");
-                ui.strong("Input (canonical unit)");
-                ui.strong(format!("Final {} ({})", p.name, p.unit));
+                let input = batch
+                    .definition
+                    .as_ref()
+                    .and_then(|d| d.sweep.as_ref())
+                    .map(|s| {
+                        format!(
+                            "{} ({})",
+                            s.parameter.descriptor().name,
+                            s.parameter.descriptor().unit
+                        )
+                    })
+                    .unwrap_or_else(|| "Initial input".into());
+                ui.strong(input);
+                ui.strong(format!("Final ({})", p.unit));
+                ui.strong("Δ from run 1");
                 ui.end_row();
                 for r in &batch.results {
                     ui.label(r.run.to_string());
@@ -560,12 +721,22 @@ fn experiments(
                     ui.label(
                         r.final_values
                             .get(p.key)
-                            .map(|v| units::fmt_num(*v))
+                            .map(|v| format!("{v:.10e}"))
                             .unwrap_or_else(|| "Unavailable".into()),
+                    );
+                    ui.label(
+                        match (
+                            r.final_values.get(p.key),
+                            batch.results[0].final_values.get(p.key),
+                        ) {
+                            (Some(v), Some(first)) => format!("{:+.6e}", v - first),
+                            _ => "Unavailable".into(),
+                        },
                     );
                     ui.end_row();
                 }
             });
+        ui.label(egui::RichText::new("Displayed digits resolve numerical differences; they do not imply observational precision. Δ uses the first completed branch, not an unmodified control.").small().color(MUTED));
     }
     if let Some(s) = &batch.status {
         ui.separator();
@@ -608,11 +779,13 @@ pub fn panel(
     let ctx = contexts.ctx_mut()?;
     let mut open = research.open;
     let mut pending = None;
+    let panel_height = (ctx.content_rect().height() - 310.0).clamp(160.0, 430.0);
     egui::Window::new("Control Panel & Research")
         .open(&mut open)
         .frame(egui::Frame::window(&ctx.style()).fill(egui::Color32::from_rgb(13, 17, 25)))
         .default_pos([310.0, 75.0])
         .default_width(650.0)
+        .max_height(panel_height + 70.0)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 for (tab, name) in [
@@ -627,7 +800,8 @@ pub fn panel(
             });
             ui.separator();
             egui::ScrollArea::vertical()
-                .max_height(590.0)
+                .id_salt(("research_scroll", research.tab))
+                .max_height(panel_height)
                 .show(ui, |ui| match research.tab {
                     1 => models(ui, &mut research, &sim, t, &mut ui_state),
                     2 => sources(ui, &sim, t),

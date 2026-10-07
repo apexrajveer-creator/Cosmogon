@@ -34,8 +34,8 @@ studies, stable event/state identities and export formats usable outside the nat
 endpoint regression is useful but does not prove trajectory accuracy everywhere between endpoints.
 Physically meaningful significant figures are distinct from double-precision serialization digits.
 
-Priority after this foundation: compute/report existing analytic and cached ephemeris benchmarks;
-expand comparative orbital trajectories and sampling diagnostics; improve graph/definition controls
+Analytic/cached endpoint reports and cross-object primary-measurement studies are now implemented.
+Priority next: expand comparative orbital trajectories and sampling diagnostics; improve graph/definition controls
 and manual keyboard/assistive-technology checks; then connect observed terrain/catalogue data and
 engineering quantities as their actual authoritative models are built. Never expose a decorative
 control for an unimplemented solver/settlement/spacecraft quantity.

@@ -16,7 +16,7 @@ gravity. Solver steps are available only for a dynamic system.
 
 Info explains dependencies, affected outputs, equations and input limits. Models documents the
 implemented method, assumptions, validity, limitations, cost, regression references and primary
-sources. Regression references are not live test results. Numerical input guards prevent obviously
+sources. The Models tab can also calculate the analytic/cached-ephemeris checks described below; registry references alone are not live test results. Numerical input guards prevent obviously
 unsafe values but do not establish a validated physical regime for every possible experiment.
 
 Data distinguishes measured, derived, estimated, modelled, procedural and user-modified quantities.
@@ -78,12 +78,12 @@ between 2 and 4096; interval-days must be finite and between 0.000001 and 3652.5
 to existing stars/bodies, case-insensitively. Native automation instead requests a sample every
 research-every rendered app frames (1–600); actual simulation times depend on clock/frame timing.
 Native research-samples clamps to 2–4096. Automated research defaults to the Solar System Lab when
-no scene/load is specified. Capture, performance and research exports coordinate --quit so all
+no scene/load is specified; CLI experiment/sweep creation also defaults to Lab. Capture, performance and research exports coordinate --quit so all
 requested outputs complete. Export/load failure returns a nonzero process status.
 
 The research registries and recordings are outside Universe serialization. The save schema and
 golden fingerprint remain unchanged. These tools support exploratory studies with the implemented
-approximations; independent model validation and broader control coverage remain open work.
+approximations; broader independent model validation and control coverage remain open work.
 
 ## Orbital measurements and diagnostics
 
@@ -113,7 +113,7 @@ scientifically equivalent to those tools.
 
 Experiments guides the user through freezing a starting state, changing one input and comparing
 computed outcomes. Three introductory questions explore radius/gravity, albedo/global-mean climate,
-and solver convergence. Advanced controls expose the same authoritative model and sampling plan.
+and solver convergence. Advanced controls expose the same authoritative model and sampling plan. The changed object and measured object can differ: changing Jupiter’s mass can record Earth’s eccentricity. A primary measurement is saved in the definition, while each run still exports all supported readings.
 The copied starting state stays fixed while the live universe continues. Reference data can be
 copied for an experiment without changing the read-only reference universe.
 
@@ -123,8 +123,7 @@ value per independent branch. Each branch begins from the same frozen state. Max
 checks cancellation between bounded work slices; validation/snapshot/export operations may take
 longer than a slice. The worker has a bounded progress queue. It never mutates the live Sim. A run
 exports only after all requested sample times were reached. Completed runs survive cancellation;
-batch.json explicitly says incomplete and records the reason. Thread/application termination is
-not a resumable batch service yet.
+batch.json explicitly says incomplete and records the reason. The Results view opens when a worker finishes, including failures with completed branches; partial results do not count as successful completion. Thread/application termination is not a resumable batch service yet.
 
 The batch root contains base.cosmo, definition.json, batch.json and run-0001 etc. Each completed
 run has the six-file observer bundle. batch.json provides ordered input values and final outputs
@@ -161,3 +160,35 @@ research exports, and returns failure status for invalid plans/output/load error
 Comparisons and CSV expose real calculated data. Broader observed-data coverage, uncertainty
 propagation, stable event identities, research catalogue ingestion, independently benchmarked
 model regimes, screen-reader/manual keyboard checks and full graph-layout persistence remain open.
+
+
+## Measured orbit validation
+
+Models → Check orbit models against reference cases calculates a fresh report on an app worker;
+`cosmogon-cli validate --output /tmp/orbit-check-1.json` runs the same fixtures headlessly. The report
+contains two analytic circular test-particle orbits (1000/2000 steps per period) and the Accurate
+Solar Lab at 365 days against nine locally cached 2027 JPL endpoints. Every metric has its actual
+value, unit and historical regression guard. The report exports initial vectors, rounded endpoint
+coordinates, epoch, frame, source and solver conditions. These are fixed fixtures, independent of
+the currently selected/edited universe. Existing report files are protected.
+
+The JPL endpoint residual is hundreds of kilometres for Earth/Moon despite tiny numerical error in
+the simple analytic case. Numerical precision and physical-model completeness are different. Passing
+historical regression guards does not certify a sandbox or validate climate, collision, stellar or
+civilization models. No covariance, interval-wide trajectory bound or independent integrator comparison
+is supplied. See [SCIENTIFIC_VALIDATION](SCIENTIFIC_VALIDATION.md) for measured evidence.
+
+```sh
+./target/release/cosmogon-cli --help
+./target/release/cosmogon-cli validate --output /tmp/orbit-check-1.json
+./target/release/cosmogon-cli sweep --target Jupiter --parameter mass_kg \
+  --from 9.49e26 --to 3.796e27 --runs 3 --measure-target Earth --measure eccentricity \
+  --samples 4 --interval-days 10 --output /tmp/jupiter-earth-study-1
+```
+
+`--target` selects the changed object for sweeps; `--measure-target` selects the observed object.
+`--measure` accepts a canonical descriptor key or parameter ID and persists the comparison choice.
+The typed definition/native sweep interval permits up to one million years between states; long
+N-body runs can require substantial computation. This input bound is not an accuracy claim. The
+single CLI `experiment` observer retains its 3652.5-day maximum. Malformed command-line requests
+return a concise error and failure status rather than panicking.

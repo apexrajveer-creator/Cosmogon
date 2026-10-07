@@ -41,12 +41,15 @@
 * Add bounded native observer plots and protected six-file CSV/initial-state/edit/event/model bundles.
   Paused edits have distinct edit_count rows; rewind stops a recording. Missing uncertainty is null.
 * Add CLI model registry export and uniform-simulation-time experiments, plus coordinated native
-  developer research/capture/profile exports. Add frozen-state definition replay and bounded independent parameter sweeps; no independent scientific validation claimed.
+  developer research/capture/profile exports. Add frozen-state definition replay and bounded independent parameter sweeps; no blanket scientific validation claimed.
 * Add parent-relative orbital measurements and bounded dynamic-particle Newtonian diagnostics.
   Charts support nearest-state inspection, zoom/pan, log scale, fractional changes and event markers.
 * Add cancellable native background studies with guided questions, saved prepared definitions,
   ordered sweep values and canonical-unit outcome comparison. CLI sweep/replay shares the runner.
   Frozen-state fingerprints reject a changed base; incomplete batches retain completed runs.
+* Calculate native/headless analytic circular-orbit and cached JPL endpoint validation reports with actual residuals, initial/reference vectors, units, solver conditions and explicit coverage limits.
+* Allow independent changed/measured objects and a persisted primary measurement. Surface completed branches from cancelled/failed studies without reporting success; open computed results automatically.
+* Fit research scroll areas within the window, separate per-tab scroll state, add CLI help and graceful argument errors; research creation defaults to Solar Lab.
 * Simulation state and save format unchanged; **golden fingerprint unchanged**.
 
 ## 1.0.0 — The whole universe (2026-10-04)

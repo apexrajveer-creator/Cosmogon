@@ -4,8 +4,10 @@ mod definition;
 mod parameters;
 mod recording;
 mod registry;
+mod validation;
 
 pub use definition::*;
 pub use parameters::*;
 pub use recording::*;
 pub use registry::*;
+pub use validation::*;

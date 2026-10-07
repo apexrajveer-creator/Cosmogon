@@ -97,3 +97,6 @@ See [RESEARCH](docs/RESEARCH.md) for native controls, provenance, scientific lim
 Use new output directories. Native cadence counts app frames; CLI cadence requests simulation days.
 `--panel control|models|sources|plots` opens a research tab. Models prints registry JSON without
 creating a universe. No additional installation or network service is required.
+
+Measured orbit checks: `./target/release/cosmogon-cli validate --output /tmp/orbit-check-1.json`.
+`--panel validation` opens Models and starts these fixed fixtures for native captures. CLI `--help` documents cross-object sweeps and primary measurements; existing export paths are protected.
