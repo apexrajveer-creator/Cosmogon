@@ -269,7 +269,7 @@ fn initial_focus(mut rig: ResMut<CameraRig>, mut sim: ResMut<Sim>, args: Res<Arg
         let site = cosmogon_sim::planet::landing::find(id).expect("validated site argument");
         let result = (|| {
             let Target::Body(r) = find_target(&sim, "Mars").ok_or("Mars is absent from this world")? else { return Err("Mars target is not a body".to_string()) };
-            let anchor = crate::surface::SurfaceAnchor::new(r, site.latitude_north_deg, site.longitude_east_deg, args.surface_altitude, Some(id.clone()), !args.surface_snapshot)?;
+            let anchor = crate::surface::SurfaceAnchor::new_dataset(r, sim.universe.body(r).elevation_data.and_then(cosmogon_sim::planet::terrain::ElevationData::mola).ok_or("Surface travel requires observed MOLA terrain")?, site.latitude_north_deg, site.longitude_east_deg, args.surface_altitude, Some(id.clone()), !args.surface_snapshot)?;
             let anchor = if args.surface_horizon {anchor.horizon()} else {anchor};
             rig.travel_surface(anchor, &sim)?;
             sim.selected = Some(Target::Body(r));

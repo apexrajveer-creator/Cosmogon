@@ -20,8 +20,14 @@ pub struct SurfaceAnchor {
 }
 
 impl SurfaceAnchor {
+    #[cfg(test)]
     pub fn new(body: BodyRef, latitude: f64, longitude: f64, altitude: f64, site: Option<String>, tracked: bool) -> Result<Self, String> {
-        mola::read(latitude, longitude)?;
+        Self::new_dataset(body, mola::Dataset::Four, latitude, longitude, altitude, site, tracked)
+    }
+    // Coordinate identity, altitude and view mode are validated together with the pinned field.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_dataset(body: BodyRef, dataset: mola::Dataset, latitude: f64, longitude: f64, altitude: f64, site: Option<String>, tracked: bool) -> Result<Self, String> {
+        dataset.read(latitude, longitude)?;
         if !altitude.is_finite() || !(60.0..=1.0e8).contains(&altitude) {
             return Err("Choose an altitude between 60 m and 100,000 km above the shared terrain.".into());
         }
@@ -35,7 +41,7 @@ impl SurfaceAnchor {
         let right = forward.cross(local).normalize();
         let up = right.cross(forward).normalize();
         let orientation = DQuat::from_mat3(&DMat3::from_cols(right, up, -forward)).normalize();
-        let anchor = Self { body, latitude_deg: latitude, longitude_east_deg: longitude.rem_euclid(360.0), altitude_m: altitude, site_id: site, terrain_dataset: mola::DATASET.into(), tracked, local_orientation_xyzw: orientation.to_array() };
+        let anchor = Self { body, latitude_deg: latitude, longitude_east_deg: longitude.rem_euclid(360.0), altitude_m: altitude, site_id: site, terrain_dataset: dataset.id().into(), tracked, local_orientation_xyzw: orientation.to_array() };
         if !anchor.valid() { return Err("Invalid surface anchor or mismatched landing reference.".into()); }
         Ok(anchor)
     }
@@ -53,7 +59,7 @@ impl SurfaceAnchor {
 
     pub fn valid(&self) -> bool {
         let q = DQuat::from_array(self.local_orientation_xyzw);
-        self.terrain_dataset == mola::DATASET && self.latitude_deg.is_finite() && (-90.0..=90.0).contains(&self.latitude_deg)
+        mola::Dataset::from_id(&self.terrain_dataset).is_ok() && self.latitude_deg.is_finite() && (-90.0..=90.0).contains(&self.latitude_deg)
             && self.longitude_east_deg.is_finite() && (0.0..360.0).contains(&self.longitude_east_deg)
             && self.altitude_m.is_finite() && (60.0..=1.0e8).contains(&self.altitude_m)
             && q.is_finite() && (q.length_squared() - 1.0).abs() < 0.01
@@ -64,11 +70,13 @@ impl SurfaceAnchor {
         if !self.valid() { return Err("Invalid or unsupported surface anchor.".into()); }
         let body = sim.universe.systems.get(self.body.system as usize).and_then(|s|s.bodies.get(self.body.body as usize))
             .filter(|b|b.exists()).ok_or("Surface reference no longer exists; tracking released.")?;
-        if body.elevation_data != Some(ElevationData::MarsMola) || !body.name.eq_ignore_ascii_case("Mars") {
+        if body.elevation_data.and_then(ElevationData::mola).is_none() || !body.name.eq_ignore_ascii_case("Mars") {
             return Err("Surface travel requires Mars with observed MOLA terrain; this world's stored terrain is preserved.".into());
         }
+        let dataset = body.elevation_data.and_then(ElevationData::mola).expect("checked source");
+        if dataset.id() != self.terrain_dataset {return Err("Terrain source changed; this viewpoint pins a different MOLA dataset. Tracking released. Restore that source or create a new viewpoint.".into());}
         let local = DVec3::from_array(dir_from_lat_lon(self.latitude_deg.to_radians(), self.longitude_east_deg.to_radians()));
-        let radius = body.radius + mola::elevation_m(local.to_array());
+        let radius = body.radius + dataset.elevation_m(local.to_array());
         let frame = body_rotation_f64(sim, self.body, sim.universe.time);
         let center = to_render(sim.universe.body_position(self.body, sim.universe.time));
         Ok(Flight::new(center + frame * local * (radius + self.altitude_m), frame * DQuat::from_array(self.local_orientation_xyzw)))
@@ -88,6 +96,31 @@ mod tests {
         let sim = Sim::new(cosmogon_sim::Universe::new(cosmogon_sim::UniverseSettings { scenario: cosmogon_sim::Scenario::SolarSystemLab, ..Default::default() }), Session::Reference { dataset: "surface-test".into(), title: "Test".into() });
         let Target::Body(r) = find_target(&sim, "Mars").unwrap() else { panic!() };
         (sim, r)
+    }
+    #[test]
+    fn source_edits_undo_exactly_release_tracking_and_preserve_pinned_viewpoints() {
+        use cosmogon_sim::sandbox::Edit;
+        let (mut sim,r)=scene();
+        let original=serde_json::to_string(&sim.universe).unwrap();
+        let edit=Edit::SetMarsTerrain {body:r,dataset:ElevationData::MarsMola16};
+        assert!(sim.edit(edit.clone(),0.0).is_err());
+        assert_eq!(original,serde_json::to_string(&sim.universe).unwrap());
+        sim.session=Session::Sandbox(crate::persistence::Manifest::new("Test","","dev",crate::persistence::Origin::default()));
+        let old=SurfaceAnchor::new(r,-4.59,137.44,1000.0,Some("curiosity".into()),true).unwrap();
+        let mut rig=CameraRig::default();rig.travel_surface(old.clone(),&sim).unwrap();
+        let point=Viewpoint::capture("Pinned four",&sim,&rig,&Presentation::default());
+        sim.edit(edit,0.0).unwrap();
+        assert!(old.pose(&sim).is_err());
+        assert!(point.restore(&sim,&mut rig,&mut Presentation::default()).is_err());
+        rig.follow_surface(&sim);
+        assert!(rig.surface_anchor.is_none());assert!(rig.navigation_notice.as_deref().unwrap().contains("Terrain source changed"));
+        let fresh=SurfaceAnchor::new_dataset(r,mola::Dataset::Sixteen,-4.59,137.44,1000.0,Some("curiosity".into()),true).unwrap();
+        let pose=fresh.pose(&sim).unwrap();
+        let radius=(pose.position-target_info(&sim,Target::Body(r)).0).length();
+        assert!((radius-sim.universe.body(r).radius-mola::Dataset::Sixteen.read(-4.59,137.44).unwrap().height_above_areoid_m-1000.0).abs()<0.001);
+        sim.undo(1.0);assert_eq!(original,serde_json::to_string(&sim.universe).unwrap());
+        assert!(old.pose(&sim).is_ok());assert!(fresh.pose(&sim).is_err());
+        sim.redo(2.0);assert!(fresh.pose(&sim).is_ok());assert!(old.pose(&sim).is_err());
     }
     #[test]
     fn surface_pose_matches_shared_height_at_seams_poles_and_new_times() {

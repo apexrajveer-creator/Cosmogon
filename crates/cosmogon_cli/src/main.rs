@@ -25,6 +25,7 @@ struct Args {
     recording: Option<String>,
     reference: Option<String>,
     site: Option<String>,
+    mars_terrain: Option<String>,
     from_site: Option<String>,
     to_site: Option<String>,
     latitude: f64,
@@ -61,6 +62,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         recording: None,
         reference: None,
         site: None,
+        mars_terrain: None,
         from_site: None,
         to_site: None,
         latitude: 0.0,
@@ -111,6 +113,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             },
             "--interval-days" => a.interval_days = number(val()?, &flag)?,
             "--target" => { a.target = val()?; explicit_target = true; },
+            "--mars-terrain" => {let v=val()?;if !matches!(v.as_str(),"4"|"16") {return Err("--mars-terrain requires 4 or 16 pixels per degree".into());}a.mars_terrain=Some(v);},
             "--site" => a.site = Some(val()?),
             "--from-site" => a.from_site = Some(val()?),
             "--to-site" => a.to_site = Some(val()?),
@@ -155,6 +158,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             unknown => return Err(format!("Unknown flag {unknown}; use --help")),
         }
     }
+    if a.mars_terrain.is_some() && !matches!(a.cmd.as_str(),"terrain"|"surface"|"section") {return Err("--mars-terrain is a terrain, surface or section option".into());}
+    if a.cmd == "terrain" && (a.mars_terrain.is_none() || a.save.is_none() || explicit_coordinates || explicit_target || a.definition.is_some()) {return Err("terrain requires --mars-terrain 4|16 --save NEW_FILE; optionally --initial SAVE".into());}
     if a.cmd != "section" && (a.from_site.is_some() || a.to_site.is_some()) {return Err("--from-site and --to-site are terrain section options".into());}
     if a.cmd == "section" {
         if explicit_target && !a.target.eq_ignore_ascii_case("Mars") {return Err("Terrain sections require Mars with the pinned MOLA field".into());}
@@ -190,6 +195,7 @@ fn help() {
   surface --target Mars          Sample authoritative MOLA height and source-cell coverage JSON
   section [--output NEW_DIR]      Calculate/export a source-supported MOLA terrain section
   sites                          Print historical landing references, sources and registration limits
+  terrain --mars-terrain 4|16 --save NEW_FILE  Explicit source edit; optionally --initial SAVE
   datasets                       Print embedded MOLA source/version/checksum metadata
   models                         Print model/source/parameter registry JSON
   inspect --recording DIR         Validate and print saved numeric recording data
@@ -199,6 +205,7 @@ fn help() {
   validate [--output NEW_FILE]   Calculate analytic and cached JPL regression measurements
   run | check | survey | profile Run the released simulation/determinism tools
 
+Terrain source: --mars-terrain 4|16 on surface/section explicitly edits that world.
 Surface coordinates: --latitude -90..90 --longitude -360..360 (degrees, east positive)
 Or: surface --site perseverance|curiosity|insight|viking-1 (historical touchdown, not current rover position)
 Sections: --from-site curiosity --to-site insight --samples 2..1024
@@ -249,7 +256,8 @@ fn main() {
         "help" => help(),
         "section" => {if let Err(e)=section(&a) {eprintln!("Terrain section failed: {e}");std::process::exit(1);}},
         "sites" => println!("{}", serde_json::to_string_pretty(&cosmogon_sim::planet::landing::registry()).unwrap()),
-        "datasets" => println!("{}", cosmogon_sim::planet::mola::METADATA),
+        "datasets" => println!("{}", serde_json::to_string_pretty(&cosmogon_sim::planet::mola::registry()).unwrap()),
+        "terrain" => {if let Err(e)=terrain(&a) {eprintln!("Terrain change failed: {e}");std::process::exit(1);}},
         "surface" => { if let Err(e) = surface(&a) { eprintln!("Surface probe failed: {e}"); std::process::exit(1); } }
         "models" => println!("{}", serde_json::to_string_pretty(&serde_json::json!({"format":"cosmogon-model-registry", "schema_version":1, "models":cosmogon_sim::research::PhysicsModelRegistry::models(), "sources":cosmogon_sim::research::SCIENTIFIC_SOURCES, "parameters":cosmogon_sim::research::PARAMETERS})).unwrap()),
         "inspect" => {
@@ -573,6 +581,12 @@ mod argument_tests {
         parse_args(values.iter().map(|s| s.to_string()))
     }
     #[test]
+    fn source_selection_is_explicit_and_rejects_ignored_options() {
+        for values in [vec!["surface","--mars-terrain","32"],vec!["run","--mars-terrain","16"],vec!["terrain","--mars-terrain","16"],vec!["terrain","--save","x"],vec!["terrain","--mars-terrain","4","--save","x","--target","Earth"]] {assert!(args(&values).is_err());}
+        assert_eq!(args(&["surface","--site","curiosity","--mars-terrain","16"]).unwrap().mars_terrain.as_deref(),Some("16"));
+        assert!(args(&["terrain","--mars-terrain","16","--save","x"]).is_ok());
+    }
+    #[test]
     fn malformed_requests_return_errors_and_research_defaults_to_lab() {
         for values in [
             vec!["sweep", "--samples", "bad"],
@@ -605,13 +619,31 @@ mod argument_tests {
     }
 }
 
+fn terrain_world(a: &Args) -> Result<Universe,String> {
+    let mut u=if let Some(path)=&a.initial {save::read_file(std::path::Path::new(path)).map_err(|e|e.to_string())?} else {Universe::new(settings(a,a.seed))};
+    if let Some(ppd)=&a.mars_terrain {
+        let r=u.systems.iter().find_map(|s|s.bodies.iter().enumerate().find(|(_,b)|b.exists() && b.name.eq_ignore_ascii_case("Mars")).map(|(j,_)|cosmogon_sim::BodyRef {system:s.id,body:j as u32})).ok_or("Mars is absent from this world")?;
+        let dataset=if ppd=="16" {cosmogon_sim::planet::terrain::ElevationData::MarsMola16} else {cosmogon_sim::planet::terrain::ElevationData::MarsMola};
+        u.apply_edit(cosmogon_sim::sandbox::Edit::SetMarsTerrain {body:r,dataset})?;
+    }
+    Ok(u)
+}
+fn terrain(a: &Args) -> Result<(),String> {
+    use std::io::Write;
+    let u=terrain_world(a)?;
+    let bytes=save::to_json(&u,"Mars terrain source choice").map_err(|e|e.to_string())?;
+    let path=std::path::Path::new(a.save.as_ref().ok_or("--save required")?);
+    if let Some(parent)=path.parent().filter(|p|!p.as_os_str().is_empty()) {std::fs::create_dir_all(parent).map_err(|e|e.to_string())?;}
+    let mut file=std::fs::OpenOptions::new().write(true).create_new(true).open(path).map_err(|e|format!("Existing saves are protected: {e}"))?;
+    file.write_all(bytes.as_bytes()).map_err(|e|e.to_string())?;
+    println!("Saved explicit terrain source change to {}",path.display());Ok(())
+}
 fn surface(a: &Args) -> Result<(), String> {
     use cosmogon_sim::planet::terrain::ElevationData;
-    let u = if let Some(path) = &a.initial { save::read_file(std::path::Path::new(path)).map_err(|e|e.to_string())? }
-        else { Universe::new(settings(a,a.seed)) };
+    let u = terrain_world(a)?;
     let body = u.systems.iter().flat_map(|s| &s.bodies).find(|b|b.exists() && b.name.eq_ignore_ascii_case(&a.target)).ok_or("Target body not found")?;
-    if body.elevation_data != Some(ElevationData::MarsMola) { return Err("This probe requires a body using the embedded Mars MOLA grid; older procedural saves retain their original terrain".into()); }
-    let mut record = cosmogon_sim::planet::landing::probe(a.latitude,a.longitude,a.site.as_deref())?;
+    let dataset=body.elevation_data.and_then(ElevationData::mola).ok_or("This probe requires a supported MOLA grid; older procedural saves retain their terrain")?;
+    let mut record = cosmogon_sim::planet::landing::probe_dataset(dataset,a.latitude,a.longitude,a.site.as_deref())?;
     record["target"]=serde_json::json!(body.name);
     println!("{}",serde_json::to_string_pretty(&record).map_err(|e|e.to_string())?);
     Ok(())
@@ -619,10 +651,11 @@ fn surface(a: &Args) -> Result<(), String> {
 
 fn section(a: &Args) -> Result<(),String> {
     use cosmogon_sim::planet::{section::{Definition,Point},terrain::ElevationData};
-    let u=if let Some(path)=&a.initial {save::read_file(std::path::Path::new(path)).map_err(|e|e.to_string())?} else {Universe::new(settings(a,a.seed))};
+    let u=terrain_world(a)?;
     let body=u.systems.iter().flat_map(|s|&s.bodies).find(|b|b.exists() && b.name.eq_ignore_ascii_case("Mars")).ok_or("Mars is absent from this world")?;
-    if body.elevation_data != Some(ElevationData::MarsMola) {return Err("Terrain sections require the pinned MOLA field; this saved terrain is preserved".into());}
-    let definition=if let Some(path)=&a.definition {Definition::read(std::path::Path::new(path))?} else {Definition {start:Point::site(a.from_site.as_deref().unwrap_or("curiosity"))?,end:Point::site(a.to_site.as_deref().unwrap_or("insight"))?,reference_radius_m:body.radius,samples:a.samples,..Default::default()}};
+    let dataset=body.elevation_data.and_then(ElevationData::mola).ok_or("Terrain sections require a pinned MOLA field; this saved terrain is preserved")?;
+    let definition=if let Some(path)=&a.definition {Definition::read(std::path::Path::new(path))?} else {Definition {terrain_dataset:dataset.id().into(),start:Point::site(a.from_site.as_deref().unwrap_or("curiosity"))?,end:Point::site(a.to_site.as_deref().unwrap_or("insight"))?,reference_radius_m:body.radius,samples:a.samples,..Default::default()}};
+    if definition.terrain_dataset != dataset.id() {return Err("Section pins a different terrain dataset than this world; restore that source explicitly or select the correct saved world".into());}
     let section=definition.calculate()?;
     if let Some(path)=&a.output {section.export(std::path::Path::new(path))?;}
     println!("{}",serde_json::to_string_pretty(&section).map_err(|e|e.to_string())?);Ok(())

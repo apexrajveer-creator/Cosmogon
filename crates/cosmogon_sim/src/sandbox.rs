@@ -92,6 +92,8 @@ pub enum Edit {
     /// Put the body on the given orbit around its parent; angles in rad, mean anomaly *now*.
     SetOrbit { body: BodyRef, a: f64, e: f64, i: f64, node: f64, peri: f64, mean_anomaly: f64 },
     SetProperty { body: BodyRef, property: BodyProperty },
+    /// Explicit observed height-source choice; does not switch gravity or orbital state.
+    SetMarsTerrain { body: BodyRef, dataset: terrain::ElevationData },
     SetStar { system: u32, property: StarProperty },
     /// Choose analytic (Kepler) or N-body gravity and its settings.
     SetPhysics { system: u32, nbody: bool, settings: PhysicsSettings },
@@ -103,7 +105,7 @@ impl Edit {
     pub fn system(&self) -> u32 {
         match self {
             Edit::AddBody { system, .. } | Edit::SetStar { system, .. } | Edit::SetPhysics { system, .. } | Edit::Intervene { system, .. } => *system,
-            Edit::RemoveBody { body } | Edit::SetState { body, .. } | Edit::Impulse { body, .. } | Edit::SetOrbit { body, .. } | Edit::SetProperty { body, .. } => body.system,
+            Edit::RemoveBody { body } | Edit::SetState { body, .. } | Edit::Impulse { body, .. } | Edit::SetOrbit { body, .. } | Edit::SetProperty { body, .. } | Edit::SetMarsTerrain { body, .. } => body.system,
         }
     }
 }
@@ -411,6 +413,10 @@ fn validate(u: &Universe, e: &Edit) -> Result<(), String> {
                 _ => {}
             }
         }
+        Edit::SetMarsTerrain { body, dataset } => {
+            body_ok(body)?;
+            if !u.body(*body).name.eq_ignore_ascii_case("Mars") || !u.body(*body).kind.has_surface() || dataset.mola().is_none() {return Err("MOLA source selection requires Mars and a supported MOLA grid".into());}
+        }
         Edit::SetStar { property, .. } => match property {
             StarProperty::Mass(m) => {
                 finite_positive(*m, "Mass")?;
@@ -449,6 +455,7 @@ fn describe(u: &Universe, e: &Edit) -> String {
             BodyProperty::Co2Fraction(f) => format!("Set CO₂ of {} to {:.4}%", name(body), f * 100.0),
             BodyProperty::WaterInventory(w) => format!("Set water of {} to {w:.3} Earth oceans", name(body)),
         },
+        Edit::SetMarsTerrain { body, dataset } => format!("Set terrain of {} to {}", name(body), dataset.mola().expect("validated MOLA").label()),
         Edit::SetStar { system, property } => {
             let s = &u.system(*system).star.name;
             match property {
@@ -480,6 +487,20 @@ impl Universe {
             let summary = self.apply_intervention(*civ, action);
             self.edits.push(EditRecord { time: t, summary: summary.clone(), edit });
             return Ok(EditOutcome { created: None, summary });
+        }
+        // Height-source edits preserve the existing gravity model and phase. Refresh the
+        // ordinary derived environment, then journal the source change for reproducibility.
+        if let Edit::SetMarsTerrain { body, dataset } = &edit {
+            let summary = describe(self, &edit);
+            let (s,j)=(body.system as usize,body.body as usize);
+            let b=&mut self.systems[s].bodies[j];
+            b.elevation_data=Some(*dataset);
+            b.mark("terrain",Quality::Derived);
+            b.sea_level=terrain::Terrain::of(b).sea_level_for(b.hydro.ocean_fraction);
+            self.refresh_body_environment(s,j,t);
+            self.edits.push(EditRecord {time:t,summary:summary.clone(),edit:edit.clone()});
+            self.history.push(Event {time:t,category:Category::Astronomy,importance:4,title:summary.clone(),detail:"Observed terrain source changed explicitly. Camera anchors and studies pin their previous dataset.".into(),system:Some(body.system),body:Some(body.body),civ:None});
+            return Ok(EditOutcome {created:None,summary});
         }
         let s = edit.system() as usize;
         let summary = describe(self, &edit);
@@ -662,7 +683,7 @@ impl Universe {
                     sys.deactivate_dynamics(t)?;
                 }
             }
-            Edit::Intervene { .. } => unreachable!("handled above"),
+            Edit::Intervene { .. } | Edit::SetMarsTerrain { .. } => unreachable!("handled above"),
         }
 
         let sys = &mut self.systems[s];

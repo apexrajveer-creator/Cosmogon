@@ -38,19 +38,22 @@ pub fn registry() -> serde_json::Value {
 
 /// A portable reading with source support. The caller checks the selected body's terrain.
 pub fn probe(latitude: f64, longitude: f64, site_id: Option<&str>) -> Result<serde_json::Value, String> {
+    probe_dataset(super::mola::Dataset::Four, latitude, longitude, site_id)
+}
+pub fn probe_dataset(dataset: super::mola::Dataset, latitude: f64, longitude: f64, site_id: Option<&str>) -> Result<serde_json::Value, String> {
     let site = site_id.map(|id| find(id).ok_or_else(|| format!("Unknown landing reference: {id}"))).transpose()?;
     if site.is_some_and(|s| s.latitude_north_deg != latitude || s.longitude_east_deg != longitude.rem_euclid(360.0)) {
         return Err("Landing identity does not match the probe coordinates".into());
     }
-    let reading = super::mola::read(latitude, longitude)?;
-    let height = super::mola::elevation_m(super::terrain::dir_from_lat_lon(latitude.to_radians(), longitude.to_radians()));
+    let reading = dataset.read(latitude, longitude)?;
+    let height = dataset.elevation_m(super::terrain::dir_from_lat_lon(latitude.to_radians(), longitude.to_radians()));
     Ok(serde_json::json!({"format":"cosmogon-surface-probe","schema_version":2,
-        "terrain_dataset":super::mola::DATASET,"terrain_source":super::mola::SOURCE_URL,
+        "terrain_dataset":dataset.id(),"terrain_metadata":serde_json::from_str::<serde_json::Value>(dataset.metadata()).map_err(|e|e.to_string())?,"terrain_source":super::mola::SOURCE_URL,
         "landing_registry":VERSION,"sources_accessed":ACCESSED,"landing_reference":site,
         "coordinate_registration":REGISTRATION,"reading":reading,"authoritative_height_m":height,
         "frame":"IAU2000 planetocentric latitude; east longitude; GMM3 degree/order 50 areoid height",
-        "sampling":"Bilinear between 0.25-degree grid pixel centres; zero-observation cells are provider-interpolated",
-        "limitations":"Global overview (14.82 km equatorial spacing), not landing safety/local relief. No per-cell uncertainty or propagated covariance. Rendering uses a spherical base radius; areoid shape is not modelled. Colours, climate and subpixel shading are generated/modelled separately."}))
+        "sampling":format!("Bilinear between {}-degree grid pixel centres; zero-observation cells are provider-interpolated",1.0/dataset.ppd() as f64),
+        "limitations":"Global overview (source spacing recorded in metadata), not landing safety/local relief. No per-cell uncertainty or propagated covariance. Rendering uses a spherical base radius; areoid shape is not modelled. Colours, climate and subpixel shading are generated/modelled separately."}))
 }
 
 #[cfg(test)]

@@ -49,3 +49,7 @@ processed version still requires its own pinned product/label/checksum metadata.
 This is the next connected phase-8 build. Native section-definition import/preferences and a visible
 transect line remain useful follow-ons; habitat engineering follows with actual shared state, sources,
 conservation/balance checks and honest model bounds rather than decorative panels.
+
+## Subsequent implementation
+
+The connected [MARS_REFINEMENT](MARS_REFINEMENT.md) build now implements the separately pinned 16ppd field. Both payloads and primary labels match the provider inventory; raw height range is −8177..21171 m and coverage contains 903558 zero-shot bins. This supersedes the initial binary/availability unknowns above; overview/coverage/frame limitations remain.

@@ -802,7 +802,7 @@ fn surface_signature(sim: &Sim, r: BodyRef) -> u64 {
     let b = sim.universe.body(r);
     let veg = sim.universe.biosphere(r).is_some_and(|x| x.vegetated());
     let q = |x: f64, s: f64| (x * s).round() as i64 as u64;
-    q(b.hydro.ocean_fraction, 40.0) ^ (q(b.hydro.ice_fraction, 40.0) << 8) ^ (q(b.temperature, 0.2) << 16) ^ ((veg as u64) << 40)
+    cosmogon_sim::planet::terrain::Terrain::of(b).cache_key().rotate_left(43) ^ q(b.hydro.ocean_fraction, 40.0) ^ (q(b.hydro.ice_fraction, 40.0) << 8) ^ (q(b.temperature, 0.2) << 16) ^ ((veg as u64) << 40)
 }
 
 fn request_bakes(
@@ -848,12 +848,14 @@ fn request_bakes(
 
 fn finish_bakes(
     mut commands: Commands,
+    sim: Res<Sim>,
     mut q: Query<(Entity, &mut BodyVisual, &mut PendingBake, &MeshMaterial3d<PlanetMaterial>)>,
     mut planet_mats: ResMut<Assets<PlanetMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
     for (e, mut b, mut p, mat) in &mut q {
         if let Some(baked) = block_on(future::poll_once(&mut p.task)) {
+            if p.signature != surface_signature(&sim, b.r) {commands.entity(e).remove::<PendingBake>();continue;}
             if let Some(m) = planet_mats.get_mut(&mat.0) {
                 m.albedo = images.add(image_from(baked.albedo, baked.width, baked.height, TextureFormat::Rgba8UnormSrgb));
                 m.clouds = images.add(image_from(baked.clouds, baked.width, baked.height, TextureFormat::R8Unorm));

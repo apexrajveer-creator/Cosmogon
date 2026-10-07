@@ -53,14 +53,16 @@ fn graph(ui:&mut egui::Ui,section:&Section,cursor:&mut usize) {
 pub fn panel(mut contexts:EguiContexts,mut state:ResMut<UiState>,mut study:ResMut<Study>,mut sim:ResMut<Sim>,mut rig:ResMut<CameraRig>) -> Result {
     if !state.surface_study_open || state.hidden || state.photo_mode {return Ok(());}
     let ctx=contexts.ctx_mut()?;let mut open=state.surface_study_open;
-    let mars=sim.universe.systems.iter().find_map(|s|s.bodies.iter().enumerate().find(|(_,b)|b.exists() && b.name.eq_ignore_ascii_case("Mars") && b.elevation_data==Some(ElevationData::MarsMola)).map(|(i,b)|(BodyRef {system:s.id,body:i as u32},b.radius)));
+    let mars=sim.universe.systems.iter().find_map(|s|s.bodies.iter().enumerate().find(|(_,b)|b.exists() && b.name.eq_ignore_ascii_case("Mars") && b.elevation_data.and_then(ElevationData::mola).is_some()).map(|(i,b)|(BodyRef {system:s.id,body:i as u32},b.radius,b.elevation_data.and_then(ElevationData::mola).expect("checked source"))));
     let study=&mut *study;
     let mut action=None;
     egui::Window::new("Mars terrain section").open(&mut open).default_pos([340.0,82.0]).default_width(660.0).show(ctx,|ui| {
         ui.label("Measure broad topography between coordinates or historical landing references.");
-        ui.label(egui::RichText::new("MOLA 0.25° overview · no local slopes, rover routes or landing-safety assessment. Missing uncertainty stays unavailable.").small().color(ACCENT));
-        let Some((_,radius))=mars else {ui.label("This world has no Mars using the pinned MOLA field. Legacy terrain is preserved.");return;};
+
+        let Some((_,radius,dataset))=mars else {ui.label("This world has no Mars using the pinned MOLA field. Legacy terrain is preserved.");return;};
+        ui.label(egui::RichText::new(format!("{} overview · no local slopes, rover routes or landing-safety assessment. Missing uncertainty stays unavailable.",dataset.label())).small().color(ACCENT));
         study.definition.reference_radius_m=radius;
+        study.definition.terrain_dataset=dataset.id().into();
         ui.columns(2,|cols| {endpoint(&mut cols[0],"Start",&mut study.definition.start);endpoint(&mut cols[1],"End",&mut study.definition.end);});
         ui.horizontal(|ui| {
             ui.label("Samples");ui.add(egui::DragValue::new(&mut study.definition.samples).range(2..=1024));
@@ -97,10 +99,10 @@ pub fn panel(mut contexts:EguiContexts,mut state:ResMut<UiState>,mut study:ResMu
             });
         }
     });
-    if let (Some(visit),Some((r,_)),Some(section))=(action,mars,&study.section) {
+    if let (Some(visit),Some((r,_,dataset)),Some(section))=(action,mars,&study.section) {
         let row=&section.rows[study.cursor];let reading=&row.reading;
         let site=if row.index==0 {section.definition.start.landing_id.clone()} else if row.index==section.rows.len()-1 {section.definition.end.landing_id.clone()} else {None};
-        let result=SurfaceAnchor::new(r,reading.latitude_deg,reading.longitude_east_deg,state.surface_altitude,site,state.surface_tracked).map(|a|if state.surface_horizon {a.horizon()} else {a});
+        let result=SurfaceAnchor::new_dataset(r,dataset,reading.latitude_deg,reading.longitude_east_deg,state.surface_altitude,site,state.surface_tracked).map(|a|if state.surface_horizon {a.horizon()} else {a});
         match result {
             Ok(anchor)=>{state.show_surface_anchor(&anchor);sim.selected=Some(Target::Body(r));if visit {if let Err(e)=rig.travel_surface(anchor,&sim) {study.status=Some(e);}}}
             Err(e)=>study.status=Some(e),

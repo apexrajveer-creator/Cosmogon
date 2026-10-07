@@ -55,7 +55,7 @@ fn main() -> bevy::app::AppExit {
     // The pipelined renderer's shutdown waits without servicing its main-thread
     // executor. Imported-table automation may finish during GPU initialization;
     // render those short jobs on the main thread so teardown cannot deadlock.
-    let plugins = if (args.research_recording.is_some() || args.surface_site.is_some()) && args.quit_after_capture {
+    let plugins = if (args.research_recording.is_some() || args.surface_site.is_some() || args.mars_terrain.is_some()) && args.quit_after_capture {
         plugins.disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>()
     } else {
         plugins

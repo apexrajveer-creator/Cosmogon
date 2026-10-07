@@ -1,5 +1,7 @@
 # Observed Mars overview terrain
 
+The [source refinement build](MARS_REFINEMENT.md) additionally offers a separately pinned 16ppd grid through explicit source selection; existing worlds and new defaults preserve their original field.
+
 New Solar System/reference/Lab worlds use the NASA MGS MOLA 4-pixels-per-degree MEGDR topography
 and observation-count products. Simulation surface sampling and native terrain rendering use the
 same bilinear height field. There is no additional generated Mars elevation noise. The existing

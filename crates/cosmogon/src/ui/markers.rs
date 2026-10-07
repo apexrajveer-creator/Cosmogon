@@ -132,7 +132,7 @@ pub fn draw_markers(
     if labels {
         if let Some(Target::Body(r)) = sim.selected.or(rig.focus) {
             let b=u.body(r);
-            if b.exists() && b.elevation_data == Some(cosmogon_sim::planet::terrain::ElevationData::MarsMola) && b.name.eq_ignore_ascii_case("Mars") {
+            if b.exists() && b.elevation_data.and_then(cosmogon_sim::planet::terrain::ElevationData::mola).is_some() && b.name.eq_ignore_ascii_case("Mars") {
                 let center=to_render(u.body_position(r,t));
                 if view.screen_radius(center,b.radius)>80.0 {
                     let frame=body_rotation_f64(&sim,r,t);
@@ -143,7 +143,7 @@ pub fn draw_markers(
                         points.insert(0,(ui_state.surface_latitude,ui_state.surface_longitude,"Surface probe".into(),ui_state.surface_site.as_deref().and_then(cosmogon_sim::planet::landing::find).map(|s|s.id),true));
                     }
                     for (lat,lon,name,site,probe) in points {
-                        let Ok(reading)=cosmogon_sim::planet::mola::read(lat,lon) else {continue};
+                        let Ok(reading)=b.elevation_data.and_then(cosmogon_sim::planet::terrain::ElevationData::mola).expect("checked source").read(lat,lon) else {continue};
                         let local=DVec3::from_array(cosmogon_sim::planet::terrain::dir_from_lat_lon(lat.to_radians(),lon.to_radians()));
                         let radial=frame*local;
                         let radius=b.radius+reading.height_above_areoid_m;
@@ -499,7 +499,7 @@ pub fn draw_markers(
                     ui_state.body_tab=super::BodyTab::Surface;ui_state.show_right=true;ui_state.surface_export_status=None;
                     if double {
                         if let Target::Body(r)=h.target {
-                            let result=crate::surface::SurfaceAnchor::new(r,site.latitude_north_deg,site.longitude_east_deg,ui_state.surface_altitude,Some(site.id.into()),ui_state.surface_tracked).map(|a|if ui_state.surface_horizon {a.horizon()} else {a}).and_then(|a|rig.travel_surface(a,&sim));
+                            let result=crate::surface::SurfaceAnchor::new_dataset(r,sim.universe.body(r).elevation_data.and_then(cosmogon_sim::planet::terrain::ElevationData::mola).expect("marker source"),site.latitude_north_deg,site.longitude_east_deg,ui_state.surface_altitude,Some(site.id.into()),ui_state.surface_tracked).map(|a|if ui_state.surface_horizon {a.horizon()} else {a}).and_then(|a|rig.travel_surface(a,&sim));
                             if let Err(e)=result {rig.navigation_notice=Some(e);}
                         }
                     }

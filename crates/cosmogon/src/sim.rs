@@ -478,6 +478,14 @@ fn poll_pending(mut commands: Commands, pending: Option<ResMut<PendingUniverse>>
             Ok((u, session)) => {
                 perf.last_load_ms = Some(pending.started.elapsed().as_secs_f64() * 1000.0);
                 let mut sim = Sim::new(u, session);
+                if let Some(ppd) = &args.mars_terrain {
+                    let result=(|| -> Result<(),String> {
+                        let r=sim.universe.systems.iter().find_map(|s|s.bodies.iter().enumerate().find(|(_,b)|b.exists() && b.name.eq_ignore_ascii_case("Mars")).map(|(j,_)|cosmogon_sim::BodyRef {system:s.id,body:j as u32})).ok_or("Mars is absent from this world")?;
+                        let dataset=if ppd=="16" {cosmogon_sim::planet::terrain::ElevationData::MarsMola16} else {cosmogon_sim::planet::terrain::ElevationData::MarsMola};
+                        sim.edit(cosmogon_sim::sandbox::Edit::SetMarsTerrain {body:r,dataset},0.0)?;Ok(())
+                    })();
+                    if let Err(e)=result {msg.0=Some(format!("Could not apply terrain source: {e}"));if args.quit_after_capture {error!("Cannot start automated run: {e}");exit.write(AppExit::error());}next.set(AppState::MainMenu);return;}
+                }
                 if let Some(s) = args.speed {
                     sim.speed = s.min(SPEEDS.len() - 1);
                 }

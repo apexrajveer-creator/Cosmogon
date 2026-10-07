@@ -1,0 +1,59 @@
+{
+  "id": "mgs-mola-megdr-16ppd",
+  "version": "2003-grid-pds4-label-1.1",
+  "doi": "10.17189/1z1b-kv84",
+  "provider": "NASA PDS / MGS MOLA Team / Washington University Geosciences Node",
+  "attribution": "Smith, D. E., MGS MOLA MEGDR, NASA Planetary Data System",
+  "rights": "Public domain PDS archive data; see provider FAQ and source registry",
+  "rights_evidence": "https://pds-geosciences.wustl.edu/documents/ViewingPDSImagesAndExportingToOtherFormats.pdf",
+  "shape": [
+    2880,
+    5760
+  ],
+  "cell_degrees": 0.0625,
+  "equatorial_spacing_km": 3.7044613374,
+  "source_reference_radius_m": 3396000,
+  "grid": "Pixel centres: 89.96875 N, 0.03125 E; north-to-south, east longitude",
+  "coordinate_system": "IAU2000 planetocentric latitude, positive-east longitude",
+  "vertical_datum": "GMM3 (mgm1025), degree/order 50 areoid; topography = radius minus areoid radius",
+  "unit": "m",
+  "counts_unit": "observations per bin",
+  "processing": "Exact big-to-little endian conversion only; bilinear sampling at runtime",
+  "uncertainty_m": null,
+  "coverage_limit": "Provider reports about 55% of equatorial bins have at least one shot; profile gaps reach 12 km. Pixel spacing is not independent measured resolution. Zero-shot bins are provider-interpolated. Counts are not accuracy/confidence.",
+  "observations": "Principally February 1999\u2013June 2001, plus polar observations; 2003 grid, September 2026 label correction does not add observations",
+  "checksum_inventory_url": "https://pds-geosciences.wustl.edu/mgs/urn-nasa-pds-mgs_mola_topography_derived/urn-nasa-pds-mgs_mola_topography_derived.md5",
+  "checksum_inventory_sha256": "4468a26e18e382896cb3abd4cd69362f0bc76920ec64bf3645271e7be4ebe487",
+  "products": [
+    {
+      "product": "megt90n000eb",
+      "label_version": "1.1",
+      "source_url": "https://pds-geosciences.wustl.edu/mgs/urn-nasa-pds-mgs_mola_topography_derived/meg016/megt90n000eb.img",
+      "source_sha256": "d18d9b9ab8c5516d02e157dd2cde0f1d0d160c21940e953ba22391269a545e7b",
+      "source_md5": "357c759ab342140d2d008443e0a68015",
+      "label_sha256": "c393221db2de31916b30113ce28841dd967456dadb9bf2735eb30496eb37afa2",
+      "output": "mars_mola_elevation.bin",
+      "output_sha256": "9fdb0ddd3db378678326f2f34ea2a8f9220ecd0a0bda3d51aa0d27ac0506cd17",
+      "range": [
+        -8177,
+        21171
+      ],
+      "zero_bins": 2128
+    },
+    {
+      "product": "megc90n000eb",
+      "label_version": "1.1",
+      "source_url": "https://pds-geosciences.wustl.edu/mgs/urn-nasa-pds-mgs_mola_topography_derived/meg016/megc90n000eb.img",
+      "source_sha256": "9a300c6cd9f5a282ae31299be228ea2e75993049e88c9f6ab69a84f4db5f01d7",
+      "source_md5": "198ea0b1e0b7d14b911a85c5ffab0648",
+      "label_sha256": "845eda1aa007144821f3915e3c45dada4fbccb4f862de08f761c80406a156c28",
+      "output": "mars_mola_counts.bin",
+      "output_sha256": "c23c8f6b00a7fb20f2bf3427324ded812cf5f9d568eeb606b8c498250fd7192c",
+      "range": [
+        0,
+        326
+      ],
+      "zero_bins": 903558
+    }
+  ]
+}

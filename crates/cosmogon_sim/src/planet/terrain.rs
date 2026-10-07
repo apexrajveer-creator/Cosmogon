@@ -20,6 +20,14 @@ pub enum ElevationData {
     Earth,
     /// NASA PDS MOLA 4-pixels/degree median topography above the GMM3 areoid.
     MarsMola,
+    /// NASA PDS MOLA 16-pixels/degree overview; counts retain interpolated support.
+    MarsMola16,
+}
+
+impl ElevationData {
+    pub fn mola(self) -> Option<super::mola::Dataset> {
+        match self {Self::MarsMola => Some(super::mola::Dataset::Four), Self::MarsMola16 => Some(super::mola::Dataset::Sixteen), Self::Earth => None}
+    }
 }
 
 /// Metres of real relief per terrain unit. Chosen so the terrain's temperature lapse
@@ -72,11 +80,14 @@ impl Terrain {
         Self { seed, data: None }
     }
 
+    /// Stable presentation cache identity; source changes must rebuild heights and bakes.
+    pub fn cache_key(&self) -> u64 { self.seed.rotate_left(19) ^ match self.data {None => 0, Some(ElevationData::Earth) => 1, Some(ElevationData::MarsMola) => 2, Some(ElevationData::MarsMola16) => 3} }
+
     /// Elevation in terrain units (≈ −1…1.3 for procedural worlds; metres / 4300 for data).
     pub fn elevation(&self, d: [f64; 3]) -> f64 {
         match self.data {
             None => elevation(self.seed, d),
-            Some(ElevationData::MarsMola) => super::mola::elevation_m(d) / METRES_PER_UNIT,
+            Some(data @ (ElevationData::MarsMola | ElevationData::MarsMola16)) => data.mola().expect("MOLA variant").elevation_m(d) / METRES_PER_UNIT,
             // Measured relief plus faint sub-grid detail so close views aren't flat.
             Some(ElevationData::Earth) => earth_elevation_m(d) / METRES_PER_UNIT + 0.012 * fbm3(self.seed, scale(d, 60.0), 4, 2.0, 0.5),
         }

@@ -31,6 +31,7 @@ pub struct Args {
     /// Place the camera above this latitude,longitude (degrees) of the focused body.
     pub latlon: Option<(f64, f64)>,
     pub surface_site: Option<String>,
+    pub mars_terrain: Option<String>,
     pub surface_altitude: f64,
     pub surface_snapshot: bool,
     pub surface_horizon: bool,
@@ -118,6 +119,7 @@ impl Args {
                 "--continue" => a.continue_latest = true,
                 "--capture-metadata" => a.capture_metadata = true,
                 "--free-camera" => a.free_camera = true,
+                "--mars-terrain" => a.mars_terrain = Some(val()),
                 "--surface-site" => a.surface_site = Some(val()),
                 "--surface-altitude" => a.surface_altitude = val().parse().unwrap_or(f64::NAN),
                 "--surface-snapshot" => a.surface_snapshot = true,
@@ -153,13 +155,14 @@ impl Args {
                 f => eprintln!("ignoring unknown argument {f}"),
             }
         }
-        if (a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
+        if (a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
             a.new = Some(Scenario::SolarSystemLab);
         }
         a
     }
 
     fn validate_surface(&self) -> Result<(), String> {
+        if self.mars_terrain.as_deref().is_some_and(|v|!matches!(v,"4"|"16")) {return Err("--mars-terrain requires 4 or 16 pixels per degree".into());}
         if let Some(id) = &self.surface_site {
             if cosmogon_sim::planet::landing::find(id).is_none() { return Err(format!("Unknown --surface-site {id}; choose perseverance, curiosity, insight or viking-1")); }
             if !self.surface_altitude.is_finite() || !(60.0..=1e8).contains(&self.surface_altitude) { return Err("--surface-altitude must be finite, between 60 and 100000000 metres".into()); }
@@ -174,7 +177,7 @@ mod tests {
     use super::*;
     #[test]
     fn surface_requests_reject_misleading_or_invalid_combinations() {
-        for values in [vec!["--surface-site","missing"],vec!["--surface-site","curiosity","--surface-altitude","NaN"],vec!["--surface-site","curiosity","--surface-altitude","59"],vec!["--surface-site","curiosity","--focus","Earth"],vec!["--surface-site","curiosity","--latlon","0,0"]] {
+        for values in [vec!["--mars-terrain","32"],vec!["--mars-terrain",""],vec!["--surface-site","missing"],vec!["--surface-site","curiosity","--surface-altitude","NaN"],vec!["--surface-site","curiosity","--surface-altitude","59"],vec!["--surface-site","curiosity","--focus","Earth"],vec!["--surface-site","curiosity","--latlon","0,0"]] {
             assert!(Args::parse_from(values.into_iter().map(String::from)).validate_surface().is_err());
         }
         let a=Args::parse_from(["--surface-site","perseverance"].into_iter().map(String::from));

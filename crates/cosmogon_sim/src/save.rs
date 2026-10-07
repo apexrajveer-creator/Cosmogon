@@ -40,6 +40,8 @@ pub enum SaveError {
     TooNew(u32),
     #[error("save is corrupt: {0}")]
     Corrupt(#[from] serde_json::Error),
+    #[error("unsupported or mismatched terrain dataset: {0}")]
+    Dataset(String),
     #[error("migration failed: {0}")]
     Migration(String),
     #[error("i/o error: {0}")]
@@ -113,6 +115,9 @@ pub fn data_versions(u: &Universe) -> std::collections::BTreeMap<String, String>
     if u.systems.iter().any(|s| s.bodies.iter().any(|b| b.elevation_data == Some(crate::planet::terrain::ElevationData::MarsMola))) {
         m.insert("nasa-pds-mgs-mola-megdr".into(), crate::planet::mola::DATASET.into());
     }
+    if u.systems.iter().any(|s|s.bodies.iter().any(|b|b.elevation_data == Some(crate::planet::terrain::ElevationData::MarsMola16))) {
+        m.insert("nasa-pds-mgs-mola-megdr-16ppd".into(), crate::planet::mola::DATASET_16.into());
+    }
     m
 }
 
@@ -126,8 +131,17 @@ pub fn from_json(s: &str) -> Result<Universe, SaveError> {
     for step in &MIGRATIONS[(version as usize - 1)..] {
         step(&mut v)?;
     }
+    let terrain_versions = v["header"]["data_versions"].clone();
     let universe = v.get_mut("universe").map(Value::take).ok_or(SaveError::NotASave)?;
     let mut u: Universe = serde_json::from_value(universe)?;
+    let expected = data_versions(&u);
+    for key in ["nasa-pds-mgs-mola-megdr", "nasa-pds-mgs-mola-megdr-16ppd"] {
+        if let Some(version) = terrain_versions.get(key) {
+            if version.as_str() != expected.get(key).map(String::as_str) {return Err(SaveError::Dataset(format!("{key}: the header and body's pinned source disagree")));}
+        } else if key.ends_with("16ppd") && expected.contains_key(key) {
+            return Err(SaveError::Dataset("16ppd world is missing its required dataset version".into()));
+        }
+    }
     // Tasks added by newer versions (stellar evolution) start running in older saves.
     u.ensure_star_task();
     Ok(u)

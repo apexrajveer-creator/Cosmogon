@@ -470,6 +470,7 @@ impl Look {
             match body.name.as_str() {
                 "Earth" | "Moon" | "Mars" => return plain(Style::Terran, match body.elevation_data {
                     Some(cosmogon_sim::planet::terrain::ElevationData::Earth) => "ETOPO5 relief + generated surface detail",
+                    Some(cosmogon_sim::planet::terrain::ElevationData::MarsMola16) => "MOLA 16ppd relief + generated colours / shading",
                     Some(cosmogon_sim::planet::terrain::ElevationData::MarsMola) => "MOLA relief + generated colours / shading",
                     None => "Generated terrain / approximate spacecraft-inspired colours",
                 }),

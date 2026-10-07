@@ -141,3 +141,7 @@ coarse terrain and unverified registration do not provide current rover position
 output folders. An exported definition retains its chosen reference sphere/sample count. Native
 `--panel section` shows the actual graph, row values and probe/travel/export controls; see
 [MARS_TERRAIN_STUDIES](docs/MARS_TERRAIN_STUDIES.md) for schema and limitations.
+
+## Finer Mars source selection
+
+See [MARS_REFINEMENT](docs/MARS_REFINEMENT.md). Both verified grids are embedded; no runtime data download is needed. `--mars-terrain 4|16` applies an explicit source edit for native development starts and CLI surface/section commands. CLI `terrain --mars-terrain 16 --save NEW_FILE [--initial OLD_SAVE]` creates a protected saved world. `cargo run --release -p cosmogon_cli --example mola_profile` measures warm source queries only; it is not a graphics benchmark.

@@ -130,7 +130,7 @@ impl SurfaceModel {
     fn detail(&self, d: [f64; 3], height: f64) -> f64 {
         // Unobserved hills/craters would invent slopes on a measured Mars surface.
         // Keep its geometry on the shared MOLA field; shader fine shading is visual.
-        if self.body.elevation_data == Some(cosmogon_sim::planet::terrain::ElevationData::MarsMola) {
+        if self.body.elevation_data.and_then(cosmogon_sim::planet::terrain::ElevationData::mola).is_some() {
             return 0.0;
         }
         let seed = self.body.terrain_seed;
@@ -438,7 +438,7 @@ pub fn update_terrain_lod(
     let veg = u.biosphere(r).is_some_and(|b| b.vegetated());
     // Cities change the ground too (bucketed so growth repaints occasionally, not constantly).
     let towns_sig = u.civ_on(r).map(|c| c.sites.iter().filter(|s| s.active()).map(|s| (s.population.max(1.0).log10() * 4.0) as u64).sum::<u64>()).unwrap_or(0);
-    let sig = towns_sig.rotate_left(48) ^ (body.radius.to_bits().rotate_left(24)) ^ ((body.hydro.ocean_fraction * 40.0) as u64) ^ (((body.hydro.ice_fraction * 40.0) as u64) << 8) ^ ((body.temperature * 0.2) as u64) << 16 ^ (veg as u64) << 40;
+    let sig = cosmogon_sim::planet::terrain::Terrain::of(body).cache_key().rotate_left(43) ^ towns_sig.rotate_left(48) ^ (body.radius.to_bits().rotate_left(24)) ^ ((body.hydro.ocean_fraction * 40.0) as u64) ^ (((body.hydro.ice_fraction * 40.0) as u64) << 8) ^ ((body.temperature * 0.2) as u64) << 16 ^ (veg as u64) << 40;
     if lod.model.is_none() || lod.model_signature != sig {
         for (_, state) in lod.nodes.drain() {
             if let NodeState::Ready(e) = state {
@@ -585,13 +585,16 @@ mod tests {
     #[test]
     fn patches_stay_on_the_surface() {
         let sys = sol::sol_system();
-        let mars = &sys.bodies[sys.find_body("Mars").unwrap()];
-        let model = SurfaceModel::new(mars, false);
+        let mut mars = sys.bodies[sys.find_body("Mars").unwrap()].clone();
+        for data in [cosmogon_sim::planet::terrain::ElevationData::MarsMola,cosmogon_sim::planet::terrain::ElevationData::MarsMola16] {
+        mars.elevation_data=Some(data);
+        let model = SurfaceModel::new(&mars, false);
         for (lat, lon) in [(18.625_f64, 226.125_f64), (-42.625, 70.125), (0.0, 360.0), (90.0, 0.0)] {
             let d = cosmogon_sim::planet::terrain::dir_from_lat_lon(lat.to_radians(), lon.to_radians());
-            let observed = cosmogon_sim::planet::mola::read(lat, lon).unwrap().height_above_areoid_m;
+            let observed = data.mola().unwrap().read(lat, lon).unwrap().height_above_areoid_m;
             assert!((model.sample(d).0 - mars.radius - observed).abs() < 1e-8,
                 "Mars geometry must not add generated slopes to the source field");
+        }
         }
         for name in ["Mercury", "Io", "Earth", "Europa", "Callisto"] {
             let body = &sys.bodies[sys.find_body(name).unwrap()];

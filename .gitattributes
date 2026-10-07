@@ -1,0 +1,2 @@
+# Preserve exact embedded numeric grid bytes on every checkout; no line-ending conversion.
+*.bin binary
