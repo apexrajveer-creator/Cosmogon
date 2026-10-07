@@ -18,6 +18,8 @@ use crate::noise::{fbm3, ridged3};
 pub enum ElevationData {
     /// NOAA ETOPO5 global relief (land and sea floor), downsampled to 2048×1024.
     Earth,
+    /// NASA PDS MOLA 4-pixels/degree median topography above the GMM3 areoid.
+    MarsMola,
 }
 
 /// Metres of real relief per terrain unit. Chosen so the terrain's temperature lapse
@@ -74,6 +76,7 @@ impl Terrain {
     pub fn elevation(&self, d: [f64; 3]) -> f64 {
         match self.data {
             None => elevation(self.seed, d),
+            Some(ElevationData::MarsMola) => super::mola::elevation_m(d) / METRES_PER_UNIT,
             // Measured relief plus faint sub-grid detail so close views aren't flat.
             Some(ElevationData::Earth) => earth_elevation_m(d) / METRES_PER_UNIT + 0.012 * fbm3(self.seed, scale(d, 60.0), 4, 2.0, 0.5),
         }

@@ -47,6 +47,8 @@ changes an existing experiment. New sandboxes use the latest cached dataset.
   positions correspond to the real sky at the epoch.
 * Physical parameters of the same bodies from `sol.toml` (NASA fact sheets).
 
+* NASA PDS MGS MOLA 4ppd topography and observation-count coverage — pinned source/label/checksum metadata, shared authoritative terrain/probe, offline embedded. See [MARS_TERRAIN](MARS_TERRAIN.md). This does not implement on-demand patch delivery.
+
 ## Scale and streaming (design for S4/S5)
 
 * **Spatial index**: HEALPix (nside by depth) × distance shells; one tile file per cell,

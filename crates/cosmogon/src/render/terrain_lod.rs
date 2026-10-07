@@ -128,6 +128,11 @@ impl SurfaceModel {
     /// fine roughness, and impact craters on airless worlds. Visual only — the simulation
     /// reasons with the coarser authoritative terrain.
     fn detail(&self, d: [f64; 3], height: f64) -> f64 {
+        // Unobserved hills/craters would invent slopes on a measured Mars surface.
+        // Keep its geometry on the shared MOLA field; shader fine shading is visual.
+        if self.body.elevation_data == Some(cosmogon_sim::planet::terrain::ElevationData::MarsMola) {
+            return 0.0;
+        }
         let seed = self.body.terrain_seed;
         let p = |k: f64| [d[0] * k, d[1] * k, d[2] * k];
         let rough = 0.3 + height.clamp(0.0, 1.5) * 1.2;
@@ -580,6 +585,14 @@ mod tests {
     #[test]
     fn patches_stay_on_the_surface() {
         let sys = sol::sol_system();
+        let mars = &sys.bodies[sys.find_body("Mars").unwrap()];
+        let model = SurfaceModel::new(mars, false);
+        for (lat, lon) in [(18.625_f64, 226.125_f64), (-42.625, 70.125), (0.0, 360.0), (90.0, 0.0)] {
+            let d = cosmogon_sim::planet::terrain::dir_from_lat_lon(lat.to_radians(), lon.to_radians());
+            let observed = cosmogon_sim::planet::mola::read(lat, lon).unwrap().height_above_areoid_m;
+            assert!((model.sample(d).0 - mars.radius - observed).abs() < 1e-8,
+                "Mars geometry must not add generated slopes to the source field");
+        }
         for name in ["Mercury", "Io", "Earth", "Europa", "Callisto"] {
             let body = &sys.bodies[sys.find_body(name).unwrap()];
             let model = SurfaceModel::new(body, false);

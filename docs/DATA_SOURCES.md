@@ -69,3 +69,12 @@ update method, fields imported, uncertainty handling and attribution requirement
 
 All are labelled ESTIMATED in the app. Countries are seeded from the city list (each city's
 country and capital) and are kept static by the model.
+
+## Observed Mars overview terrain
+
+New Solar System worlds use pinned NASA PDS MGS MOLA MEGDR 4ppd topography and observation-count
+grids. Heights are derived medians above the GMM3 areoid; empty source bins are provider-interpolated.
+Runtime bilinear sampling is shared with rendering and exposes source-cell weights/counts. No per-bin
+uncertainty is supplied and no generated noise is added to Mars elevation. Colours, climate, resources
+and subpixel shading remain modelled/generated. See [MARS_TERRAIN](MARS_TERRAIN.md) and
+[SOURCE_REGISTRY](../data/SOURCE_REGISTRY) for resolution, frame, checksum, version and rights evidence.

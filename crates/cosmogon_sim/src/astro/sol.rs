@@ -165,6 +165,7 @@ pub fn sol_system() -> StarSystem {
             accretion: 0.0,
             melt: None,
             elevation_data: match sb.elevation_data.as_deref() {
+                Some("mars_mola") => Some(crate::planet::terrain::ElevationData::MarsMola),
                 Some("earth") => Some(crate::planet::terrain::ElevationData::Earth),
                 Some(other) => panic!("unknown elevation_data {other}"),
                 None => None,

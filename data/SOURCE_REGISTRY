@@ -58,3 +58,18 @@ Before adding or refreshing release data, record provider terms and redistributi
 - Units/epoch/frame: model-specific; see code/docs. Do not assume all rendered landmarks are authoritative catalogue objects.
 - Licence/attribution/redistribution: original implementation uses declared project licence; external values require per-source reconciliation in the future PhysicsModelRegistry.
 - Processing: deterministic modelling and/or generated presentation. This group is a known inventory gap, not a fully normalized astronomical catalogue.
+
+
+## mgs-mola-megdr-4ppd@2003-grid-pds4-label-1.1
+
+- Provider: NASA PDS Geosciences Node, Washington University; MGS MOLA Team / David E. Smith.
+- Bundle: https://pds-geosciences.wustl.edu/mgs/urn-nasa-pds-mgs_mola_topography_derived/ ; DOI 10.17189/1z1b-kv84.
+- Products: data_meg004:megt90n000cb (topography), data_meg004:megc90n000cb (observation counts); PDS4 labels version 1.1, September 15 2026. Underlying grid is the final 2003 MEGDR, not new 2026 observations.
+- Retrieved/processed: 2026-10-07. Stored grids and labels: crates/cosmogon_sim/data/mola/. Exact hashes and provider URLs: metadata.json.
+- Rights evidence: Geosciences Node January 2024 FAQ, page 2, “Data sets archived in the PDS are in the public domain.” https://pds-geosciences.wustl.edu/documents/ViewingPDSImagesAndExportingToOtherFormats.pdf . Attribution retained; project licence does not replace source attribution.
+- Raw source SHA256: topography 25f16fb7aaf857898dcf98bc4f841341a24f8b9f7e98453ca083bc45d897ca2c; counts 7e920ec43497b4beddf974650471600c7afd4916e2a8dd3500d6b14714365661. Both also matched the provider's archive MD5 inventory at retrieval.
+- Spatial coordinates: IAU2000 planetocentric latitude, positive-east longitude; 1440 × 720, 0.25° centres from (89.875 N, 0.125 E), rows north to south. About 14.817845 km equatorial sampling on the source reference sphere.
+- Vertical coordinates: signed integer metres, median topography (radius minus GMM3/mgm1025 degree/order 50 areoid radius). No height uncertainty/covariance supplied per bin.
+- Observations: mapping phase February 1999 through June 2001, plus specified off-nadir polar observations in 1998/mapping. Labels' broader observation timestamps are retained in the XML.
+- Processing: tools/process_mola.py validates pinned raw SHA256, dimensions, type and label version, then converts big-endian to little-endian without resampling. Runtime bilinear heights expose four source-cell medians, observation counts and weights; zero counts mark provider-interpolated bins. Counts are not confidence or uncertainty.
+- Limits: global overview, not local geology, engineering/landing safety or a current terrain survey. No random subgrid elevation is added to Mars. Colours, climate, resource distribution and fine shading remain generated/modelled; the renderer uses a spherical base rather than the full areoid shape. Future grid revisions must receive a distinct saved terrain identifier to preserve old worlds.

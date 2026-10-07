@@ -103,3 +103,9 @@ Measured orbit checks: `./target/release/cosmogon-cli validate --output /tmp/orb
 
 Reopen saved numeric data: `./target/release/cosmogon-cli inspect --recording /tmp/earth-research-1`.
 Native QA: `--research-recording /tmp/earth-research-1 --panel plots --research-workspace /tmp/research-choices.json`; the optional choices file is distinct from the simulation save.
+
+Observed Mars relief: `python3 tools/process_mola.py --fetch` verifies pinned PDS products and
+converts their endianness. The application needs no runtime network. `cosmogon-cli datasets` shows
+MOLA source/checksum metadata; `surface --target Mars --latitude 18.625 --longitude 226.125` samples
+the shared field. Native `--new lab --focus Mars --panel surface` opens the source-cell probe.
+See [MARS_TERRAIN](docs/MARS_TERRAIN.md).

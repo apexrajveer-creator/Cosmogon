@@ -107,8 +107,11 @@ pub fn data_versions(u: &Universe) -> std::collections::BTreeMap<String, String>
         let d = crate::astro::horizons::Dataset::embedded();
         m.insert("jpl-horizons-sol".into(), format!("{} (epoch {})", d.dataset.version, d.dataset.epoch));
     }
-    if u.systems.iter().any(|s| s.bodies.iter().any(|b| b.elevation_data.is_some())) {
+    if u.systems.iter().any(|s| s.bodies.iter().any(|b| b.elevation_data == Some(crate::planet::terrain::ElevationData::Earth))) {
         m.insert("noaa-etopo5-earth".into(), "1".into());
+    }
+    if u.systems.iter().any(|s| s.bodies.iter().any(|b| b.elevation_data == Some(crate::planet::terrain::ElevationData::MarsMola))) {
+        m.insert("nasa-pds-mgs-mola-megdr".into(), crate::planet::mola::DATASET.into());
     }
     m
 }
@@ -232,5 +235,5 @@ mod golden {
         assert_eq!(fp, GOLDEN, "universe fingerprint changed: {fp:#018x}");
     }
 
-    const GOLDEN: u64 = 0x5799_03fd_05a2_8945;
+    const GOLDEN: u64 = 0xf2c4140a45ae509b;
 }

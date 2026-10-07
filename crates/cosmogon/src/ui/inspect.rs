@@ -300,6 +300,7 @@ pub fn right_panel(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mu
                     for (tab, label) in [(BodyTab::Overview, "Overview"), (BodyTab::Orbit, "Orbit"), (BodyTab::Physics, "Physics"), (BodyTab::Environment, "Environment"), (BodyTab::Life, "Life")] {
                         ui.selectable_value(&mut ui_state.body_tab, tab, label);
                     }
+                    if b.kind.has_surface() { ui.selectable_value(&mut ui_state.body_tab, BodyTab::Surface, "Surface"); }
                     if civ {
                         ui.selectable_value(&mut ui_state.body_tab, BodyTab::Civilization, egui::RichText::new("Civilization").color(CIV));
                     }
@@ -313,6 +314,7 @@ pub fn right_panel(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mu
                     BodyTab::Orbit => orbit(ui, u, r, &mut ctx, &mut ui_state.impulse),
                     BodyTab::Physics => physics_tab(ui, u, r),
                     BodyTab::Environment => environment(ui, u, r, &mut ctx),
+                    BodyTab::Surface => surface_tab(ui, b, &mut ui_state),
                     BodyTab::Life => life(ui, u, r),
                     BodyTab::Civilization => {
                         if let Some(c) = u.civs.iter().rev().find(|c| c.system == r.system && c.body == r.body) {
@@ -616,7 +618,7 @@ fn data_tab(ui: &mut egui::Ui, u: &Universe, r: BodyRef) {
             ("Resources", "resources"),
         ] {
             ui.label(egui::RichText::new(label).color(MUTED));
-            let q = if f == "terrain" && b.elevation_data.is_some() { Quality::Measured } else { b.quality(f) };
+            let q = if f == "terrain" && b.elevation_data.is_some() { Quality::Derived } else { b.quality(f) };
             units::quality_badge(ui, q);
             ui.end_row();
         }
@@ -1121,5 +1123,53 @@ fn civilization(ui: &mut egui::Ui, u: &Universe, c: &Civilization, ui_state: &mu
             _ => CIV,
         };
         ui.label(egui::RichText::new(format!("{} — {}", format_date(e.time, u.start_time, u.gregorian()), e.title)).size(11.5).color(color)).on_hover_text(&e.detail);
+    }
+}
+
+/// A coordinate probe reads the same height field as terrain/climate and exposes its support.
+fn surface_tab(ui: &mut egui::Ui, body: &cosmogon_sim::astro::Body, state: &mut UiState) {
+    use cosmogon_sim::planet::{mola, terrain::ElevationData};
+    heading(ui, "Surface data");
+    match body.elevation_data {
+        Some(ElevationData::MarsMola) => {
+            ui.label("NASA MGS / MOLA · derived observed topography");
+            ui.hyperlink_to("Dataset and citation · DOI 10.17189/1z1b-kv84",mola::SOURCE_URL);
+            ui.label(egui::RichText::new("Global overview: 0.25° cells, about 14.82 km at the equator. No landing-safety or local-resolution claim.").small().color(ACCENT));
+            ui.label(egui::RichText::new(format!("Height above {}. IAU2000 planetocentric latitude; east-positive longitude.",mola::DATUM)).small().color(MUTED));
+            ui.horizontal(|ui| {ui.label("Latitude (°)");ui.add(egui::DragValue::new(&mut state.surface_latitude).speed(0.05).range(-90.0..=90.0));});
+            ui.horizontal(|ui| {ui.label("Longitude east (°)");ui.add(egui::DragValue::new(&mut state.surface_longitude).speed(0.05).range(-360.0..=360.0));});
+            match mola::read(state.surface_latitude,state.surface_longitude) {
+                Ok(reading) => {
+                    kv(ui,"Bilinear height",format!("{:.2} m",reading.height_above_areoid_m));
+                    units::quality_badge(ui, Quality::Derived);
+                    ui.label(egui::RichText::new("Provider medians at grid centres; the app blends neighbouring cells. Height uncertainty is unavailable, not zero.").small().color(MUTED));
+                    heading(ui,"Contributing source cells");
+                    egui::Grid::new("mola_cells").striped(true).show(ui,|ui| {
+                        ui.strong("Centre (N, E)");ui.strong("m");ui.strong("Shots");ui.strong("Weight");ui.end_row();
+                        for cell in reading.source_cells.iter().filter(|c|c.weight>0.0) {
+                            ui.label(format!("{:.3}, {:.3}",cell.latitude_deg,cell.longitude_east_deg));
+                            ui.label(cell.median_height_m.to_string());ui.label(cell.observations.to_string());
+                            ui.label(format!("{:.1}%",cell.weight*100.0));ui.end_row();
+                        }
+                    });
+                    if reading.source_cells.iter().any(|c|c.weight>0.0 && c.observations==0) {
+                        ui.colored_label(ACCENT,"Includes a provider-interpolated cell with no direct observations.");
+                    }
+                    ui.label(egui::RichText::new("Shots are observation counts, not uncertainty or confidence scores. High counts do not establish local precision.").small().color(MUTED));
+                }
+                Err(e) => {ui.label(e);}
+            }
+            egui::CollapsingHeader::new("Versions and modelling limits").show(ui,|ui| {
+                ui.label(mola::DATASET);
+                ui.label("2003 grid; PDS4 label 1.1 corrects projection metadata in September 2026. Source and converted checksums are bundled.");
+                ui.label("No generated noise is added to the Mars elevation field. Colours, climate and fine shading remain modelled/generated. The rendered base is spherical; the areoid shape itself is not modelled.");
+                ui.label("These coordinates are body-fixed. Changing them samples data; it does not move the camera or change the universe.");
+            });
+        }
+        Some(ElevationData::Earth) => {
+            ui.label("NOAA ETOPO5 derived relief, downsampled to 2048 × 1024.");
+            ui.label("Earth adds generated fine detail. Cache datum/epoch and per-cell observation counts are not supplied; see Source Registry. The Mars MOLA probe does not apply here.");
+        }
+        None => {ui.label("Terrain is generated from this world's seed. No observed elevation grid is attached. Older saves retain their original terrain.");}
     }
 }

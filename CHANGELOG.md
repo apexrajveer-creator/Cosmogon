@@ -2,6 +2,8 @@
 
 ## Unreleased — native exploration and research
 
+- New Solar System worlds attach NASA PDS MOLA 4-pixels/degree observed-derived Mars relief with observation-count coverage, source/checksum metadata and native/headless coordinate probes. Mars no longer uses generated elevation; colours/climate/fine shading remain generated/modelled. Existing saves keep their stored terrain identifier. This deliberate new-state change re-pins the deterministic golden fingerprint from `0x579903fd05a28945` to `0xf2c4140a45ae509b`.
+
 * Adopt the owner's master development directive; add current-state audit, evidence/limitations,
   product vision, source/asset inventories and active phased gap analysis while preserving historical plans.
 * Add an optional Performance panel (View menu and command palette), frame-time chart and

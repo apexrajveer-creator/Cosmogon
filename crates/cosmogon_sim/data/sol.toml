@@ -86,6 +86,7 @@ resources = { iron = 1.0, copper = 1.0, tin = 1.0, coal = 1.0, oil = 1.0, uraniu
 
 [[body]]
 name = "Mars"
+elevation_data = "mars_mola"
 kind = "Rocky"
 a_au = 1.52368055
 e = 0.09339410

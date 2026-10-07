@@ -3,3 +3,4 @@
 pub mod environment;
 pub mod resources;
 pub mod terrain;
+pub mod mola;

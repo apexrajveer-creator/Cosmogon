@@ -1,0 +1,49 @@
+{
+  "id": "mgs-mola-megdr-4ppd",
+  "version": "2003-grid-pds4-label-1.1",
+  "doi": "10.17189/1z1b-kv84",
+  "provider": "NASA PDS / MGS MOLA Team / Washington University Geosciences Node",
+  "attribution": "Smith, D. E., MGS MOLA MEGDR, NASA Planetary Data System",
+  "rights": "Public domain PDS archive data; see provider FAQ and source registry",
+  "rights_evidence": "https://pds-geosciences.wustl.edu/documents/ViewingPDSImagesAndExportingToOtherFormats.pdf",
+  "shape": [
+    720,
+    1440
+  ],
+  "cell_degrees": 0.25,
+  "grid": "Pixel centres: 89.875 N, 0.125 E; north-to-south, east longitude",
+  "coordinate_system": "IAU2000 planetocentric latitude, positive-east longitude",
+  "vertical_datum": "GMM3 (mgm1025), degree/order 50 areoid; topography = radius minus areoid radius",
+  "unit": "m",
+  "counts_unit": "observations per bin",
+  "processing": "Exact big-to-little endian conversion only; bilinear sampling at runtime",
+  "uncertainty_m": null,
+  "products": [
+    {
+      "product": "megt90n000cb",
+      "label_version": "1.1",
+      "source_url": "https://pds-geosciences.wustl.edu/mgs/urn-nasa-pds-mgs_mola_topography_derived/meg004/megt90n000cb.img",
+      "source_sha256": "25f16fb7aaf857898dcf98bc4f841341a24f8b9f7e98453ca083bc45d897ca2c",
+      "label_sha256": "e3982cb17458a9d59896b0c21e0485322ccc42f8e6089d9d856a62032775b60b",
+      "output": "mars_mola_elevation.bin",
+      "output_sha256": "fde054706d2fd9bd868633edcfc0fa99d7377b16098505a61cd84b8812f4524e",
+      "range": [
+        -8068,
+        21134
+      ]
+    },
+    {
+      "product": "megc90n000cb",
+      "label_version": "1.1",
+      "source_url": "https://pds-geosciences.wustl.edu/mgs/urn-nasa-pds-mgs_mola_topography_derived/meg004/megc90n000cb.img",
+      "source_sha256": "7e920ec43497b4beddf974650471600c7afd4916e2a8dd3500d6b14714365661",
+      "label_sha256": "32b1df151884c2a212ed108e9e1c75eff8fb4b084ba17bf37338a8b72bba5a57",
+      "output": "mars_mola_counts.bin",
+      "output_sha256": "84f66a4d180afaaeb520d23afd7191709a75ea000419d122c4f4d8c248b7de03",
+      "range": [
+        0,
+        2611
+      ]
+    }
+  ]
+}

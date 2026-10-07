@@ -48,6 +48,7 @@ pub enum BodyTab {
     Orbit,
     Physics,
     Environment,
+    Surface,
     Life,
     Civilization,
     History,
@@ -76,6 +77,8 @@ pub struct UiState {
     pub pause_menu: bool,
     pub left_tab: LeftTab,
     pub body_tab: BodyTab,
+    pub surface_latitude: f64,
+    pub surface_longitude: f64,
     pub search: String,
     pub chronicle_min_importance: u8,
     pub menu: MenuScreen,
@@ -129,6 +132,8 @@ impl Default for UiState {
             pause_menu: false,
             left_tab: LeftTab::Systems,
             body_tab: BodyTab::Overview,
+            surface_latitude: 18.65,
+            surface_longitude: 226.2,
             search: String::new(),
             chronicle_min_importance: 4,
             menu: MenuScreen::Home,
@@ -202,6 +207,7 @@ fn init_ui_state(mut ui: ResMut<UiState>, args: Res<crate::args::Args>) {
     match args.panel.as_deref() {
         Some("create") => ui.create_open = true,
         Some("physics") => ui.physics_open = true,
+        Some("surface") => ui.body_tab = BodyTab::Surface,
         Some("alerts") => ui.alerts_open = true,
         Some("sound") => { ui.alerts_open = true; ui.alerts_tab = 1; }
         Some("routing") => { ui.alerts_open = true; ui.alerts_tab = 2; }

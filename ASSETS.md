@@ -14,3 +14,10 @@ Cosmogon ships **no third-party art**. Everything visual is generated:
 
 Any future imported data (e.g. NASA/USGS elevation maps) must be recorded here with its source and license
 before it is committed.
+
+## Mars MOLA overview relief and coverage
+
+`crates/cosmogon_sim/data/mola/` contains NASA PDS MGS MOLA 4ppd topography/count grids, provider
+PDS4 XML labels and processing/source metadata. PDS archived datasets are public domain according
+to the provider FAQ; attribution and evidence are in `data/SOURCE_REGISTRY`. Exact source values
+are endian-converted without resampling. This data does not license unrelated mission photographs.

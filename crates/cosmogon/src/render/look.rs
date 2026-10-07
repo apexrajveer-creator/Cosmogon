@@ -468,7 +468,11 @@ impl Look {
         let mercury = Cratered { bright: [0.64, 0.61, 0.57], dark: [0.42, 0.40, 0.38], maria: 0.25, rays: 0.8, ray_color: [0.82, 0.80, 0.77] };
         if body.real {
             match body.name.as_str() {
-                "Earth" | "Moon" | "Mars" => return plain(Style::Terran, "Measured relief / mapped terrain"),
+                "Earth" | "Moon" | "Mars" => return plain(Style::Terran, match body.elevation_data {
+                    Some(cosmogon_sim::planet::terrain::ElevationData::Earth) => "ETOPO5 relief + generated surface detail",
+                    Some(cosmogon_sim::planet::terrain::ElevationData::MarsMola) => "MOLA relief + generated colours / shading",
+                    None => "Generated terrain / approximate spacecraft-inspired colours",
+                }),
                 "Mercury" => return plain(Style::Cratered(mercury), "Cratered plains and smooth volcanic plains"),
                 "Venus" => return plain(Style::CloudDeck { tint: [0.93, 0.86, 0.66], streaks: 0.6 }, "Sulphuric-acid cloud deck"),
                 "Jupiter" => return plain(Style::Giant(Box::new(jupiter())), "Ammonia cloud belts and zones"),

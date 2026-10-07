@@ -24,6 +24,8 @@ struct Args {
     initial: Option<String>,
     recording: Option<String>,
     reference: Option<String>,
+    latitude: f64,
+    longitude: f64,
     definition: Option<String>,
     parameter: String,
     sweep_start: Option<f64>,
@@ -55,6 +57,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         initial: None,
         recording: None,
         reference: None,
+        latitude: 0.0,
+        longitude: 0.0,
         definition: None,
         parameter: "albedo".into(),
         sweep_start: None,
@@ -95,6 +99,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--interval-days" => a.interval_days = number(val()?, &flag)?,
             "--target" => a.target = val()?,
             "--output" => a.output = Some(val()?),
+            "--latitude" => a.latitude = number(val()?, &flag)?,
+            "--longitude" => a.longitude = number(val()?, &flag)?,
             "--reference" => a.reference = Some(val()?),
             "--recording" => a.recording = Some(val()?),
             "--initial" => a.initial = Some(val()?),
@@ -152,6 +158,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
 fn help() {
     println!(
         r#"Cosmogon headless tools
+  surface --target Mars          Sample authoritative MOLA height and source-cell coverage JSON
+  datasets                       Print embedded MOLA source/version/checksum metadata
   models                         Print model/source/parameter registry JSON
   inspect --recording DIR         Validate and print saved numeric recording data
   experiment --output NEW_DIR    Record a saved or new universe at uniform simulation times
@@ -159,6 +167,8 @@ fn help() {
   replay --output NEW_DIR        Run an exported definition against its frozen base
   validate [--output NEW_FILE]   Calculate analytic and cached JPL regression measurements
   run | check | survey | profile Run the released simulation/determinism tools
+
+Surface coordinates: --latitude -90..90 --longitude -360..360 (degrees, east positive)
 
 Research inputs:
   --initial BASE.cosmo           Use a complete saved state; overrides scenario/seed
@@ -201,6 +211,8 @@ fn main() {
     };
     match a.cmd.as_str() {
         "help" => help(),
+        "datasets" => println!("{}", cosmogon_sim::planet::mola::METADATA),
+        "surface" => { if let Err(e) = surface(&a) { eprintln!("Surface probe failed: {e}"); std::process::exit(1); } }
         "models" => println!("{}", serde_json::to_string_pretty(&serde_json::json!({"format":"cosmogon-model-registry", "schema_version":1, "models":cosmogon_sim::research::PhysicsModelRegistry::models(), "sources":cosmogon_sim::research::SCIENTIFIC_SOURCES, "parameters":cosmogon_sim::research::PARAMETERS})).unwrap()),
         "inspect" => {
             let result=(||->Result<serde_json::Value,String>{
@@ -541,4 +553,20 @@ mod argument_tests {
         );
         assert_eq!(args(&["sweep", "--help"]).unwrap().cmd, "help");
     }
+}
+
+fn surface(a: &Args) -> Result<(), String> {
+    use cosmogon_sim::planet::{mola, terrain::{ElevationData, METRES_PER_UNIT, Terrain, dir_from_lat_lon}};
+    let u = if let Some(path) = &a.initial { save::read_file(std::path::Path::new(path)).map_err(|e|e.to_string())? }
+        else { Universe::new(settings(a,a.seed)) };
+    let body = u.systems.iter().flat_map(|s| &s.bodies).find(|b|b.exists() && b.name.eq_ignore_ascii_case(&a.target)).ok_or("Target body not found")?;
+    if body.elevation_data != Some(ElevationData::MarsMola) { return Err("This probe requires a body using the embedded Mars MOLA grid; older procedural saves retain their original terrain".into()); }
+    let reading=mola::read(a.latitude,a.longitude)?;
+    let authoritative_height_m=Terrain::of(body).elevation(dir_from_lat_lon(a.latitude.to_radians(),a.longitude.to_radians()))*METRES_PER_UNIT;
+    println!("{}",serde_json::to_string_pretty(&serde_json::json!({"format":"cosmogon-surface-probe","schema_version":1,
+        "target":body.name,"reading":reading,"authoritative_height_m":authoritative_height_m,
+        "frame":"IAU2000 planetocentric latitude; east longitude; GMM3 degree/order 50 areoid height",
+        "sampling":"Bilinear between 0.25-degree grid pixel centres; support cells with zero observations are provider-interpolated",
+        "limitations":"Global overview (14.82 km equatorial spacing), not landing safety/local relief. No per-cell uncertainty or propagated covariance. Rendering uses a spherical base radius; areoid shape is not modelled. Colours, climate and subpixel shading are generated/modelled separately."})).map_err(|e|e.to_string())?);
+    Ok(())
 }
