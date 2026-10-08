@@ -88,3 +88,5 @@ claim that the camera remains above that point later. Headless `cosmogon-cli sit
 ## Authored shots
 
 Camera & Photo → Paths connects current views and saved viewpoints to explicit timed keys, interpolation, look-at, lens changes and Play/Pause/Stop/scrub. See [CINEMATIC_PATHS](CINEMATIC_PATHS.md) for file identity, clearance and timing limits. No simulation or golden changes.
+
+Keyboard defaults in this document can be rebound in Camera & Photo → Controls. Native hints and help show the active mapping. Escape/modifier chords and mouse controls stay fixed; see [INPUT_BINDINGS](INPUT_BINDINGS.md).

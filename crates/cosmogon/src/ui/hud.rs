@@ -11,14 +11,17 @@ use crate::persistence::{list_saves, UserSettings};
 use crate::render::ViewInfo;
 use crate::sim::{Sim, Target};
 use crate::state::AppState;
+use crate::input::{Action,Bindings};
 
-pub fn keyboard(mut contexts: EguiContexts, keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, mut ui: ResMut<UiState>, mut settings: ResMut<UserSettings>, time: Res<Time>, args: Res<crate::args::Args>) -> Result {
+// Bevy supplies each independently owned input/UI resource.
+#[allow(clippy::too_many_arguments)]
+pub fn keyboard(mut contexts: EguiContexts, keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, mut ui: ResMut<UiState>, mut settings: ResMut<UserSettings>, time: Res<Time>, args: Res<crate::args::Args>, bindings:Res<Bindings>) -> Result {
     let ctx = contexts.ctx_mut()?;
-    if args.capture.is_some() {
+    if args.capture.is_some() || bindings.blocked {
         return Ok(());
     }
     let now = time.elapsed_secs_f64();
-    let cmd = keys.pressed(KeyCode::SuperLeft) || keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::SuperRight) || keys.pressed(KeyCode::ControlRight);
+    let cmd = crate::input::command_modifier(&keys);
     let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     // Shortcuts that work even while a text field has focus.
     if cmd && keys.just_pressed(KeyCode::KeyK) {
@@ -38,25 +41,26 @@ pub fn keyboard(mut contexts: EguiContexts, keys: Res<ButtonInput<KeyCode>>, mut
         sim.redo(now);
         return Ok(());
     }
-    if keys.just_pressed(KeyCode::Space) {
+    if cmd {return Ok(());}
+    if bindings.pressed(&keys,Action::Pause) {
         sim.paused = !sim.paused;
     }
-    if keys.just_pressed(KeyCode::Period) || keys.just_pressed(KeyCode::Equal) {
+    if bindings.pressed(&keys,Action::SpeedUp) || bindings.pressed(&keys,Action::SpeedUpAlt) {
         sim.speed = (sim.speed + 1).min(SPEEDS.len() - 1);
     }
-    if keys.just_pressed(KeyCode::Comma) || keys.just_pressed(KeyCode::Minus) {
+    if bindings.pressed(&keys,Action::SpeedDown) || bindings.pressed(&keys,Action::SpeedDownAlt) {
         sim.speed = sim.speed.saturating_sub(1);
     }
-    if keys.just_pressed(KeyCode::Tab) {
+    if bindings.pressed(&keys,Action::HideInterface) {
         ui.hidden = !ui.hidden;
     }
-    if keys.just_pressed(KeyCode::KeyP) {
+    if bindings.pressed(&keys,Action::Photo) {
         ui.photo_requested = true;
     }
-    if keys.just_pressed(KeyCode::F3) {
+    if bindings.pressed(&keys,Action::Debug) {
         ui.debug = !ui.debug;
     }
-    if keys.just_pressed(KeyCode::F1) {
+    if bindings.pressed(&keys,Action::Help) {
         ui.help = !ui.help;
     }
     if keys.just_pressed(KeyCode::Escape) {
@@ -79,7 +83,7 @@ pub fn icon_button(ui: &mut egui::Ui, glyph: &str, tip: &str, on: bool, enabled:
     ui.add_enabled(enabled, b).on_hover_text(tip)
 }
 
-pub fn top_bar(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut sim: ResMut<Sim>, mut rig: ResMut<CameraRig>, mut settings: ResMut<UserSettings>, time: Res<Time>) -> Result {
+pub fn top_bar(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut sim: ResMut<Sim>, mut rig: ResMut<CameraRig>, mut settings: ResMut<UserSettings>, time: Res<Time>, bindings:Res<Bindings>) -> Result {
     let ctx = contexts.ctx_mut()?;
     if ui_state.hidden {
         return Ok(());
@@ -136,10 +140,10 @@ pub fn top_bar(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut si
                 if icon_button(ui, icon::TREE_STRUCTURE, "Universe panel (worlds, chronicle, civilizations)", ui_state.show_left, true).clicked() {
                     ui_state.show_left = !ui_state.show_left;
                 }
-                if icon_button(ui, icon::QUESTION, "Controls (F1)", ui_state.help, true).clicked() {
+                if icon_button(ui, icon::QUESTION, &format!("Controls ({})",bindings.label(Action::Help)), ui_state.help, true).clicked() {
                     ui_state.help = !ui_state.help;
                 }
-                if icon_button(ui, icon::CAMERA, "Photo (P): save a clean screenshot to Pictures/Cosmogon", false, true).clicked() {
+                if icon_button(ui, icon::CAMERA, &format!("Photo ({}): save a clean screenshot to Pictures/Cosmogon",bindings.label(Action::Photo)), false, true).clicked() {
                     ui_state.photo_requested = true;
                 }
                 ui.menu_button(egui::RichText::new(icon::EYE).size(17.0), |ui| {
@@ -327,6 +331,7 @@ pub fn overlays_windows(
     mut next: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
     time: Res<Time>,
+    bindings:Res<Bindings>,
 ) -> Result {
     if ui_state.hidden || ui_state.photo_mode { return Ok(()); }
     let ctx = contexts.ctx_mut()?;
@@ -365,27 +370,33 @@ pub fn overlays_windows(
     }
     if ui_state.help {
         let mut open = true;
-        egui::Window::new("Controls").open(&mut open).collapsible(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
+        let mut customize = false;
+        egui::Window::new("Controls").open(&mut open).collapsible(false).default_pos([330.0,70.0]).default_width(560.0).max_height((ctx.available_rect().height()-190.0).max(220.0)).vscroll(true).show(ctx, |ui| {
+            if ui.button("Customize keyboard controls").clicked(){ui_state.camera_open=true;ui_state.camera_tab=4;customize=true;}
+            ui.label(egui::RichText::new("Physical keys use US position labels; printed letters may differ.").small().color(MUTED));
             egui::Grid::new("help").num_columns(2).striped(true).show(ui, |ui| {
-                for (k, v) in [
-                    ("Drag (left or right)", "Orbit the camera"),
-                    ("Scroll · W / S", "Zoom (works from metres to light-years)"),
-                    ("Click marker / list item", "Select"),
-                    ("Double-click · F", "Fly to the selection"),
-                    ("Home", "View the whole star system"),
-                    ("G", "Switch orbit / free camera"),
-                    ("Free: W A S D · R / C", "Move · up / down"),
-                    ("Free: right-drag · arrows · Q / E", "Look · roll"),
-                    ("Free: wheel · Shift · Alt/Option", "Speed · boost · fine movement"),
-                    ("Space", "Pause / resume"),
-                    (", and .", "Slower / faster"),
-                    ("Tab", "Hide the interface"),
-                    ("P", "Photo: save a clean screenshot to Pictures/Cosmogon"),
-                    ("Ctrl/⌘ + S", "Save sandbox"),
-                    ("Ctrl/⌘ + Z / ⇧Z", "Undo / redo an edit"),
-                    ("Ctrl/⌘ + K", "Command palette"),
-                    ("F3", "Developer overlay"),
-                    ("Esc", "Menu"),
+                let pair=|a,b|format!("{} / {}",bindings.label(a),bindings.label(b));
+                for (k,v) in [
+                    ("Drag (left or right)".into(),"Orbit the camera"),
+                    (format!("Scroll · {}",pair(Action::Forward,Action::Backward)),"Zoom from metres to light-years"),
+                    ("Click marker / list item".into(),"Select"),
+                    (format!("Double-click · {}",bindings.label(Action::OrbitSelection)),"Fly to selection"),
+                    (bindings.label(Action::ViewSystem),"View the star system"),
+                    (bindings.label(Action::ToggleFlight),"Switch orbit / free camera"),
+                    (format!("Free: {} · {} · {}",pair(Action::Forward,Action::Backward),pair(Action::Left,Action::Right),pair(Action::Up,Action::Down)),"Move · sideways · up / down"),
+                    (format!("Free: {} · {}",pair(Action::LookLeft,Action::LookRight),pair(Action::LookUp,Action::LookDown)),"Look horizontally / vertically"),
+                    (format!("Free: {}",pair(Action::RollLeft,Action::RollRight)),"Roll"),
+                    ("Free: right-drag · wheel · Shift · Alt".into(),"Look · speed · boost · fine movement"),
+                    (bindings.label(Action::Pause),"Pause / resume"),
+                    (format!("{} · {}",pair(Action::SpeedDown,Action::SpeedDownAlt),pair(Action::SpeedUp,Action::SpeedUpAlt)),"Slower / faster"),
+                    (bindings.label(Action::HideInterface),"Hide / show interface"),
+                    (bindings.label(Action::Photo),"Save a clean screenshot to Pictures/Cosmogon"),
+                    (bindings.label(Action::Help),"Show / hide controls help"),
+                    (bindings.label(Action::Debug),"Developer overlay"),
+                    ("Ctrl/⌘ + S".into(),"Save sandbox"),
+                    ("Ctrl/⌘ + Z / ⇧Z · Y".into(),"Undo / redo"),
+                    ("Ctrl/⌘ + K".into(),"Command palette"),
+                    ("Escape".into(),"Cancel / menu"),
                 ] {
                     ui.label(egui::RichText::new(k).color(ACCENT));
                     ui.label(v);
@@ -393,7 +404,7 @@ pub fn overlays_windows(
                 }
             });
         });
-        ui_state.help = open;
+        ui_state.help = open && !customize;
     }
     if ui_state.pause_menu {
         let mut close = false;

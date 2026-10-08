@@ -67,6 +67,7 @@ pub struct Args {
     pub profile_frames: usize,
     pub profile_warmup: usize,
     pub free_camera: bool,
+    pub input_bindings: Option<String>,
     pub camera_path: Option<String>,
     pub camera_path_time: Option<f64>,
     pub camera_path_play: bool,
@@ -134,6 +135,7 @@ impl Args {
                 "--persist" => a.persist = true,
                 "--continue" => a.continue_latest = true,
                 "--capture-metadata" => a.capture_metadata = true,
+                "--input-bindings" => a.input_bindings=Some(val()),
                 "--camera-path" => a.camera_path=Some(val()),
                 "--camera-path-time" => a.camera_path_time=Some(val().parse().unwrap_or(f64::NAN)),
                 "--camera-path-play" => a.camera_path_play=true,
@@ -187,13 +189,15 @@ impl Args {
                 f => eprintln!("ignoring unknown argument {f}"),
             }
         }
-        if (a.camera_path.is_some() || a.habitat_recording.is_some() || a.greenhouse_definition.is_some() || a.habitat_definition.is_some() || a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
+        if (a.input_bindings.is_some() || a.camera_path.is_some() || a.habitat_recording.is_some() || a.greenhouse_definition.is_some() || a.habitat_definition.is_some() || a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
             a.new = Some(Scenario::SolarSystemLab);
         }
         a
     }
 
     fn validate_surface(&self) -> Result<(), String> {
+        if self.input_bindings.as_deref()==Some("") {return Err("Choose an input-bindings file".into());}
+        if self.input_bindings.is_some() && self.habitat_audio_export.is_some(){return Err("Keyboard controls require a native launch".into());}
         if self.camera_path.is_none() && (self.camera_path_time.is_some() || self.camera_path_play) {return Err("--camera-path-time/--camera-path-play require --camera-path FILE".into());}
         if self.camera_path_time.is_some_and(|t|!t.is_finite() || !(0.0..=3600.0).contains(&t)) {return Err("Camera presentation seconds must be finite and between 0 and 3600".into());}
         if self.camera_path.is_some() {
@@ -234,6 +238,12 @@ impl Args {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn input_binding_launches_are_explicit_and_use_native_defaults(){
+        let a=Args::parse_from(["--input-bindings","controls.json"].into_iter().map(String::from));assert!(a.validate_surface().is_ok());assert_eq!(a.new,Some(Scenario::SolarSystemLab));
+        let a=Args::parse_from(["--input-bindings",""].into_iter().map(String::from));assert!(a.validate_surface().is_err());
+        let a=Args::parse_from(["--input-bindings","f","--load","s","--habitat-audio","0","--habitat-audio-export","o"].into_iter().map(String::from));assert!(a.validate_surface().is_err());
+    }
     #[test]
     fn camera_path_launches_require_explicit_valid_unambiguous_controls(){
         for values in [vec!["--camera-path-time","1"],vec!["--camera-path-play"],vec!["--camera-path",""],vec!["--camera-path","p","--camera-path-time","NaN"],vec!["--camera-path","p","--camera-path-time","3601"],vec!["--camera-path","p","--latlon","0,0"],vec!["--camera-path","p","--fov","40"],vec!["--camera-path","p","--capture","x","--camera-path-play"]]{assert!(Args::parse_from(values.into_iter().map(String::from)).validate_surface().is_err());}

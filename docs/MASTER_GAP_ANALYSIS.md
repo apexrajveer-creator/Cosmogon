@@ -8,7 +8,7 @@ The old `GAP_ANALYSIS.md` describes the pre-sandbox baseline and is historical.
 | 0 Audit | Release 1.0, current audit, baseline tests, native captures, checkpoint | Full GPU/VRAM profiling on supported hardware/tools; Windows manual QA |
 | 1 Native foundation | Deterministic engine-independent sim, jobs, saves, logging, embedded assets | Resource/data-pack manager, measured budgets; performance report slice implemented here |
 | 2 Application shell | Home, Continue, sandbox library, reference clone, settings, autosave | Coherent workspace persistence/docking, accessible navigation audit |
-| 3 Camera + UX | Orbit/track, free flight, speed/inertia/sensitivity, object-relative and geographic surface viewpoints, authored timed camera paths, command palette, inspector | Key rebinding, advanced cinematic paths/video/time synchronization, complete reference-frame precision; notification foundation is present in phase 5 |
+| 3 Camera + UX | Orbit/track, free flight, speed/inertia/sensitivity, object-relative and geographic surface viewpoints, authored timed camera paths, physical-key customization, command palette, inspector | Mouse/controller/chord rebinding and accessibility verification, advanced cinematic paths/video/time synchronization, complete reference-frame precision; notification foundation is present in phase 5 |
 | 4 Photo | Clean native PNG, FOV/exposure/warmth/saturation, separate preferences, camera/dataset sidecars | DOF, advanced grading, high-resolution/tiled export, advanced camera paths/video |
 | 5 Audio/alerts | Realistic/cinematic/hybrid modes; music/effects/alert/equipment mix; live habitat interior sonification; inbox, routing, quiet settings and optional pause | Physical environment/interior/weather audio, custom sounds, durable read marks and new event producers |
 | 6 Solar sandbox | Horizons states, N-body, edits, throw, launch, predictions, undo | Shared parameter/model registry, source context and observer export built; broader control/regime validation remains |
@@ -29,7 +29,7 @@ The old `GAP_ANALYSIS.md` describes the pre-sandbox baseline and is historical.
    timing; optional supported process/render snapshots; panel and versioned reports.
 2. **Camera navigation (built, partial phase):** f64 detached pose, six-axis motion, roll,
    adaptive/manual speed, inertia, sensitivity/inversion, orbit return and persistent viewpoints.
-   Terrain follows nearby bodies. Input rebinding, swept collision and advanced cinematics remain.
+   Terrain follows nearby bodies. Mouse/controller/chord customization, swept collision and advanced cinematics remain.
 3. **Photo foundation (built, partial phase):** presentation-only lens/colour settings, separate
    persistence, clean PNG action and metadata sidecars. No DOF or tiled/high-resolution output yet.
 4. **Research truth and controls (built, partial phase):** typed model/source registries, provenance repair and consistent
@@ -59,4 +59,6 @@ New work must meet the relevant definitions of done; partial implementations rem
 
 14. **Authored camera paths (built, partial phase 2/17):** shared f64 timed poses, orientation/look-at, lens interpolation, native authoring, explicit playback/scrub and protected definition files. See [CINEMATIC_PATHS](CINEMATIC_PATHS.md). Video, DOF, spline/arc-length control and simulation-rate synchronization remain incomplete.
 
-15. **Native keyboard controls (next, partial phase 3/17):** shared physical-key bindings for camera and ordinary HUD actions, conflicts/cancellation, explicit persistence, protected files and dynamic help. Mouse/controller/chord rebinding and full accessibility verification remain.
+15. **Native keyboard controls (built, partial phase 3/17):** shared physical-key bindings for camera and ordinary HUD actions, conflicts/cancellation, explicit persistence, protected files and dynamic help. Mouse/controller/chord rebinding and full accessibility verification remain.
+
+16. **Controlled transpiration planning (next, partial phase 9/16):** shared source-pinned vapor/leaf conductance and water forecasts, explicit humidity assumptions, deterministic integration, native plots and numeric exports. Physical greenhouse coupling, humidity dynamics and facility equipment remain incomplete.

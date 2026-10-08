@@ -22,6 +22,7 @@ pub use habitat::HabitatUi;
 pub(crate) use surface_study::Study;
 mod navigation;
 pub(crate) mod cinematic;
+mod input;
 mod tools;
 pub mod tour;
 pub mod units;
@@ -267,6 +268,8 @@ fn init_ui_state(mut ui: ResMut<UiState>, args: Res<crate::args::Args>) {
         Some("camera") => ui.camera_open = true,
         Some("photo") => { ui.camera_open = true; ui.camera_tab = 1; }
         Some("paths"|"paths-keys"|"paths-files") => {ui.camera_open=true;ui.camera_tab=3;}
+        Some("controls"|"controls-everyday"|"controls-files") => {ui.camera_open=true;ui.camera_tab=4;}
+        Some("help") => ui.help=true,
         Some("bookmarks") => { ui.camera_open = true; ui.camera_tab = 2; }
         Some("palette") => ui.palette_open = true,
         _ => {}

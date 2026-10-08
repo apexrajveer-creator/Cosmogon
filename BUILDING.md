@@ -179,3 +179,7 @@ See [HABITAT_DIAGNOSTICS](docs/HABITAT_DIAGNOSTICS.md) for live/recorded panels 
 ## Authored camera paths
 
 `--camera-path FILE --camera-path-time SECONDS --panel paths` opens a validated matching-world definition and freezes a pose for native capture. `--camera-path-play` explicitly starts ordinary playback and conflicts with captures. Paths/default launch use Solar System Lab; existing camera/surface/tour/menu/time-advance conflicts are refused. See [CINEMATIC_PATHS](docs/CINEMATIC_PATHS.md) for protected files and complete examples.
+
+## Keyboard customization
+
+`--input-bindings FILE --panel controls|controls-everyday|controls-files` validates a complete physical-key mapping before GPU startup and opens native controls. `--panel help` opens mapping-aware help. Capture metadata retains actual controls; input remains ignored in automated captures. Runtime imports require explicit saving to persist. See [INPUT_BINDINGS](docs/INPUT_BINDINGS.md).

@@ -15,6 +15,7 @@ mod capture;
 mod interact;
 mod navigation;
 mod cinematic;
+mod input;
 mod surface;
 mod notifications;
 mod persistence;
@@ -35,6 +36,9 @@ use bevy_egui::EguiPlugin;
 fn main() -> bevy::app::AppExit {
     let started = std::time::Instant::now();
     let args = args::Args::parse();
+    if let Some(path)=&args.input_bindings {
+        if let Err(e)=input::Definition::read(std::path::Path::new(path)){eprintln!("Cannot open keyboard controls: {e}");return AppExit::error();}
+    }
     if let Some(path)=&args.camera_path {
         let checked=(||->Result<(),String>{
             let d=cinematic::Definition::read(std::path::Path::new(path))?;
@@ -139,6 +143,7 @@ fn main() -> bevy::app::AppExit {
             sim::SimPlugin,
             render::RenderPlugin,
             camera::CameraPlugin,
+            input::InputPlugin,
             ui::UiPlugin,
             capture::CapturePlugin,
             timeline::TimelinePlugin,

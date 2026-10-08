@@ -311,8 +311,11 @@ fn camera_input(
     mut settings: ResMut<UserSettings>,
     ui: Res<crate::ui::UiState>,
     mut path: ResMut<crate::cinematic::Player>,
+    bindings:Res<crate::input::Bindings>,
 ) {
+    use crate::input::Action;
     let rig = &mut *rig;
+    if bindings.blocked {if let Some(f)=&mut rig.free {f.velocity=DVec3::ZERO;}return;}
     rig.follow_surface(&sim);
     // Automated captures must be reproducible: ignore whatever the mouse is doing.
     if args.capture.is_some() || ui.pause_menu {
@@ -322,22 +325,22 @@ fn camera_input(
         Ok(ctx) => (ctx.wants_pointer_input() || ctx.is_pointer_over_area(), ctx.wants_keyboard_input()),
         Err(_) => (false, false),
     };
-    let cmd = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight) || keys.pressed(KeyCode::SuperLeft) || keys.pressed(KeyCode::SuperRight);
+    let cmd = crate::input::command_modifier(&keys);
     if path.active {
-        let movement = !wants_keys && !cmd && [KeyCode::KeyW,KeyCode::KeyA,KeyCode::KeyS,KeyCode::KeyD,KeyCode::KeyR,KeyCode::KeyC,KeyCode::KeyQ,KeyCode::KeyE,KeyCode::KeyG,KeyCode::KeyF,KeyCode::Home,KeyCode::ArrowLeft,KeyCode::ArrowRight,KeyCode::ArrowUp,KeyCode::ArrowDown].iter().any(|k|keys.pressed(*k));
+        let movement = !wants_keys && !cmd && bindings.camera_input(&keys);
         let pointer = !wants_pointer && (scroll.delta != Vec2::ZERO || ((mouse.pressed(MouseButton::Left) || mouse.pressed(MouseButton::Right)) && motion.delta != Vec2::ZERO));
         if movement || pointer {path.stop("Manual navigation stopped the camera path.");} else {return;}
     }
     if !wants_keys && !cmd {
-        if keys.just_pressed(KeyCode::KeyG) {
+        if bindings.pressed(&keys,Action::ToggleFlight) {
             if rig.free.is_some() {
                 if let Some(t) = sim.selected.or(rig.focus) { rig.focus_on(t, &sim, None); }
             } else { rig.detach(); }
         }
-        if keys.just_pressed(KeyCode::KeyF) {
+        if bindings.pressed(&keys,Action::OrbitSelection) {
             if let Some(t) = sim.selected { rig.focus_on(t, &sim, None); }
         }
-        if keys.just_pressed(KeyCode::Home) {
+        if bindings.pressed(&keys,Action::ViewSystem) {
             if let Some(t) = rig.focus { rig.focus_on(Target::Star(t.system()), &sim, None); }
         }
     }
@@ -353,9 +356,9 @@ fn camera_input(
             if lines != 0.0 { settings.camera.speed_multiplier = (settings.camera.speed_multiplier * (lines * 0.18).exp()).clamp(0.001, 1000.0); }
         }
         if wants_keys || cmd { flight.velocity = DVec3::ZERO; return; }
-        let axis = |positive, negative| (keys.pressed(positive) as i32 - keys.pressed(negative) as i32) as f64;
-        flight.turn(axis(KeyCode::ArrowLeft, KeyCode::ArrowRight) * dt, axis(KeyCode::ArrowUp, KeyCode::ArrowDown) * dt, axis(KeyCode::KeyQ, KeyCode::KeyE) * dt);
-        let local = DVec3::new(axis(KeyCode::KeyD, KeyCode::KeyA), axis(KeyCode::KeyR, KeyCode::KeyC), axis(KeyCode::KeyS, KeyCode::KeyW)).normalize_or_zero();
+        let axis = |positive, negative| bindings.axis(&keys,positive,negative);
+        flight.turn(axis(Action::LookLeft, Action::LookRight) * dt, axis(Action::LookUp, Action::LookDown) * dt, axis(Action::RollLeft, Action::RollRight) * dt);
+        let local = DVec3::new(axis(Action::Right, Action::Left), axis(Action::Up, Action::Down), axis(Action::Backward, Action::Forward)).normalize_or_zero();
         let boost = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) { 10.0 } else if keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight) { 0.1 } else { 1.0 };
         flight.speed_m_s = settings.camera.speed(clearance) * boost;
         let desired = flight.rotation * local * flight.speed_m_s;
@@ -393,11 +396,11 @@ fn camera_input(
         }
     }
     if !wants_keys && !cmd {
-        let zoom = (keys.pressed(KeyCode::KeyS) as i32 - keys.pressed(KeyCode::KeyW) as i32) as f64;
+        let zoom = bindings.axis(&keys,Action::Backward,Action::Forward);
         if zoom != 0.0 {
             zoom_by(rig, (zoom * 2.4 * time.delta_secs_f64().min(0.1)).exp());
         }
-        rig.yaw += (keys.pressed(KeyCode::KeyA) as i32 - keys.pressed(KeyCode::KeyD) as i32) as f64 * 1.2 * time.delta_secs_f64().min(0.1);
+        rig.yaw += bindings.axis(&keys,Action::Left,Action::Right) * 1.2 * time.delta_secs_f64().min(0.1);
 
     }
 }

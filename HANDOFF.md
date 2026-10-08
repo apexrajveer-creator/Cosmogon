@@ -50,6 +50,8 @@ The connected [habitat WHY diagnostics](docs/HABITAT_DIAGNOSTICS.md) build expla
 
 The connected [authored camera paths](docs/CINEMATIC_PATHS.md) build adds f64 timed poses, orientation/look-at, interpolated lens values, actual/saved-view authoring, explicit playback/scrub, protected definitions and request-time intended/actual metadata. Checks: 294 passed plus one existing ignored, 33 distinct preflight/native/regression cases, seventeen inspected accepted layouts and a 48-second packaged playback run; [verification](docs/CINEMATIC_PATHS_VALIDATION.md). No simulation, save or golden change. Video, DOF, splines and simulation-rate synchronization remain incomplete. The next connected build customizes native keyboard controls.
 
+The connected [native keyboard controls](docs/INPUT_BINDINGS.md) build maps 24 camera/everyday actions through shared physical-key input, conflict/cancel/release handling, explicit protected persistence/import/export and dynamic help. Checks: 302 passed plus one existing ignored, 28 distinct refusal/native/regression cases, thirteen final inspected layouts and a 48-second packaged run; [verification](docs/INPUT_BINDINGS_VALIDATION.md). No simulation, save or golden change. Mouse/controller/chord customization, international logical keys and full accessibility verification remain. Controlled greenhouse transpiration planning follows; the master directive remains incomplete.
+
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
   [GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases) with macOS, Windows and Linux builds.
@@ -86,6 +88,7 @@ Map of the 1.0 features (start here when changing one):
 | Timeline and rewind | — | `timeline.rs` |
 | Historical Mars landing references / geographic travel | `planet/landing.rs`, `planet/mola.rs` | `surface.rs`, `camera.rs`, `ui/inspect.rs`, `ui/markers.rs` |
 | Authored camera paths | — | `cinematic.rs`, `ui/cinematic.rs`; photo/performance metadata |
+| Native keyboard controls | — | `input.rs`, `ui/input.rs`; camera/HUD/help and photo/performance metadata |
 | Camera, free flight, viewpoints | — | `camera.rs`, `navigation.rs`, `ui/navigation.rs` |
 | Photo mode, lens/colour, dev capture | — | `capture.rs`, `navigation.rs`, `ui/navigation.rs` |
 | Research controls/models/sources/CSV | `research/` | `research.rs`, `ui/research.rs`; CLI `experiment`, `models` |

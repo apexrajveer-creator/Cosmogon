@@ -124,6 +124,7 @@ pub fn throw_velocity(center: DVec3, normal: DVec3, start: DVec3, end: DVec3, re
 fn throw_and_grab(
     mut sim: ResMut<Sim>,
     mut drag: ResMut<Drag>,
+    bindings:Res<crate::input::Bindings>,
     mut contexts: EguiContexts,
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -133,6 +134,7 @@ fn throw_and_grab(
     rig: Res<CameraRig>,
     time: Res<Time>,
 ) {
+    if bindings.blocked {drag.active=None;return;}
     let now = time.elapsed_secs_f64();
     let throwing = match &sim.tool {
         Tool::Throw(t) => Some(t.preset),

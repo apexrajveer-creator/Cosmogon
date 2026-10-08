@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased — authored camera paths
+* Native keyboard customization for 24 camera/everyday actions, shared input and cinematic interruption, capture/cancel/release gating, conflict validation, dynamic help, explicit protected versioned files and separate preferences. No Universe/save/golden change.
+
 
 App-only timed keyframes, normalized orientation/look-at and lens interpolation, native authoring from actual/saved views, explicit Play/Pause/Stop/scrub, protected schema-1 files and capture/performance evidence of evaluated versus actual ground-corrected positions. Simulation laws, save schema and golden `0xf2c4140a45ae509b` unchanged. Video, DOF, spline paths and simulation-rate synchronization remain incomplete.
 

@@ -5,27 +5,29 @@ use crate::camera::CameraRig;
 use crate::navigation::{Presentation, Viewpoint, Viewpoints};
 use crate::persistence::UserSettings;
 use crate::sim::Sim;
+use crate::input::{Bindings,Action};
 use super::{UiState, ACCENT, MUTED};
 
 #[allow(clippy::too_many_arguments)]
-pub fn panel(mut contexts: EguiContexts, mut state: ResMut<UiState>, mut rig: ResMut<CameraRig>, mut settings: ResMut<UserSettings>, mut views: ResMut<Viewpoints>, mut sim: ResMut<Sim>, time: Res<Time>, mut paths:ResMut<crate::cinematic::Player>) -> Result {
+pub fn panel(mut contexts: EguiContexts, mut state: ResMut<UiState>, mut rig: ResMut<CameraRig>, mut settings: ResMut<UserSettings>, mut views: ResMut<Viewpoints>, mut sim: ResMut<Sim>, time: Res<Time>, mut paths:ResMut<crate::cinematic::Player>, mut bindings:ResMut<Bindings>) -> Result {
     if !state.camera_open || state.hidden || state.photo_mode { return Ok(()); }
     let ctx = contexts.ctx_mut()?;
     let mut open = state.camera_open;
-    egui::Window::new("Camera & Photo").open(&mut open).default_pos([325.0, 75.0]).default_width(430.0).default_height(if state.camera_tab==3 {540.0}else{400.0}).max_height((ctx.available_rect().height()-160.0).max(220.0)).vscroll(true).show(ctx, |ui| {
+    egui::Window::new("Camera & Photo").open(&mut open).default_pos([325.0, 75.0]).default_width(430.0).default_height(if state.camera_tab>=3 {540.0}else{400.0}).max_height((ctx.available_rect().height()-160.0).max(220.0)).vscroll(true).show(ctx, |ui| {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut state.camera_tab, 0, "Navigate");
             ui.selectable_value(&mut state.camera_tab, 1, "Photo");
             ui.selectable_value(&mut state.camera_tab, 2, "Viewpoints");
             ui.selectable_value(&mut state.camera_tab, 3, "Paths");
+            ui.selectable_value(&mut state.camera_tab, 4, "Controls");
         });
         ui.separator();
         match state.camera_tab {
             0 => {
                 ui.label(egui::RichText::new(if rig.surface_anchor.as_ref().is_some_and(|a|a.tracked) { "SURFACE TRACKING" } else if rig.free.is_some() { "FREE FLIGHT" } else { "ORBIT & TRACK" }).color(ACCENT).strong());
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(rig.free.is_none(), egui::Button::new("Detach camera (G)")).clicked() { rig.detach(); }
-                    if ui.button("Orbit selection (F)").clicked() {
+                    if ui.add_enabled(rig.free.is_none(), egui::Button::new(format!("Detach camera ({})",bindings.label(Action::ToggleFlight)))).clicked() { rig.detach(); }
+                    if ui.button(format!("Orbit selection ({})",bindings.label(Action::OrbitSelection))).clicked() {
                         if let Some(t) = sim.selected.or(rig.focus) { rig.focus_on(t, &sim, None); }
                     }
                     if ui.button("Stop").clicked() { paths.stop("Camera stopped; path control released."); if let Some(f) = &mut rig.free { f.velocity = bevy::math::DVec3::ZERO; } }
@@ -33,8 +35,9 @@ pub fn panel(mut contexts: EguiContexts, mut state: ResMut<UiState>, mut rig: Re
                 if rig.surface_anchor.is_some() && ui.button("Release surface view").clicked() {rig.release_surface();}
                 if let Some(message)=&rig.navigation_notice {ui.label(egui::RichText::new(message).small().color(ACCENT));}
                 ui.add_space(6.0);
-                ui.label("W / S forward & back · A / D sideways · R / C up & down");
-                ui.label("Right-drag to look · Q / E roll · arrows to look");
+                ui.label(format!("{} / {} forward & back · {} / {} sideways · {} / {} up & down",bindings.label(Action::Forward),bindings.label(Action::Backward),bindings.label(Action::Left),bindings.label(Action::Right),bindings.label(Action::Up),bindings.label(Action::Down)));
+                ui.label(format!("Right-drag to look · {} / {} roll",bindings.label(Action::RollLeft),bindings.label(Action::RollRight)));
+                ui.label(format!("{} / {} / {} / {} to look",bindings.label(Action::LookLeft),bindings.label(Action::LookRight),bindings.label(Action::LookUp),bindings.label(Action::LookDown)));
                 ui.label("Wheel adjusts speed · Shift ×10 · Alt/Option ×0.1");
                 ui.label(egui::RichText::new("The camera is a navigation tool, not a simulated spacecraft.").small().color(MUTED));
                 ui.separator();
@@ -68,10 +71,11 @@ pub fn panel(mut contexts: EguiContexts, mut state: ResMut<UiState>, mut rig: Re
                 ui.separator();
                 ui.checkbox(&mut sim.paused, "Pause simulation");
                 ui.checkbox(&mut settings.photo_metadata, "Write camera & dataset metadata (JSON)");
-                if ui.button("Take clean PNG (P)").clicked() { state.photo_requested = true; }
+                if ui.button(format!("Take clean PNG ({})",bindings.label(Action::Photo))).clicked() { state.photo_requested = true; }
                 ui.label(egui::RichText::new("Saves at the window's native pixel resolution to Pictures/Cosmogon. Navigation remains available while composing.").small().color(MUTED));
-                if ui.button("Hide interface (Tab to restore)").clicked() { state.hidden = true; }
+                if ui.button(format!("Hide interface ({} to restore)",bindings.label(Action::HideInterface))).clicked() { state.hidden = true; }
             }
+            4 => super::input::show(ui,&mut bindings),
             3 => super::cinematic::show(ui,&mut paths,&sim,&mut rig,&mut settings.presentation,&views),
             _ => {
                 ui.label(egui::RichText::new("SAVED VIEWPOINTS").color(ACCENT).strong());
