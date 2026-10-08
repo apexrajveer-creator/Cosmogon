@@ -228,6 +228,7 @@ fn record(
             "camera_path":paths.as_ref().and_then(|p|p.metadata(&sim,&rig)),
             "input_bindings":bindings.as_ref().map(|b|b.metadata()),
             "greenhouse_planner":habitat.as_ref().map(|h|h.crop.metadata()),
+            "habitat_moisture":habitat.as_ref().and_then(|h|h.moisture_metadata(&sim.universe)),
             "camera_mode": if rig.free.is_some() { "free" } else { "orbit" },
             "orientation_xyzw": rig.rotation.to_array(), "presentation": settings.presentation,
             "yaw_rad": rig.yaw, "pitch_rad": rig.pitch, "fov_y_rad": view.fov_y,

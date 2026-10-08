@@ -640,3 +640,23 @@ fn capture_thumbnail(mut commands: Commands, mut sim: ResMut<Sim>) {
         }
     });
 }
+
+#[cfg(test)]
+mod moisture_edit_tests {
+    use super::*;
+    #[test]
+    fn moisture_settings_are_atomic_undoable_and_preserve_stores() {
+        let mut u=Universe::new(UniverseSettings {scenario:cosmogon_sim::Scenario::SolarSystemLab,..Default::default()});
+        let body=cosmogon_sim::BodyRef {system:0,body:u.systems[0].find_body("Mars").unwrap() as u32};
+        let mut d=cosmogon_sim::habitat::Definition::at(body,0.0,0.0);d.config.moisture=Some(cosmogon_sim::moisture::Config {relative_humidity_setpoint:0.0,..Default::default()});
+        u.apply_edit(Edit::CreateHabitat {definition:Box::new(d)}).unwrap();u.advance_by(3600.0);
+        let m:Manifest=serde_json::from_value(serde_json::json!({"format":"test","version":1,"id":"moisture-in-memory-test","name":"Test","created_unix":0,"modified_unix":0,"template":"test","owner":"test"})).unwrap();
+        let mut sim=Sim::new(u,Session::Sandbox(m));let before=serde_json::to_value(&sim.universe).unwrap();
+        let mut c=sim.universe.habitats[0].config.clone();c.moisture.as_mut().unwrap().condensate_capacity_kg=0.0;
+        assert!(sim.edit(Edit::ConfigureHabitat {system:0,id:0,config:Box::new(c)},0.0).is_err());assert_eq!(serde_json::to_value(&sim.universe).unwrap(),before);assert!(sim.undo_label().is_none());
+        let mut c=sim.universe.habitats[0].config.clone();c.moisture=None;let stores=sim.universe.habitats[0].state.clone();
+        sim.edit(Edit::ConfigureHabitat {system:0,id:0,config:Box::new(c)},0.0).unwrap();assert_eq!(sim.universe.habitats[0].state,stores);let disabled=serde_json::to_value(&sim.universe).unwrap();assert!(sim.dirty);
+        sim.undo(0.0);assert_eq!(serde_json::to_value(&sim.universe).unwrap(),before);
+        sim.redo(0.0);assert_eq!(serde_json::to_value(&sim.universe).unwrap(),disabled);
+    }
+}

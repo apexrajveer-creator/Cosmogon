@@ -39,8 +39,8 @@ fn remainder(v: f64) -> Option<f64> {
     // Larger inconsistent differences are unavailable, never silently clamped away.
     (v >= -1e-6 && v.is_finite()).then_some(v.max(0.0))
 }
-pub fn allocations(h: &Habitat) -> [Allocation; 6] {
-    let mut rows = [
+pub fn allocations(h: &Habitat) -> Vec<Allocation> {
+    let mut rows = vec![
         Allocation { id:"base", label:"Base services", requested_w:None, served_w:None, rated_w:None, evidence:"budget.configuration.base_load_w; priority 1 of delivered_w" },
         Allocation { id:"scrubber", label:"CO₂ scrubber", requested_w:None, served_w:None, rated_w:None, evidence:"budget.configuration.scrubber_power_w; priority 2 of delivered_w" },
         Allocation { id:"recycler", label:"Water recycler", requested_w:None, served_w:None, rated_w:None, evidence:"budget.configuration.recycler_power_w; priority 3 of delivered_w" },
@@ -48,6 +48,7 @@ pub fn allocations(h: &Habitat) -> [Allocation; 6] {
         Allocation { id:"electrolysis", label:"Water electrolysis", requested_w:None, served_w:None, rated_w:None, evidence:"budget.electrolysis; interval configuration power limit" },
         Allocation { id:"sabatier", label:"CO₂ reduction", requested_w:None, served_w:None, rated_w:None, evidence:"budget.sabatier; interval configuration power limit" },
     ];
+    if h.uses_moisture() {rows.push(Allocation {id:"moisture",label:"Dehumidifier",requested_w:None,served_w:None,rated_w:None,evidence:"budget.moisture; interval configuration power limit"});}
     if support(h) != "supported" {
         return rows;
     }
@@ -85,19 +86,22 @@ pub fn allocations(h: &Habitat) -> [Allocation; 6] {
         rows[i].requested_w = requested.or_else(|| (!configured).then_some(0.0));
         rows[i].served_w = served.or_else(|| (!configured).then_some(0.0));
     }
+    let moisture_request=b.moisture.as_ref().map(|m|m.requested_w).or_else(||c.moisture.is_none().then_some(0.0));
+    let moisture_served=b.moisture.as_ref().map(|m|m.delivered_w).or_else(||c.moisture.is_none().then_some(0.0));
+    if let Some(row)=rows.get_mut(6) {row.rated_w=Some(c.moisture.as_ref().map(|m|m.power_limit_w).unwrap_or(0.0));row.requested_w=moisture_request;row.served_w=moisture_served;}
     rows[3].rated_w = Some(c.heater_limit_w + c.radiator_pump_w);
     rows[3].requested_w = rows[4]
         .requested_w
         .zip(rows[5].requested_w)
         .and_then(|(e, s)| {
             remainder(
-                b.requested_w - c.base_load_w - c.scrubber_power_w - c.recycler_power_w - e - s,
+                b.requested_w - c.base_load_w - c.scrubber_power_w - c.recycler_power_w - e - s - moisture_request?,
             )
         });
     rows[3].served_w = rows[4]
         .served_w
         .zip(rows[5].served_w)
-        .and_then(|(e, s)| remainder(available - e - s));
+        .and_then(|(e, s)| remainder(available - e - s - moisture_served?));
     rows
 }
 #[derive(Clone, Debug, Serialize)]
@@ -138,7 +142,7 @@ pub struct Diagnostics {
     pub interval_s: f64,
     pub support: &'static str,
     pub configuration_matches_current: bool,
-    pub allocations: [Allocation; 6],
+    pub allocations: Vec<Allocation>,
     pub power: Vec<Term>,
     pub heat: Vec<Term>,
     pub water: Vec<Term>,
@@ -177,12 +181,15 @@ pub fn explain(h: &Habitat) -> Diagnostics {
     let s_water = sabatier
         .map(|e| e.water_generated_kg)
         .or_else(|| c.sabatier.is_none().then_some(0.0));
+    let moisture=b.moisture.as_ref();
+    let phase=moisture.map(|m|(m.crew_phase_energy_j,m.condensation_heat_j)).or_else(||c.moisture.is_none().then_some((0.0,0.0)));
+    let vapor=moisture.map(|m|m.crew_vapor_kg).or_else(||c.moisture.is_none().then_some(0.0));
     let days = c.crew as f64 * b.seconds / SECONDS_PER_DAY * b.served_cycle_fraction;
     let recovered = b.water_recovered_kg;
     let potable_net = e_water.map(|w| recovered - 3.217 * days - w);
-    let heat_sum = e_heat.zip(s_heat).map(|(e, s)| {
+    let heat_sum = e_heat.zip(s_heat).zip(phase).map(|((e, s),(debit,credit))| {
         b.delivered_w + b.battery_losses_w + b.metabolic_heat_w - e + s - b.radiator_rejection_w
-            + b.conduction_w
+            + b.conduction_w - debit/b.seconds + credit/b.seconds
     });
     d.power = vec![
         term(
@@ -304,8 +311,8 @@ pub fn explain(h: &Habitat) -> Diagnostics {
             "crew_wastewater",
             "Reference wastewater produced",
             "kg",
-            Some(4.467 * days),
-            "NASA BVAD Table 3-31: 4.467 kg/person-day * actual served reference days",
+            vapor.map(|v|4.467*days-v),
+            if h.uses_moisture(){"4.467 kg/person-day * actual served days - recorded airborne vapor"}else{"NASA BVAD Table 3-31: 4.467 kg/person-day * actual served reference days"},
         ),
         term(
             "electrolysis",
@@ -318,8 +325,8 @@ pub fn explain(h: &Habitat) -> Diagnostics {
             "waste_processed",
             "Wastewater processed",
             "kg",
-            remainder(b.water_processed_kg - b.sabatier_water_processed_kg),
-            "water_processed_kg - sabatier_water_processed_kg",
+            remainder(b.water_processed_kg - b.sabatier_water_processed_kg - b.condensate_processed_kg),
+            if h.uses_moisture(){"water_processed_kg - sabatier_water_processed_kg - condensate_processed_kg"}else{"water_processed_kg - sabatier_water_processed_kg"},
         ),
         term(
             "raw_processed",
@@ -332,8 +339,8 @@ pub fn explain(h: &Habitat) -> Diagnostics {
             "waste_recovered",
             "Wastewater potable recovery",
             "kg",
-            remainder(recovered - b.sabatier_water_recovered_kg),
-            "water_recovered_kg - sabatier_water_recovered_kg",
+            remainder(recovered - b.sabatier_water_recovered_kg - b.condensate_recovered_kg),
+            if h.uses_moisture(){"water_recovered_kg - sabatier_water_recovered_kg - condensate_recovered_kg"}else{"water_recovered_kg - sabatier_water_recovered_kg"},
         ),
         term(
             "raw_recovered",
@@ -482,6 +489,15 @@ pub fn explain(h: &Habitat) -> Diagnostics {
         ),
     ];
     let configuration_matches_current = d.configuration_matches_current;
+    if h.uses_moisture() {
+        d.heat.push(term("crew_vapor_phase","Crew energy retained in vapor","W",phase.map(|p|-p.0/b.seconds),"-budget.moisture.crew_phase_energy_j / seconds"));
+        d.heat.push(term("condensation","Condensation reference heat released","W",phase.map(|p|p.1/b.seconds),"budget.moisture.condensation_heat_j / seconds; electricity already in bus"));
+        if let Some(sum)=d.heat.iter_mut().find(|t|t.id=="sum") {sum.evidence="bus + losses + metabolic - electrolysis enthalpy + Sabatier heat - crew phase + condensation - radiator + conduction";}
+        d.water.push(term("crew_vapor","Crew vapor transferred to cabin","kg",vapor,"budget.moisture.crew_vapor_kg; partition of 4.467 kg/day total water output"));
+        d.water.push(term("condensate","Vapor collected as raw liquid","kg",moisture.map(|m|m.condensed_kg).or_else(||c.moisture.is_none().then_some(0.0)),"budget.moisture.condensed_kg; available for later recycling"));
+        d.water.push(term("condensate_processed","Held condensate processed","kg",Some(b.condensate_processed_kg),"budget.condensate_processed_kg; after wastewater and raw reactor product"));
+        d.water.push(term("condensate_recovered","Assumed condensate water recovery","kg",Some(b.condensate_recovered_kg),"budget.condensate_recovered_kg; not purification quality"));
+    }
     let mut note = |id, text: String, evidence: Vec<&'static str>| {
         d.explanations.push(Explanation { id, text, evidence })
     };
@@ -518,6 +534,8 @@ pub fn explain(h: &Habitat) -> Diagnostics {
             }
         }
     }
+    if let Some(m)=moisture {if !m.constraints.is_empty() {note("moisture_constraints",format!("Recorded moisture bounds: {}. Ratings and vapor partition are assumptions.",m.constraints.join("; ")),vec!["budget.moisture.constraints"]);}}
+    if c.moisture.is_some() && moisture.is_none() {note("missing_moisture","Configured moisture equipment lacks its interval budget; phase heat and dependent sums remain unavailable.".into(),vec!["budget.moisture","budget.configuration"]);}
     if c.electrolysis.is_some() && electrolysis.is_none()
         || c.sabatier.is_some() && sabatier.is_none()
     {
@@ -529,7 +547,7 @@ pub fn explain(h: &Habitat) -> Diagnostics {
 pub fn report(h: &Habitat, world_time_s: f64) -> Result<serde_json::Value, String> {
     h.validate(world_time_s)?;
     Ok(
-        serde_json::json!({"format":"cosmogon-habitat-diagnostic-report","schema_version":1,"world_time_s":world_time_s,"time_coordinate":"seconds since J2000; interval end can precede world time","diagnostics":explain(h),"habitat":h,"source":{"crew":SOURCE,"electrolysis":h.uses_electrolysis().then(crate::electrolysis::source),"sabatier":h.uses_sabatier().then(crate::sabatier::source)}}),
+        serde_json::json!({"format":"cosmogon-habitat-diagnostic-report","schema_version":1,"world_time_s":world_time_s,"time_coordinate":"seconds since J2000; interval end can precede world time","diagnostics":explain(h),"habitat":h,"source":{"crew":SOURCE,"electrolysis":h.uses_electrolysis().then(crate::electrolysis::source),"sabatier":h.uses_sabatier().then(crate::sabatier::source),"moisture":h.uses_moisture().then(crate::moisture::source)}}),
     )
 }
 pub fn from_world(u: &Universe, id: u64) -> Result<serde_json::Value, String> {

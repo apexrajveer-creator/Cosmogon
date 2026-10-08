@@ -24,6 +24,7 @@ pub mod collision;
 pub mod expansion;
 pub mod electrolysis;
 pub mod sabatier;
+pub mod moisture;
 pub mod habitability;
 pub mod habitat;
 pub mod habitat_diagnostics;

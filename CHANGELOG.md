@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — finite cabin moisture
+
+Optional source-pinned finite vapor/isolated condensate, assumed crew moisture partition, NIST-supported RH, conservative dehumidifier bus allocation, explicit crew phase debit/condensation heat and later powered liquid recycling. Native Overview/Settings/Model views, ordinary undoable edits, exact retained model pins, shared WHY and protected 85-column studies/recording graphs. Legacy configurations and golden `0xf2c4140a45ae509b` remain unchanged. No wall/ice condensation, hardware calibration, purification quality or physical greenhouse exchange claim.
+
 ## Unreleased — controlled crop transpiration
 
 Source-pinned optional light-period water/vapor forecasts, explicit maintained humidity at fixed terrestrial reference pressure, gross/light-cycle net carbon and conductance, deterministic quadrature with resolution evidence, native water graphs/comparisons and protected numeric exports. Version-1 definitions preserve identical biomass without fabricated humidity/water; negative source conductance and unknown water versions are refused. No installed greenhouse, finite habitat exchange, field calibration, simulation/save/golden or dependency change.

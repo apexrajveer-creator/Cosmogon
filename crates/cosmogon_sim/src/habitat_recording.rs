@@ -88,6 +88,7 @@ impl Recording {
         let mut previous = None;
         let mut uses_electrolysis = false;
         let mut uses_sabatier = false;
+        let mut uses_moisture=false;
         for row in &rows {
             if !row.simulation_time_s.is_finite()
                 || row.simulation_time_s < initial.time
@@ -108,6 +109,7 @@ impl Recording {
             }
             uses_electrolysis |= row.habitat.uses_electrolysis();
             uses_sabatier |= row.habitat.uses_sabatier();
+            uses_moisture |= row.habitat.uses_moisture();
         }
         for (used, key, descriptor, expected) in [
             (
@@ -122,11 +124,12 @@ impl Recording {
                 "sabatier_model_descriptor",
                 crate::sabatier::source(),
             ),
+            (uses_moisture,"moisture_source","moisture_model_descriptor",crate::moisture::source()),
         ] {
             if used
                 && (m[key] != expected
                     || m[descriptor]["id"]
-                        != if key == "sabatier_source" {
+                        != if key == "moisture_source" {"moisture"} else if key == "sabatier_source" {
                             "sabatier"
                         } else {
                             "electrolysis"
@@ -157,7 +160,7 @@ impl Recording {
                 ));
             }
         }
-        for key in ["electrolysis_source", "sabatier_source"] {
+        for key in ["electrolysis_source", "sabatier_source", "moisture_source"] {
             if report[key] != expected[key] {
                 return Err("Recorded report reaction source disagrees with final habitat".into());
             }
@@ -180,7 +183,7 @@ impl Recording {
             .ok_or("Missing CSV header")?
             .split(',')
             .collect::<Vec<_>>();
-        if !matches!(header.len(), 38 | 49 | 66) {
+        if !matches!(header.len(), 38 | 49 | 66 | 85) {
             return Err("Unsupported habitat CSV columns".into());
         }
         for (a, e) in a.iter().zip(&e) {
@@ -190,7 +193,7 @@ impl Recording {
                 return Err("CSV values disagree with JSON observations".into());
             }
         }
-        let summary = serde_json::json!({"format":"cosmogon-habitat-recording-inspection","schema_version":1,"model":habitat::MODEL,"habitat_id":id,"name":definition.name,"body":definition.body,"latitude_deg":definition.latitude_deg,"longitude_east_deg":definition.longitude_east_deg,"sample_count":count,"initial_time_s":initial.time,"final_time_s":final_world.time,"duration_s":final_world.time-initial.time,"initial_state_fingerprint":initial_fp,"final_state_fingerprint":final_fp,"initial_dataset_versions":save::data_versions(&initial),"final_dataset_versions":save::data_versions(&final_world),"electrolysis_source":m["electrolysis_source"],"sabatier_source":m["sabatier_source"],"checks":"Bounded formats, sources/models, row budgets/identity/mass/time, exact endpoint worlds/fingerprints, original definition, report and CSV/JSON consistency","validation_scope":"Structural numerical consistency; no independent trajectory replay, cryptographic authenticity, predictive confidence or field calibration","metrics":Metric::ALL.iter().map(|v|serde_json::json!({"id":v.id(),"label":v.label(),"unit":v.unit()})).collect::<Vec<_>>()});
+        let summary = serde_json::json!({"format":"cosmogon-habitat-recording-inspection","schema_version":1,"model":habitat::MODEL,"habitat_id":id,"name":definition.name,"body":definition.body,"latitude_deg":definition.latitude_deg,"longitude_east_deg":definition.longitude_east_deg,"sample_count":count,"initial_time_s":initial.time,"final_time_s":final_world.time,"duration_s":final_world.time-initial.time,"initial_state_fingerprint":initial_fp,"final_state_fingerprint":final_fp,"initial_dataset_versions":save::data_versions(&initial),"final_dataset_versions":save::data_versions(&final_world),"electrolysis_source":m["electrolysis_source"],"sabatier_source":m["sabatier_source"],"moisture_source":m["moisture_source"],"checks":"Bounded formats, sources/models, row budgets/identity/mass/time, exact endpoint worlds/fingerprints, original definition, report and CSV/JSON consistency","validation_scope":"Structural numerical consistency; no independent trajectory replay, cryptographic authenticity, predictive confidence or field calibration","metrics":Metric::ALL.iter().map(|v|serde_json::json!({"id":v.id(),"label":v.label(),"unit":v.unit()})).collect::<Vec<_>>()});
         Ok(Self { rows, summary })
     }
 }
@@ -212,9 +215,10 @@ pub enum Metric {
     ElectrolysisOxygen,
     SabatierWater,
     SabatierHeat,
+    Vapor,Condensate,Humidity,CondensationHeat,
 }
 impl Metric {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 18] = [
         Self::Water,
         Self::OxygenReserve,
         Self::Hydrogen,
@@ -228,7 +232,7 @@ impl Metric {
         Self::UnservedPower,
         Self::ElectrolysisOxygen,
         Self::SabatierWater,
-        Self::SabatierHeat,
+        Self::SabatierHeat,Self::Vapor,Self::Condensate,Self::Humidity,Self::CondensationHeat,
     ];
     pub fn id(self) -> &'static str {
         match self {
@@ -246,6 +250,7 @@ impl Metric {
             Self::ElectrolysisOxygen => "electrolysis_oxygen",
             Self::SabatierWater => "sabatier_water",
             Self::SabatierHeat => "sabatier_heat",
+            Self::Vapor=>"vapor",Self::Condensate=>"condensate",Self::Humidity=>"humidity",Self::CondensationHeat=>"condensation_heat",
         }
     }
     pub fn parse(id: &str) -> Result<Self, String> {
@@ -270,6 +275,7 @@ impl Metric {
             Self::ElectrolysisOxygen => "Interval electrolytic oxygen",
             Self::SabatierWater => "Interval raw water produced",
             Self::SabatierHeat => "Interval reference reaction heat",
+            Self::Vapor=>"Cabin water vapor",Self::Condensate=>"Isolated condensate",Self::Humidity=>"Relative humidity",Self::CondensationHeat=>"Interval reference condensation heat",
         }
     }
     pub fn unit(self) -> &'static str {
@@ -278,12 +284,13 @@ impl Metric {
             Self::OxygenPressure | Self::Co2Pressure => "Pa",
             Self::Battery => "kWh",
             Self::DeliveredPower | Self::UnservedPower => "W",
-            Self::SabatierHeat => "kJ",
+            Self::SabatierHeat | Self::CondensationHeat => "kJ",
+            Self::Humidity=>"%",
             _ => "kg",
         }
     }
     pub fn is_interval(self) -> bool {
-        matches!(self,Self::DeliveredPower | Self::UnservedPower | Self::ElectrolysisOxygen | Self::SabatierWater | Self::SabatierHeat)
+        matches!(self,Self::DeliveredPower | Self::UnservedPower | Self::ElectrolysisOxygen | Self::SabatierWater | Self::SabatierHeat | Self::CondensationHeat)
     }
     pub fn value(self, row: &Sample) -> Option<f64> {
         let h = &row.habitat;
@@ -291,6 +298,10 @@ impl Metric {
         let b = &h.budget;
         Some(match self {
             Self::Water => s.potable_water_kg,
+            Self::Vapor=>{if !h.uses_moisture(){return None;}s.water_vapor_kg},
+            Self::Condensate=>{if !h.uses_moisture(){return None;}s.condensate_kg},
+            Self::Humidity=>{if !h.uses_moisture(){return None;}100.0*s.relative_humidity(&h.config)?},
+            Self::CondensationHeat=>b.moisture.as_ref()?.condensation_heat_j/1000.0,
             Self::OxygenReserve => s.oxygen_reserve_kg,
             Self::Hydrogen => s.hydrogen_kg,
             Self::Methane => s.methane_kg,

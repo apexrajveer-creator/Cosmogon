@@ -1,0 +1,19 @@
+# Finite cabin moisture: research and next mechanism
+
+Prepared before implementation, 2026-10-09. The controlled crop planner reports transpired vapor, but the live habitat currently collects all nominal moisture immediately. Finite humidity/condensate state is a prerequisite for the directive's physical greenhouse and phase-9 closure.
+
+[NASA BVAD Rev2 Table 3-31, printed p58/PDF p72](https://ntrs.nasa.gov/api/citations/20210024855/downloads/BVAD_2.15.22-final.pdf) gives respiration/perspiration water 2.946 kg per reference person-day, total metabolic heat 12.426 MJ, sensible 6.308 MJ and latent 6.118 MJ. These aggregate nominal values do not establish that all rejected moisture is airborne vapor. Source snapshot identity is the existing BVAD SHA-256.
+
+[NIST water phase data](https://webbook.nist.gov/cgi/cbook.cgi?ID=C7732185&Mask=4) gives log10(P_bar)=A-B/(T_K+C). Use only the 273–303 K coefficient set A=5.40221, B=1838.675, C=-31.737, restricting use to liquid-water temperatures 273.15–303 K. Outside that domain saturation/RH-based equipment control is unavailable; no ice or high-temperature extrapolation.
+
+[NIST gas](https://webbook.nist.gov/cgi/cbook.cgi?ID=C7732185&Mask=1) and [liquid thermochemistry](https://webbook.nist.gov/cgi/cbook.cgi?ID=C7732185&Mask=2) give CODATA formation enthalpies -241.826 and -285.830 kJ/mol (each reported +/-0.040). Their difference gives a constant 298.15 K reference phase enthalpy of 44.004 kJ/mol. It is not a temperature-dependent latent heat, hardware COP or predictive uncertainty. The gas Shomate table starts at 500 K, so do not extrapolate it to cabin temperature.
+
+## Engineering inference and intended integrated build
+
+Add optional versioned cabin-moisture equipment, finite airborne-water/isolated-condensate stores, actual ideal-gas vapor pressure/RH and explicit power/phase heat. Existing worlds/configurations remain absent/default-zero with released behavior; saved model/source pins follow retained optional state. Preserve simulation determinism and old saves; don't silently activate the mechanism.
+
+Split the already balanced nominal moisture output using an explicit assumed airborne fraction. A source-derived default may match the reference latent heat using 6.118 MJ/(2.946 kg * reference phase J/kg); label that partition as an inference, not measured vapor fraction. Keep total crew mass output unchanged. Phase energy carried into retained vapor is debited from immediate sensible cabin heating; phase release enters heat only when modeled condensation actually occurs. Report both pieces and retain the existing total-metabolic reference as evidence, without double counting it.
+
+Model a user-assumed electric dehumidifier with finite rate, bus power, RH setpoint and isolated product capacity. Budget after existing life-support/reactors; consume only available vapor above the supported setpoint, collect equal raw liquid mass, and add reference phase heat plus already-accounted delivered electricity. Existing powered water processing may consume held condensate in a later interval, after existing wastewater/product priority; no instant potable-water recovery. Retain supersaturation explicitly rather than invent passive wall condensation or destroy moisture. Unsupported saturation domains stop RH-driven processing without erasing water or claiming support.
+
+Connect actual stores/flows/constraints to ordinary edits/undo, source pins, native Humidity controls, observer CSV, recordings/graphs, shared WHY, protected exports and CLI trajectories. Show mathematical/domain limits, inferred moisture partition and assumed equipment; no medical, purification or physical greenhouse claim. Test finite water/mass/electric/reference phase-energy closure, starvation/full storage, no power, supported/unsupported thermal domains, save/load/undo and legacy behavior. Inspect actual native layouts and an ordinary packaged run after the integrated build.

@@ -54,6 +54,8 @@ The connected [native keyboard controls](docs/INPUT_BINDINGS.md) build maps 24 c
 
 The connected [controlled transpiration](docs/TRANSPIRATION_PLANNING.md) build adds optional source-pinned lettuce water/vapor forecasts, explicit humidity, conductance and pressure assumptions, deterministic quadrature, native total/daily plots and complete protected numeric exports. Legacy definitions retain identical biomass and unavailable water. Checks: 308 passed plus one existing ignored, 52 distinct offline/refusal/native cases, sixteen inspected accepted layouts plus two latest packaged repeats and a 48-second normal packaged run; [verification](docs/TRANSPIRATION_VALIDATION.md). No Universe/save or golden change. Physical greenhouse supply, humidity dynamics, facility energy and crop calibration remain incomplete. Finite cabin moisture and condensate handling follows; the master directive remains incomplete.
 
+The connected [finite cabin moisture](docs/HABITAT_HUMIDITY.md) build adds optional vapor/isolated condensate, supported saturation/RH, explicit phase heat and allocated dehumidification power, later powered recycling, source pins and actual native/recorded diagnostics. [Research memo](docs/HUMIDITY_RESEARCH.md). Checks: 316 passed plus one existing ignored, 57 distinct offline/refusal/native cases, fourteen final inspected layouts and a 48-second packaged run; [verification](docs/HABITAT_HUMIDITY_VALIDATION.md). Untouched worlds/old saves and the golden remain unchanged. Physical greenhouse, leaks, ice/wall condensation and equipment calibration remain incomplete. Controlled moisture equipment studies follow; the master directive remains incomplete.
+
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
   [GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases) with macOS, Windows and Linux builds.
@@ -95,6 +97,7 @@ Map of the 1.0 features (start here when changing one):
 | Photo mode, lens/colour, dev capture | — | `capture.rs`, `navigation.rs`, `ui/navigation.rs` |
 | Research controls/models/sources/CSV | `research/` | `research.rs`, `ui/research.rs`; CLI `experiment`, `models` |
 | Performance recordings | — | `performance.rs`, `ui/performance.rs` |
+| Finite cabin moisture / condensate | `moisture.rs`, `habitat.rs` | `ui/habitat_humidity.rs`; actual recordings/WHY and CLI habitat exports |
 | Habitat WHY / diagnostics exports | `habitat_diagnostics.rs` | `ui/habitat_why.rs`, `ui/habitat_recordings.rs`; CLI `habitat-diagnose` |
 | Habitat equipment listening / WAV | completed `habitat.rs` budgets | `habitat_audio.rs`, `audio.rs`, `ui/alerts.rs` |
 | Sound modes/mixer | — | `audio.rs`, `ui/alerts.rs` (synthesised; no audio files) |

@@ -126,6 +126,7 @@ fn photo_metadata(sim: &crate::sim::Sim, rig: &crate::camera::CameraRig, setting
         "coordinate_registration": cosmogon_sim::planet::landing::REGISTRATION,
         "terrain_study": study.metadata(),
         "greenhouse_planner": habitat.crop.metadata(),
+        "habitat_moisture": habitat.moisture_metadata(&sim.universe),
         "habitat_recording": habitat.recording.metadata(),
         "habitat_audio": environment.metadata(&sim.universe),
         "camera_path": paths.metadata(sim,rig),
