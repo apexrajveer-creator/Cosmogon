@@ -145,6 +145,8 @@ pub struct Sim {
     /// Bumped whenever the universe is replaced wholesale (undo, checkpoint restore), so
     /// derived views (trails) can reset.
     pub generation: u64,
+    /// App-only identity for camera paths reopened from an exact single-file state.
+    pub camera_source_fingerprint: u64,
     /// A thumbnail to capture for the sandbox, after this many more frames.
     pub thumbnail_request: Option<(std::path::PathBuf, u32)>,
 }
@@ -159,7 +161,9 @@ impl Sim {
             Session::Sandbox(m) if m.dir().join("manifest.json").exists() && !m.thumbnail_path().exists() => Some((m.thumbnail_path(), 150)),
             _ => None,
         };
+        let camera_source_fingerprint = if matches!(&session,Session::Sandbox(m) if m.template=="imported") {crate::cinematic::state_fingerprint(&universe)} else {0};
         Self {
+            camera_source_fingerprint,
             universe,
             session,
             speed,

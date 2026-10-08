@@ -14,6 +14,7 @@ mod camera;
 mod capture;
 mod interact;
 mod navigation;
+mod cinematic;
 mod surface;
 mod notifications;
 mod persistence;
@@ -34,6 +35,21 @@ use bevy_egui::EguiPlugin;
 fn main() -> bevy::app::AppExit {
     let started = std::time::Instant::now();
     let args = args::Args::parse();
+    if let Some(path)=&args.camera_path {
+        let checked=(||->Result<(),String>{
+            let d=cinematic::Definition::read(std::path::Path::new(path))?;
+            let requested=args.camera_path_time.unwrap_or(0.0);
+            if requested>d.duration(){return Err("Requested presentation time exceeds the path duration".into());}
+            let (u,template)=if let Some(save)=&args.load {(cosmogon_sim::save::read_file(std::path::Path::new(save)).map_err(|e|e.to_string())?,"imported")}else{
+                let (_,life,intel,_)=cosmogon_sim::universe::LIFE_PRESETS[args.life.unwrap_or(0).min(2)];
+                (cosmogon_sim::Universe::new(cosmogon_sim::UniverseSettings{seed:args.seed.unwrap_or(1),scenario:args.new.unwrap_or(cosmogon_sim::Scenario::SolarSystemLab),life_rate:life,intelligence_rate:intel,..Default::default()}),"dev")
+            };
+            let m=persistence::Manifest::new("Camera path preflight","",template,persistence::Origin::default());
+            let sim=sim::Sim::new(u,sim::Session::Sandbox(m));
+            d.pose(&sim,0.0)?;d.pose(&sim,requested)?;Ok(())
+        })();
+        if let Err(e)=checked {eprintln!("Cannot open camera path: {e}");return AppExit::error();}
+    }
     if let Some(output)=&args.habitat_audio_export {
         let result=cosmogon_sim::save::read_file(std::path::Path::new(args.load.as_deref().expect("validated audio load")))
             .map_err(|e|e.to_string()).and_then(|u|habitat_audio::export(&u,args.habitat_audio.expect("validated audio id"),std::path::Path::new(output)));

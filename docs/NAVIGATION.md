@@ -84,3 +84,7 @@ lighting helper remain available for orbit captures. Sidecars distinguish tracke
 include surface anchor/source information; snapshot coordinates describe the placement request, not a
 claim that the camera remains above that point later. Headless `cosmogon-cli sites` emits the registry;
 `cosmogon-cli surface --site curiosity` emits a source-supported reading. No network is needed at runtime.
+
+## Authored shots
+
+Camera & Photo → Paths connects current views and saved viewpoints to explicit timed keys, interpolation, look-at, lens changes and Play/Pause/Stop/scrub. See [CINEMATIC_PATHS](CINEMATIC_PATHS.md) for file identity, clearance and timing limits. No simulation or golden changes.

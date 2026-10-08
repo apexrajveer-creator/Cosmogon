@@ -131,3 +131,5 @@ The application-only `habitat_audio.rs` reads completed habitat interval configu
 ### Habitat completed-interval explanations
 
 `cosmogon_sim::habitat_diagnostics` derives typed unit/formula terms and priority allocations from retained completed budgets. Ordinary reports, bounded recording validation, CLI diagnostic exports and native live/historical WHY share the same result; app sonification reuses allocations. No start inventories or physical state are invented. Native protected source exports use a worker with a captured habitat snapshot.
+
+Authored cinematic paths live in app-only `cinematic.rs`: bounded definitions, shared f64 pose evaluator and playback resource. Camera input → path evaluation → rendering/clearance → actual-pose recording is explicitly ordered. `ui/cinematic.rs` authors actual views and saved viewpoints; photo/performance reports expose intended/actual poses. `Sim.camera_source_fingerprint` retains app-only initial imported-state identity; no Universe/save fields, simulation laws or golden changes.

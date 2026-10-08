@@ -67,6 +67,9 @@ pub struct Args {
     pub profile_frames: usize,
     pub profile_warmup: usize,
     pub free_camera: bool,
+    pub camera_path: Option<String>,
+    pub camera_path_time: Option<f64>,
+    pub camera_path_play: bool,
     pub fov: Option<f32>,
     pub exposure: Option<f32>,
     pub capture_metadata: bool,
@@ -131,6 +134,9 @@ impl Args {
                 "--persist" => a.persist = true,
                 "--continue" => a.continue_latest = true,
                 "--capture-metadata" => a.capture_metadata = true,
+                "--camera-path" => a.camera_path=Some(val()),
+                "--camera-path-time" => a.camera_path_time=Some(val().parse().unwrap_or(f64::NAN)),
+                "--camera-path-play" => a.camera_path_play=true,
                 "--free-camera" => a.free_camera = true,
                 "--habitat-compare" => a.habitat_compare=Some(val()),
                 "--habitat-audio" => {let v=val();a.habitat_audio=Some(v.parse().unwrap_or(u64::MAX));},
@@ -181,13 +187,20 @@ impl Args {
                 f => eprintln!("ignoring unknown argument {f}"),
             }
         }
-        if (a.habitat_recording.is_some() || a.greenhouse_definition.is_some() || a.habitat_definition.is_some() || a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
+        if (a.camera_path.is_some() || a.habitat_recording.is_some() || a.greenhouse_definition.is_some() || a.habitat_definition.is_some() || a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
             a.new = Some(Scenario::SolarSystemLab);
         }
         a
     }
 
     fn validate_surface(&self) -> Result<(), String> {
+        if self.camera_path.is_none() && (self.camera_path_time.is_some() || self.camera_path_play) {return Err("--camera-path-time/--camera-path-play require --camera-path FILE".into());}
+        if self.camera_path_time.is_some_and(|t|!t.is_finite() || !(0.0..=3600.0).contains(&t)) {return Err("Camera presentation seconds must be finite and between 0 and 3600".into());}
+        if self.camera_path.is_some() {
+            if self.camera_path.as_deref()==Some("") {return Err("Choose a camera-path file".into());}
+            if self.surface_site.is_some() || self.latlon.is_some() || self.free_camera || self.yaw.is_some() || self.pitch.is_some() || self.distance.is_some() || self.fov.is_some() || self.exposure.is_some() || self.tour.is_some() || self.menu.is_some() || self.habitat_audio_export.is_some() || self.continue_latest || self.what_if.is_some() || self.advance_years!=0.0 {return Err("Camera paths cannot ignore another camera, menu, time-advance or offline export request".into());}
+            if self.capture.is_some() && self.camera_path_play {return Err("Use frozen --camera-path-time for captures; --camera-path-play is for ordinary playback".into());}
+        }
         if self.habitat_audio==Some(u64::MAX) {return Err("Invalid --habitat-audio ID".into());}
         if self.habitat_audio.is_some() && self.load.is_none() {return Err("--habitat-audio requires --load SAVE".into());}
         if self.habitat_audio_export.is_some() {
@@ -221,6 +234,11 @@ impl Args {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn camera_path_launches_require_explicit_valid_unambiguous_controls(){
+        for values in [vec!["--camera-path-time","1"],vec!["--camera-path-play"],vec!["--camera-path",""],vec!["--camera-path","p","--camera-path-time","NaN"],vec!["--camera-path","p","--camera-path-time","3601"],vec!["--camera-path","p","--latlon","0,0"],vec!["--camera-path","p","--fov","40"],vec!["--camera-path","p","--capture","x","--camera-path-play"]]{assert!(Args::parse_from(values.into_iter().map(String::from)).validate_surface().is_err());}
+        let a=Args::parse_from(["--camera-path","p","--camera-path-time","3"].into_iter().map(String::from));assert!(a.validate_surface().is_ok());assert_eq!(a.camera_path_time,Some(3.0));assert_eq!(a.new,Some(Scenario::SolarSystemLab));
+    }
     #[test]
     fn sound_preview_requires_saved_live_context_and_export_is_unambiguous() {
         for v in [vec!["--habitat-audio","bad"],vec!["--habitat-audio","0"],vec!["--habitat-audio-export","o"],vec!["--load","s","--habitat-audio","0","--habitat-audio-export","o","--capture","x"],vec!["--load","s","--habitat-audio","0","--habitat-audio-export","o","--advance-years","1"]] {

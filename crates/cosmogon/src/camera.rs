@@ -158,9 +158,11 @@ impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CameraRig>()
             .init_resource::<crate::navigation::Viewpoints>()
+            .init_resource::<crate::cinematic::Player>()
+            .add_systems(OnExit(AppState::Observing), crate::cinematic::leave_world)
             .add_systems(PostStartup, spawn_camera)
             .add_systems(OnEnter(AppState::Observing), initial_focus)
-            .add_systems(Update, (camera_input, update_camera).chain().in_set(Frame::Camera).run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)))
+            .add_systems(Update, (camera_input, crate::cinematic::update, update_camera, crate::cinematic::record_actual).chain().in_set(Frame::Camera).run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)))
             .add_systems(Update, menu_camera.in_set(Frame::Camera).run_if(not(in_state(AppState::Observing))))
             .add_systems(Update, apply_graphics_settings.run_if(resource_changed::<UserSettings>));
     }
@@ -308,6 +310,7 @@ fn camera_input(
     time: Res<Time<Real>>,
     mut settings: ResMut<UserSettings>,
     ui: Res<crate::ui::UiState>,
+    mut path: ResMut<crate::cinematic::Player>,
 ) {
     let rig = &mut *rig;
     rig.follow_surface(&sim);
@@ -320,6 +323,11 @@ fn camera_input(
         Err(_) => (false, false),
     };
     let cmd = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight) || keys.pressed(KeyCode::SuperLeft) || keys.pressed(KeyCode::SuperRight);
+    if path.active {
+        let movement = !wants_keys && !cmd && [KeyCode::KeyW,KeyCode::KeyA,KeyCode::KeyS,KeyCode::KeyD,KeyCode::KeyR,KeyCode::KeyC,KeyCode::KeyQ,KeyCode::KeyE,KeyCode::KeyG,KeyCode::KeyF,KeyCode::Home,KeyCode::ArrowLeft,KeyCode::ArrowRight,KeyCode::ArrowUp,KeyCode::ArrowDown].iter().any(|k|keys.pressed(*k));
+        let pointer = !wants_pointer && (scroll.delta != Vec2::ZERO || ((mouse.pressed(MouseButton::Left) || mouse.pressed(MouseButton::Right)) && motion.delta != Vec2::ZERO));
+        if movement || pointer {path.stop("Manual navigation stopped the camera path.");} else {return;}
+    }
     if !wants_keys && !cmd {
         if keys.just_pressed(KeyCode::KeyG) {
             if rig.free.is_some() {

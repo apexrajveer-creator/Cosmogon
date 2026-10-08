@@ -7,15 +7,17 @@ use crate::persistence::UserSettings;
 use crate::sim::Sim;
 use super::{UiState, ACCENT, MUTED};
 
-pub fn panel(mut contexts: EguiContexts, mut state: ResMut<UiState>, mut rig: ResMut<CameraRig>, mut settings: ResMut<UserSettings>, mut views: ResMut<Viewpoints>, mut sim: ResMut<Sim>, time: Res<Time>) -> Result {
+#[allow(clippy::too_many_arguments)]
+pub fn panel(mut contexts: EguiContexts, mut state: ResMut<UiState>, mut rig: ResMut<CameraRig>, mut settings: ResMut<UserSettings>, mut views: ResMut<Viewpoints>, mut sim: ResMut<Sim>, time: Res<Time>, mut paths:ResMut<crate::cinematic::Player>) -> Result {
     if !state.camera_open || state.hidden || state.photo_mode { return Ok(()); }
     let ctx = contexts.ctx_mut()?;
     let mut open = state.camera_open;
-    egui::Window::new("Camera & Photo").open(&mut open).default_pos([325.0, 75.0]).default_width(400.0).show(ctx, |ui| {
+    egui::Window::new("Camera & Photo").open(&mut open).default_pos([325.0, 75.0]).default_width(430.0).default_height(if state.camera_tab==3 {540.0}else{400.0}).max_height((ctx.available_rect().height()-160.0).max(220.0)).vscroll(true).show(ctx, |ui| {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut state.camera_tab, 0, "Navigate");
             ui.selectable_value(&mut state.camera_tab, 1, "Photo");
             ui.selectable_value(&mut state.camera_tab, 2, "Viewpoints");
+            ui.selectable_value(&mut state.camera_tab, 3, "Paths");
         });
         ui.separator();
         match state.camera_tab {
@@ -26,7 +28,7 @@ pub fn panel(mut contexts: EguiContexts, mut state: ResMut<UiState>, mut rig: Re
                     if ui.button("Orbit selection (F)").clicked() {
                         if let Some(t) = sim.selected.or(rig.focus) { rig.focus_on(t, &sim, None); }
                     }
-                    if ui.button("Stop").clicked() { if let Some(f) = &mut rig.free { f.velocity = bevy::math::DVec3::ZERO; } }
+                    if ui.button("Stop").clicked() { paths.stop("Camera stopped; path control released."); if let Some(f) = &mut rig.free { f.velocity = bevy::math::DVec3::ZERO; } }
                 });
                 if rig.surface_anchor.is_some() && ui.button("Release surface view").clicked() {rig.release_surface();}
                 if let Some(message)=&rig.navigation_notice {ui.label(egui::RichText::new(message).small().color(ACCENT));}
@@ -60,7 +62,7 @@ pub fn panel(mut contexts: EguiContexts, mut state: ResMut<UiState>, mut rig: Re
                 ui.add(egui::Slider::new(&mut settings.presentation.warmth, -0.03..=0.03).text("Cool ↔ warm"));
                 ui.add(egui::Slider::new(&mut settings.presentation.saturation, 0.0..=2.0).text("Saturation"));
                 ui.horizontal(|ui| {
-                    if ui.button("Reset lens & colour").clicked() { settings.presentation = Presentation::default(); }
+                    if ui.button("Reset lens & colour").clicked() { paths.stop("Lens reset; path control released."); settings.presentation = Presentation::default(); }
                     if ui.button("Save as defaults").clicked() { sim.status = Some((match settings.try_save() { Ok(()) => "Photo defaults saved".into(), Err(e) => format!("Could not save preferences: {e}") }, time.elapsed_secs_f64())); }
                 });
                 ui.separator();
@@ -70,6 +72,7 @@ pub fn panel(mut contexts: EguiContexts, mut state: ResMut<UiState>, mut rig: Re
                 ui.label(egui::RichText::new("Saves at the window's native pixel resolution to Pictures/Cosmogon. Navigation remains available while composing.").small().color(MUTED));
                 if ui.button("Hide interface (Tab to restore)").clicked() { state.hidden = true; }
             }
+            3 => super::cinematic::show(ui,&mut paths,&sim,&mut rig,&mut settings.presentation,&views),
             _ => {
                 ui.label(egui::RichText::new("SAVED VIEWPOINTS").color(ACCENT).strong());
                 ui.label(egui::RichText::new("Position, orientation and lens for this universe. Surface views can follow body spin and motion; other views restore relative to their reference object. Time is never rewound.").small().color(MUTED));
@@ -86,6 +89,7 @@ pub fn panel(mut contexts: EguiContexts, mut state: ResMut<UiState>, mut rig: Re
                     for (i, view) in entries {
                         ui.push_id(i, |ui| { ui.horizontal(|ui| {
                             if ui.button(&view.name).on_hover_text("Restore this viewpoint in free-camera mode").clicked() {
+                                paths.stop("Saved viewpoint selected; path control released.");
                                 views.status = Some(match view.restore(&sim, &mut rig, &mut settings.presentation) {
                                     Ok(()) => {
                                         if let Some(a)=&rig.surface_anchor {

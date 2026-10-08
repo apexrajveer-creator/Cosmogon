@@ -163,6 +163,7 @@ fn record(
     mut exit: MessageWriter<AppExit>,
     research: Option<Res<crate::research::Research>>,
     batch: Option<Res<crate::research_batch::ResearchBatch>>,
+    paths: Option<Res<crate::cinematic::Player>>,
 ) {
     perf.observing_frames += 1;
     let automatic = args.profile.is_some() && !perf.automatic_done;
@@ -215,6 +216,7 @@ fn record(
             "focus": focus_name, "position_m": view.origin.to_array(),
             "distance_m": rig.focus.map(|t| (rig.eye() - crate::camera::target_info(&sim, t).0).length()),
             "clearance_m": rig.clearance,
+            "camera_path":paths.as_ref().and_then(|p|p.metadata(&sim,&rig)),
             "camera_mode": if rig.free.is_some() { "free" } else { "orbit" },
             "orientation_xyzw": rig.rotation.to_array(), "presentation": settings.presentation,
             "yaw_rad": rig.yaw, "pitch_rad": rig.pitch, "fov_y_rad": view.fov_y,

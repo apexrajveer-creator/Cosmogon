@@ -46,7 +46,9 @@ The connected [controlled habitat experiments](docs/HABITAT_COMPARISONS.md) buil
 
 The connected [habitat equipment audio](docs/HABITAT_AUDIO.md) build adds explicit interior listening, five actual completed-power-driven textures, independent environment mixing and protected WAV/source exports. It is designed sonification rather than measured acoustics or a physical cabin. Checks: 277 passed plus one existing ignored, 32 distinct offline/native/regression cases, thirteen inspected accepted layouts and a 48-second packaged run; [verification](docs/HABITAT_AUDIO_VALIDATION.md). Simulation state and golden remain unchanged. The next connected build explains completed habitat results through shared WHY diagnostics; the full directive remains incomplete.
 
-The connected [habitat WHY diagnostics](docs/HABITAT_DIAGNOSTICS.md) build explains completed power allocations, signed heat/water/air transfers and retained evidence through the same native/CLI/export implementation. Recorded intervals remain independent of the live world, and missing evidence remains unavailable. Checks: 283 passed plus one existing ignored, forty distinct offline/native/regression cases, sixteen accepted inspected layouts and a 48-second packaged run; [verification](docs/HABITAT_DIAGNOSTICS_VALIDATION.md). No simulation law, save schema or golden change. Full causal history, hardware calibration and the master directive remain incomplete. The next build adds authored camera paths.
+The connected [habitat WHY diagnostics](docs/HABITAT_DIAGNOSTICS.md) build explains completed power allocations, signed heat/water/air transfers and retained evidence through the same native/CLI/export implementation. Recorded intervals remain independent of the live world, and missing evidence remains unavailable. Checks: 283 passed plus one existing ignored, forty distinct offline/native/regression cases, sixteen accepted inspected layouts and a 48-second packaged run; [verification](docs/HABITAT_DIAGNOSTICS_VALIDATION.md). No simulation law, save schema or golden change. Full causal history, hardware calibration and the master directive remain incomplete. The next connected build adds authored camera paths.
+
+The connected [authored camera paths](docs/CINEMATIC_PATHS.md) build adds f64 timed poses, orientation/look-at, interpolated lens values, actual/saved-view authoring, explicit playback/scrub, protected definitions and request-time intended/actual metadata. Checks: 294 passed plus one existing ignored, 33 distinct preflight/native/regression cases, seventeen inspected accepted layouts and a 48-second packaged playback run; [verification](docs/CINEMATIC_PATHS_VALIDATION.md). No simulation, save or golden change. Video, DOF, splines and simulation-rate synchronization remain incomplete. The next connected build customizes native keyboard controls.
 
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
@@ -83,6 +85,7 @@ Map of the 1.0 features (start here when changing one):
 | Guided tours | — | `ui/tour.rs` |
 | Timeline and rewind | — | `timeline.rs` |
 | Historical Mars landing references / geographic travel | `planet/landing.rs`, `planet/mola.rs` | `surface.rs`, `camera.rs`, `ui/inspect.rs`, `ui/markers.rs` |
+| Authored camera paths | — | `cinematic.rs`, `ui/cinematic.rs`; photo/performance metadata |
 | Camera, free flight, viewpoints | — | `camera.rs`, `navigation.rs`, `ui/navigation.rs` |
 | Photo mode, lens/colour, dev capture | — | `capture.rs`, `navigation.rs`, `ui/navigation.rs` |
 | Research controls/models/sources/CSV | `research/` | `research.rs`, `ui/research.rs`; CLI `experiment`, `models` |

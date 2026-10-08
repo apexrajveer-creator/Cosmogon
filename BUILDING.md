@@ -52,7 +52,7 @@ meaning, sample bounds, screenshot coordination and GPU/VRAM limitations.
 
 ## Camera and photo verification
 
-View → Camera & Photo opens the three native tabs. See [NAVIGATION](docs/NAVIGATION.md) for controls,
+View → Camera & Photo opens the native camera, photo, viewpoint and path tabs. See [NAVIGATION](docs/NAVIGATION.md) for controls,
 persistence and precision limits. Developer examples:
 
 ```sh
@@ -175,3 +175,7 @@ Controlled habitat sweeps and exact-time comparisons: [HABITAT_COMPARISONS](docs
 ## Habitat WHY verification
 
 See [HABITAT_DIAGNOSTICS](docs/HABITAT_DIAGNOSTICS.md) for live/recorded panels and `cosmogon-cli habitat-diagnose --initial SAVE --habitat-id ID [--output NEW_DIR]`. Native captures retain exact shared source terms and selected observation scope; no world advancement by diagnosis.
+
+## Authored camera paths
+
+`--camera-path FILE --camera-path-time SECONDS --panel paths` opens a validated matching-world definition and freezes a pose for native capture. `--camera-path-play` explicitly starts ordinary playback and conflicts with captures. Paths/default launch use Solar System Lab; existing camera/surface/tour/menu/time-advance conflicts are refused. See [CINEMATIC_PATHS](docs/CINEMATIC_PATHS.md) for protected files and complete examples.

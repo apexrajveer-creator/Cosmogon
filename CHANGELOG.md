@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — authored camera paths
+
+App-only timed keyframes, normalized orientation/look-at and lens interpolation, native authoring from actual/saved views, explicit Play/Pause/Stop/scrub, protected schema-1 files and capture/performance evidence of evaluated versus actual ground-corrected positions. Simulation laws, save schema and golden `0xf2c4140a45ae509b` unchanged. Video, DOF, spline paths and simulation-rate synchronization remain incomplete.
+
 ## Unreleased — native exploration, research and habitat engineering
 
 - Add shared completed-interval habitat WHY diagnostics, native live/recorded power/water/heat/air explanations and protected source/CSV exports. Retain interval configuration, recorded constraints, explicit unavailable dependencies and unit/formula evidence; reuse allocations in equipment audio. Legacy studies remain readable and present diagnostic reports are checked. No physical state, source version, dependency or golden change.

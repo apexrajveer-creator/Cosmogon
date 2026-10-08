@@ -102,7 +102,7 @@ pub struct Viewpoint {
     pub presentation: Presentation,
     pub simulation_time_s: f64,
 }
-fn world_key(sim: &Sim) -> String {
+pub(crate) fn world_key(sim: &Sim) -> String {
     match &sim.session {
         Session::Reference { dataset, .. } => format!("reference:{dataset}"),
         Session::Sandbox(m) if m.template != "dev" => format!("sandbox:{}", m.id),
