@@ -171,3 +171,7 @@ Optional CO₂ reduction: `--panel habitat-water` opens actual reaction/storage/
 Habitat recordings: `cosmogon-cli habitat-inspect --recording STUDY_DIR`; native `--habitat-recording STUDY_DIR --habitat-metric water --habitat-sample 24 --panel habitat-recordings`. Graphs and photo metadata retain actual independent recorded rows; see [HABITAT_RECORDINGS](docs/HABITAT_RECORDINGS.md).
 
 Controlled habitat sweeps and exact-time comparisons: [HABITAT_COMPARISONS](docs/HABITAT_COMPARISONS.md), including shared headless and native capture examples.
+
+## Habitat WHY verification
+
+See [HABITAT_DIAGNOSTICS](docs/HABITAT_DIAGNOSTICS.md) for live/recorded panels and `cosmogon-cli habitat-diagnose --initial SAVE --habitat-id ID [--output NEW_DIR]`. Native captures retain exact shared source terms and selected observation scope; no world advancement by diagnosis.

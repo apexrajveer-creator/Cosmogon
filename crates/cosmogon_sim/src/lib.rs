@@ -26,6 +26,7 @@ pub mod electrolysis;
 pub mod sabatier;
 pub mod habitability;
 pub mod habitat;
+pub mod habitat_diagnostics;
 pub mod habitat_recording;
 pub mod habitat_comparison;
 pub mod habitat_sweep;

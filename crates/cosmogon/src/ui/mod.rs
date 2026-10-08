@@ -15,6 +15,7 @@ mod surface_study;
 mod habitat;
 mod habitat_oxygen;
 mod habitat_water;
+mod habitat_why;
 mod habitat_recordings;
 mod greenhouse;
 pub use habitat::HabitatUi;
@@ -256,7 +257,7 @@ fn init_ui_state(mut ui: ResMut<UiState>, args: Res<crate::args::Args>) {
         Some("create") => ui.create_open = true,
         Some("physics") => ui.physics_open = true,
         Some("surface") => ui.body_tab = BodyTab::Surface,
-        Some("habitat" | "habitat-controls" | "habitat-build" | "habitat-model" | "habitat-oxygen" | "habitat-water" | "habitat-recordings" | "habitat-experiments" | "greenhouse") => ui.habitat_open = true,
+        Some("habitat" | "habitat-controls" | "habitat-build" | "habitat-model" | "habitat-oxygen" | "habitat-water" | "habitat-recordings" | "habitat-recording-why" | "habitat-recording-why-water" | "habitat-recording-why-heat" | "habitat-recording-why-air" | "habitat-recording-why-evidence" | "habitat-experiments" | "habitat-why" | "habitat-why-water" | "habitat-why-heat" | "habitat-why-air" | "habitat-why-evidence" | "greenhouse") => ui.habitat_open = true,
         Some("section" | "section-map") => ui.surface_study_open = true,
         Some("alerts") => ui.alerts_open = true,
         Some("sound"|"habitat-sound"|"habitat-sound-export") => { ui.alerts_open = true; ui.alerts_tab = 1; }

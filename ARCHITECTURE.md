@@ -127,3 +127,7 @@ recording cadence and export feedback; it edits only through Sim::edit. Registri
 not serialized into Universe. See [RESEARCH](docs/RESEARCH.md) for limits and the bundle contract.
 
 The application-only `habitat_audio.rs` reads completed habitat interval configurations and power budgets into an explicit transient interior listener. A native streaming decoder uses bounded atomic presentation levels; ordinary mixer/capture/photo controls remain separate from simulation state. The same decoder exports protected fixed-interval WAV/source artifacts on a worker. No engine audio dependency or golden state change. See [HABITAT_AUDIO](docs/HABITAT_AUDIO.md).
+
+### Habitat completed-interval explanations
+
+`cosmogon_sim::habitat_diagnostics` derives typed unit/formula terms and priority allocations from retained completed budgets. Ordinary reports, bounded recording validation, CLI diagnostic exports and native live/historical WHY share the same result; app sonification reuses allocations. No start inventories or physical state are invented. Native protected source exports use a worker with a captured habitat snapshot.

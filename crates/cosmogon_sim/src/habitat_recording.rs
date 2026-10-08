@@ -162,6 +162,10 @@ impl Recording {
                 return Err("Recorded report reaction source disagrees with final habitat".into());
             }
         }
+        // Diagnostics are additive derived evidence. Old studies have no such key.
+        if report.get("diagnostics").is_some() && report["diagnostics"] != expected["diagnostics"] {
+            return Err("Recorded diagnostics disagree with the completed habitat interval".into());
+        }
         // Previous 38-/49-column studies remain valid. New columns are additive; compare
         // every existing cell to the same shared formatter rather than silently trust CSV.
         let actual = read(&path.join("samples.csv"), 16 * 1024 * 1024)?;
@@ -394,6 +398,7 @@ mod tests {
             ),
             ("manifest.json", "sabatier_source", Value::Null),
             ("report.json", "total_pressure_pa", serde_json::json!(0)),
+            ("report.json", "diagnostics", serde_json::json!({"invented":true})),
         ] {
             let p = root.join(file);
             let original = std::fs::read_to_string(&p).unwrap();
@@ -423,6 +428,11 @@ mod tests {
         assert!(Recording::read(&root).is_err());
         std::fs::write(&p, original).unwrap();
         assert!(Recording::read(&root).is_ok());
+        let p = root.join("report.json");
+        let mut legacy: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        legacy.as_object_mut().unwrap().remove("diagnostics");
+        std::fs::write(p, legacy.to_string()).unwrap();
+        assert!(Recording::read(&root).is_ok(), "Legacy reports without derived diagnostics remain valid");
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

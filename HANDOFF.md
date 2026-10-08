@@ -46,6 +46,8 @@ The connected [controlled habitat experiments](docs/HABITAT_COMPARISONS.md) buil
 
 The connected [habitat equipment audio](docs/HABITAT_AUDIO.md) build adds explicit interior listening, five actual completed-power-driven textures, independent environment mixing and protected WAV/source exports. It is designed sonification rather than measured acoustics or a physical cabin. Checks: 277 passed plus one existing ignored, 32 distinct offline/native/regression cases, thirteen inspected accepted layouts and a 48-second packaged run; [verification](docs/HABITAT_AUDIO_VALIDATION.md). Simulation state and golden remain unchanged. The next connected build explains completed habitat results through shared WHY diagnostics; the full directive remains incomplete.
 
+The connected [habitat WHY diagnostics](docs/HABITAT_DIAGNOSTICS.md) build explains completed power allocations, signed heat/water/air transfers and retained evidence through the same native/CLI/export implementation. Recorded intervals remain independent of the live world, and missing evidence remains unavailable. Checks: 283 passed plus one existing ignored, forty distinct offline/native/regression cases, sixteen accepted inspected layouts and a 48-second packaged run; [verification](docs/HABITAT_DIAGNOSTICS_VALIDATION.md). No simulation law, save schema or golden change. Full causal history, hardware calibration and the master directive remain incomplete. The next build adds authored camera paths.
+
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
   [GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases) with macOS, Windows and Linux builds.
@@ -85,6 +87,7 @@ Map of the 1.0 features (start here when changing one):
 | Photo mode, lens/colour, dev capture | — | `capture.rs`, `navigation.rs`, `ui/navigation.rs` |
 | Research controls/models/sources/CSV | `research/` | `research.rs`, `ui/research.rs`; CLI `experiment`, `models` |
 | Performance recordings | — | `performance.rs`, `ui/performance.rs` |
+| Habitat WHY / diagnostics exports | `habitat_diagnostics.rs` | `ui/habitat_why.rs`, `ui/habitat_recordings.rs`; CLI `habitat-diagnose` |
 | Habitat equipment listening / WAV | completed `habitat.rs` budgets | `habitat_audio.rs`, `audio.rs`, `ui/alerts.rs` |
 | Sound modes/mixer | — | `audio.rs`, `ui/alerts.rs` (synthesised; no audio files) |
 | Notification inbox/routing | — | `notifications.rs`, `ui/alerts.rs`, `sim.rs` |

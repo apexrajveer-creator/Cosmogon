@@ -70,6 +70,8 @@ pub struct Study {
     pub recording: Option<Recording>,
     pub comparison: Option<Recording>,
     pub experiment_mode: bool,
+    pub why_mode: bool,
+    pub why: super::habitat_why::View,
     pub alignment: Alignment,
     comparison_path: String,
     comparison_output: String,
@@ -195,6 +197,7 @@ impl Study {
         Ok(())
     }
     pub fn poll(&mut self) {
+        self.why.poll();
         let result = self
             .task
             .as_mut()
@@ -247,7 +250,7 @@ impl Study {
         let r = self.recording.as_ref()?;
         let row = &r.rows[self.selected.min(r.rows.len() - 1)];
         Some(
-            serde_json::json!({"summary":r.summary,"metric":self.metric.id(),"unit":self.metric.unit(),"selected_observation":self.selected,"selected_row":row,"selected_value":self.metric.value(row),"comparison":self.comparison.as_ref().map(|b| {let pairs=habitat_comparison::pairs(r,b,self.metric,self.alignment);let pair=&pairs[self.selected.min(pairs.len()-1)];serde_json::json!({"summary":b.summary,"alignment":self.alignment,"selected_pair":pair,"selected_row":pair.b_index.map(|j|&b.rows[j]),"report":habitat_comparison::report(r,b,self.metric,self.alignment)})}),"sweep":self.sweep_manifest,"scope":"Independent recorded view at capture request, possibly hidden; no live-world or camera change"}),
+            serde_json::json!({"summary":r.summary,"metric":self.metric.id(),"unit":self.metric.unit(),"selected_observation":self.selected,"selected_row":row,"why":self.why_mode.then(||self.why.metadata(&row.habitat,row.simulation_time_s,"recorded_completed_interval")),"selected_value":self.metric.value(row),"comparison":self.comparison.as_ref().map(|b| {let pairs=habitat_comparison::pairs(r,b,self.metric,self.alignment);let pair=&pairs[self.selected.min(pairs.len()-1)];serde_json::json!({"summary":b.summary,"alignment":self.alignment,"selected_pair":pair,"selected_row":pair.b_index.map(|j|&b.rows[j]),"report":habitat_comparison::report(r,b,self.metric,self.alignment)})}),"sweep":self.sweep_manifest,"scope":"Independent recorded view at capture request, possibly hidden; no live-world or camera change"}),
         )
     }
 }
@@ -454,6 +457,19 @@ pub fn panel(
         );
         ui.selectable_value(&mut study.experiment_mode, true, "Run experiment");
     });
+    ui.horizontal_wrapped(|ui| {ui.selectable_value(&mut study.why_mode,false,"Curves & comparison");ui.selectable_value(&mut study.why_mode,true,"WHY selected interval");});
+    if study.why_mode && !study.experiment_mode {
+        ui.label(egui::RichText::new("Recorded evidence · independent of the live world").color(ACCENT));
+        if let Some(r)=&study.recording {
+            study.selected=study.selected.min(r.rows.len()-1);
+            ui.label(format!("A: {} · {} recorded observations",r.summary["name"].as_str().unwrap_or("Habitat"),r.rows.len()));
+            ui.add(egui::Slider::new(&mut study.selected,0..=r.rows.len()-1).text("Observation index"));
+            let row=&r.rows[study.selected];
+            study.why.show(ui,&row.habitat,row.simulation_time_s,false);
+            ui.label(egui::RichText::new("This explains A's exact saved interval. Return to Curves & comparison for supported B−A differences; no unique cause is attributed across changed initial conditions.").small().color(MUTED));
+        } else {ui.label("Open a recording in Curves & comparison first.");}
+        return;
+    }
     if study.experiment_mode {
         experiment(ui, study, world, habitat_id, reference);
         if let Some(status) = &study.status {

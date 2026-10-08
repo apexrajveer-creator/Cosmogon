@@ -116,6 +116,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         };
         if a.cmd=="greenhouse" && !matches!(flag.as_str(),"--definition"|"--output"|"--initial"|"--habitat-id") {return Err(format!("{flag} is not a greenhouse planning option"));}
         if a.cmd=="greenhouse-definition" && flag!="--output" {return Err(format!("{flag} is not a greenhouse-definition option"));}
+        if a.cmd=="habitat-diagnose" && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
         if a.cmd=="habitat-inspect" && flag!="--recording" {return Err(format!("{flag} is not a habitat inspection option"));}
         if a.cmd=="habitat" && !matches!(flag.as_str(),"--definition"|"--habitat-id"|"--initial"|"--output"|"--samples"|"--interval-days"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat study option"));}
         if a.cmd=="habitat-definition" && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat-definition option"));}
@@ -141,7 +142,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--reference" => a.reference = Some(val()?),
             "--recording" => a.recording = Some(val()?),
             "--initial" => a.initial = Some(val()?),
-            "--habitat-id" => {if !matches!(a.cmd.as_str(),"habitat"|"habitat-sweep"|"greenhouse") {return Err("--habitat-id requires habitat or greenhouse".into());}a.habitat_id=Some(number(val()?,&flag)?);},
+            "--habitat-id" => {if !matches!(a.cmd.as_str(),"habitat"|"habitat-sweep"|"greenhouse"|"habitat-diagnose") {return Err("--habitat-id requires habitat, habitat-sweep, habitat-diagnose or greenhouse".into());}a.habitat_id=Some(number(val()?,&flag)?);},
             "--definition" => a.definition = Some(val()?),
             "--alignment" => {if a.cmd!="habitat-compare" {return Err("--alignment requires habitat-compare".into());}a.alignment=val()?;},
             "--parameter" => a.parameter = val()?,
@@ -190,6 +191,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         cosmogon_sim::habitat_comparison::Alignment::parse(&a.alignment)?;
         cosmogon_sim::habitat_recording::Metric::parse(a.measure.as_deref().unwrap_or("water"))?;
     }
+    if a.cmd=="habitat-diagnose" && (a.initial.is_none() || a.habitat_id.is_none()) {return Err("habitat-diagnose requires --initial SAVE and explicit --habitat-id ID".into());}
     if a.cmd=="habitat-inspect" && a.recording.is_none() {return Err("habitat-inspect requires --recording STUDY_FOLDER".into());}
     if a.cmd=="habitat" {
         if a.definition.is_none() && a.initial.is_none() {return Err("habitat requires --definition FILE or --initial saved world".into());}
@@ -229,6 +231,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
 }
 fn help() {
     eprintln!("cosmogon-cli habitat-sweep --initial SAVE --output NEW_DIR --parameter firm_power_w --from 0 --to 4000 --runs 3 [--samples 25 --interval-days 0.041666666666666664]\n  or --definition SWEEP_PLAN; optional --habitat-id ID\ncosmogon-cli habitat-compare --recording A --reference B [--measure water --alignment elapsed|world --output NEW_DIR]");
+    eprintln!("cosmogon-cli habitat-diagnose --initial SAVE --habitat-id ID [--output NEW_DIR]   # explain completed power/water/heat");
     eprintln!("cosmogon-cli habitat-inspect --recording STUDY_FOLDER   # validate and inspect recorded habitat observations");
     println!(
         r#"Cosmogon headless tools
@@ -321,6 +324,7 @@ fn main() {
         "help" => help(),
         "greenhouse-definition" => {if let Err(e)=greenhouse_definition(&a) {eprintln!("Greenhouse definition failed: {e}");std::process::exit(1);}},
         "greenhouse" => {if let Err(e)=greenhouse(&a) {eprintln!("Greenhouse planning failed: {e}");std::process::exit(1);}},
+        "habitat-diagnose" => {if let Err(e)=habitat_diagnose(&a) {eprintln!("Habitat diagnosis failed: {e}");std::process::exit(1);}},
         "habitat-inspect" => {
             match cosmogon_sim::habitat_recording::Recording::read(std::path::Path::new(a.recording.as_deref().expect("validated recording"))) {
                 Ok(r)=>println!("{}",serde_json::to_string_pretty(&r.summary).unwrap()),
@@ -693,6 +697,15 @@ fn section(a: &Args) -> Result<(),String> {
     println!("{}",serde_json::to_string_pretty(&section).map_err(|e|e.to_string())?);Ok(())
 }
 
+fn habitat_diagnose(a:&Args)->Result<(),String> {
+    let u=save::read_file(std::path::Path::new(a.initial.as_deref().expect("validated initial"))).map_err(|e|e.to_string())?;
+    let id=a.habitat_id.expect("validated identity");
+    let h=u.habitats.iter().find(|h|h.id==id).ok_or("No such habitat in saved world")?;
+    let report=cosmogon_sim::habitat_diagnostics::report(h,u.time)?;
+    if let Some(path)=&a.output {cosmogon_sim::habitat_diagnostics::export(h,u.time,std::path::Path::new(path))?;}
+    println!("{}",serde_json::to_string_pretty(&report).map_err(|e|e.to_string())?);Ok(())
+}
+
 fn habitat_sweep_plan(a:&Args)->Result<cosmogon_sim::habitat_sweep::Plan,String> {
     use cosmogon_sim::habitat_sweep::{Parameter,Plan};
     if let Some(p)=&a.definition {Plan::read(std::path::Path::new(p))} else {Plan::linear(Parameter::parse(&a.parameter)?,a.sweep_start.ok_or("Sweep requires --from")?,a.sweep_end.ok_or("Sweep requires --to")?,a.sweep_runs,a.samples,a.interval_days*cosmogon_sim::time::SECONDS_PER_DAY)}
@@ -742,6 +755,11 @@ mod argument_tests {
     use super::*;
     fn args(values: &[&str]) -> Result<Args, String> {
         parse_args(values.iter().map(|s| s.to_string()))
+    }
+    #[test]
+    fn diagnosis_requires_exact_saved_context_and_refuses_ignored_options() {
+        for v in [vec!["habitat-diagnose"],vec!["habitat-diagnose","--initial","x"],vec!["habitat-diagnose","--habitat-id","0"],vec!["habitat-diagnose","--initial","x","--habitat-id","0","--samples","3"],vec!["habitat-diagnose","--initial","x","--habitat-id","0","--scenario","sol"]] {assert!(args(&v).is_err());}
+        let a=args(&["habitat-diagnose","--initial","x","--habitat-id","0","--output","new"]).unwrap();assert_eq!(a.habitat_id,Some(0));assert_eq!(a.output.as_deref(),Some("new"));
     }
     #[test]
     fn source_selection_is_explicit_and_rejects_ignored_options() {

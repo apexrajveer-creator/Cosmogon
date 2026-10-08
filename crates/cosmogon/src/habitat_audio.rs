@@ -61,17 +61,7 @@ fn fraction(served: f64, rating: f64) -> f32 {
 }
 fn snapshot(h: &Habitat, world_time_s: f64) -> Snapshot {
     let b = &h.budget;
-    let support = if b.seconds <= 0.0 {
-        "waiting_for_completed_interval"
-    } else if !b.environment_available {
-        "environment_unavailable"
-    } else if !b.temperature_domain_supported {
-        "temperature_domain_unsupported"
-    } else if b.configuration.is_none() {
-        "interval_configuration_unavailable"
-    } else {
-        "supported"
-    };
+    let support = cosmogon_sim::habitat_diagnostics::support(h);
     let mut result = Snapshot {
         mapping: MAPPING,
         habitat_id: h.id,
@@ -90,45 +80,16 @@ fn snapshot(h: &Habitat, world_time_s: f64) -> Snapshot {
     if support != "supported" {
         return result;
     }
-    let c = b.configuration.as_ref().expect("supported configuration");
-    // The engine serves these first, in this exact order. Use the completed interval's
-    // configuration, not a newly staged/applied configuration or remaining inventory.
-    let mut remaining = b.delivered_w;
-    for (i, request) in [c.base_load_w, c.scrubber_power_w, c.recycler_power_w]
-        .into_iter()
-        .enumerate()
-    {
-        let supplied = remaining.min(request).max(0.0);
-        remaining = (remaining - supplied).max(0.0);
-        result.equipment[i].normalization_w = Some(request);
-        result.equipment[i].served_w = Some(supplied);
-        result.equipment[i].designed_level = fraction(supplied, request);
-    }
-    for (i, served, rating) in [
-        (
-            3,
-            b.electrolysis
-                .as_ref()
-                .map(|e| e.delivered_w)
-                .or_else(|| c.electrolysis.is_none().then_some(0.0)),
-            c.electrolysis
-                .as_ref()
-                .map(|e| e.power_limit_w)
-                .unwrap_or(0.0),
-        ),
-        (
-            4,
-            b.sabatier
-                .as_ref()
-                .map(|e| e.delivered_w)
-                .or_else(|| c.sabatier.is_none().then_some(0.0)),
-            c.sabatier.as_ref().map(|e| e.power_limit_w).unwrap_or(0.0),
-        ),
-    ] {
-        result.equipment[i].normalization_w = Some(rating);
-        // Missing budgets cannot establish zero operation for configured equipment.
-        result.equipment[i].served_w = served;
-        result.equipment[i].designed_level = served.map(|w| fraction(w, rating)).unwrap_or(0.0);
+    let allocations = cosmogon_sim::habitat_diagnostics::allocations(h);
+    for (voice, allocation) in [0, 1, 2, 4, 5].into_iter().enumerate() {
+        let a = &allocations[allocation];
+        result.equipment[voice].normalization_w = a.rated_w;
+        result.equipment[voice].served_w = a.served_w;
+        result.equipment[voice].designed_level = a
+            .served_w
+            .zip(a.rated_w)
+            .map(|(w, rating)| fraction(w, rating))
+            .unwrap_or(0.0);
     }
     result
 }

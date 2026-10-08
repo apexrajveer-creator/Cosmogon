@@ -2,6 +2,8 @@
 
 ## Unreleased — native exploration, research and habitat engineering
 
+- Add shared completed-interval habitat WHY diagnostics, native live/recorded power/water/heat/air explanations and protected source/CSV exports. Retain interval configuration, recorded constraints, explicit unavailable dependencies and unit/formula evidence; reuse allocations in equipment audio. Legacy studies remain readable and present diagnostic reports are checked. No physical state, source version, dependency or golden change.
+
 - Add an optional live habitat interior listening preview with five equipment textures driven by actual completed power budgets, separate environment mixing, bounded streaming synthesis and protected eight-second WAV/source exports. Context resets on load/undo/removal; capture/photo/quiet modes suppress playback. Designed sonification, with no calibrated acoustic or physical interior claim. Simulation state and golden remain unchanged.
 
 - Add controlled habitat single-setting experiments through ordinary deterministic configuration edits, preserving common initial inventory and protected per-run evidence. Native worker sweeps and two-recording curves share exact stored-time/interval-supported differences with CLI JSON/CSV. No interpolation, field-validation, global-optimization, save or golden claim.

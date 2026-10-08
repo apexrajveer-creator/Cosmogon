@@ -108,3 +108,5 @@ MIT OR Apache-2.0.
 
 Developer research controls, recorded data and reproducible studies: [RESEARCH](docs/RESEARCH.md).
 Scientific/product acceptance direction: [RESEARCH_DESIGN](docs/RESEARCH_DESIGN.md).
+
+Habitat [WHY explanations](docs/HABITAT_DIAGNOSTICS.md) trace exact live or recorded power, water, heat and air/crew terms with units, formulas, missing-evidence gaps and protected source exports. These are model-accounting explanations, with unquantified field accuracy.

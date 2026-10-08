@@ -21,6 +21,7 @@ pub struct HabitatUi {
     export_path: String,
     status: Option<String>,
     tab: usize,
+    why: super::habitat_why::View,
     pub crop: super::greenhouse::CropPlanner,
     pub recording: super::habitat_recordings::Study,
 }
@@ -38,9 +39,16 @@ impl Default for HabitatUi {
             export_path: String::new(),
             status: None,
             tab: 0,
+            why: Default::default(),
             crop: Default::default(),
             recording: Default::default(),
         }
+    }
+}
+impl HabitatUi {
+    pub fn diagnostic_metadata(&self,u:&cosmogon_sim::Universe)->Option<serde_json::Value>{
+        if self.tab!=8 {return None;}
+        self.selected.and_then(|id|u.habitats.iter().find(|h|h.id==id)).map(|h|self.why.metadata(h,u.time,"live_completed_interval"))
     }
 }
 pub(super) fn number(ui: &mut egui::Ui, label: &str, value: &mut f64, min: f64, max: f64) {
@@ -202,6 +210,7 @@ pub fn panel(
     let selected=form.selected;
     form.recording.launch_if_ready(&sim.universe,selected,sim.is_reference());
     form.recording.poll();
+    form.why.poll();
     if let Some(id) = state.habitat_requested.take() {
         form.selected = Some(id);
         state.habitat_open = true;
@@ -223,7 +232,8 @@ pub fn panel(
     let mut export = None;
     let mut clock = None;
     let mut listen = None;
-    let max_height = (ctx.available_rect().height() - 160.0).max(240.0);
+    let bottom_margin = if form.tab==7 && form.recording.why_mode {200.0} else {160.0};
+    let max_height = (ctx.available_rect().height() - bottom_margin).max(240.0);
     // The planner needs room for its axes and selected-day values on first opening.
     // Keep the window resizable; the scroll area handles smaller screens.
     egui::Window::new("Habitat engineering").open(&mut open).default_pos([345.0,82.0]).default_width(540.0).default_height(if form.tab==4 || form.tab==7 {540.0} else {480.0}).max_height(max_height).show(ctx,|ui| {
@@ -234,7 +244,7 @@ pub fn panel(
         if form.tab!=7 && (form.tab!=4 || !sim.universe.habitats.is_empty()) {egui::ComboBox::from_id_salt("habitat-selection").selected_text(form.selected.and_then(|id|sim.universe.habitats.iter().find(|h|h.id==id)).map(|h|h.definition.name.as_str()).unwrap_or("No habitats in this world")).show_ui(ui,|ui| {
             for h in &sim.universe.habitats {ui.selectable_value(&mut form.selected,Some(h.id),format!("{} · #{}",h.definition.name,h.id));}
         });}
-        ui.horizontal_wrapped(|ui| {for (i,label) in ["Budgets","Controls","Build & import","Model & export","Crop planner","Oxygen","Water recovery","Recordings"].iter().enumerate() {ui.selectable_value(&mut form.tab,i,*label);}});
+        ui.horizontal_wrapped(|ui| {for (i,label) in ["Budgets","Controls","Build & import","Model & export","Crop planner","Oxygen","Water recovery","Recordings","WHY"].iter().enumerate() {ui.selectable_value(&mut form.tab,i,*label);}});
         if let Some(status)=&form.status {ui.colored_label(ACCENT,status);}
         if form.tab==7 {
             super::habitat_recordings::panel(ui,&mut form.recording,&sim.universe,&mut form.selected,sim.is_reference());
@@ -258,6 +268,7 @@ pub fn panel(
                 ui.label(format!("Fixed minute model · last interval {:.0} s · state {:.1} s behind world clock",b.seconds,sim.universe.time-h.last_time));
                 ui.horizontal(|ui| {if ui.button("Run at 1 min/s").clicked() {clock=Some(true);}
                     if ui.button("Pause clock").clicked() {clock=Some(false);}
+                    if ui.button("WHY this result").clicked() {form.tab=8;}
                     if ui.button("Listen to equipment").clicked() {listen=Some(h.id);}});
                 if b.seconds==0.0 {ui.label("Waiting for the first completed minute. Change clock speed to see longer engineering timescales.");}
                 if !b.temperature_domain_supported && b.environment_available && b.seconds>0.0 {ui.colored_label(DANGER,"Temperature outside the model’s 100–500 K computation domain; rebuild with viable inputs. Suspended budgets are not predictions.");}
@@ -276,6 +287,7 @@ pub fn panel(
                     ui.label("Residuals check bookkeeping; they do not establish real-world predictive accuracy.");
                 });
               }
+              8=>{form.why.show(ui,h,sim.universe.time,sim.paused);}
               1|5|6=>{
                 if form.key!=Some((sim.generation,h.id)) || form.baseline.as_ref()!=Some(c) {form.key=Some((sim.generation,h.id));form.draft=c.clone();form.baseline=Some(c.clone());}
                 ui.label("Changes are staged until Apply. Stored mass/energy stay intact; reducing capacity below stored quantity is rejected.");
@@ -337,15 +349,19 @@ pub fn panel(
 
 pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>) {
     form.tab = match args.panel.as_deref() {
+        Some("habitat-why"|"habitat-why-water"|"habitat-why-heat"|"habitat-why-air"|"habitat-why-evidence") => 8,
         Some("habitat-controls") => 1,
         Some("habitat-build") => 2,
         Some("habitat-model") => 3,
         Some("greenhouse") => 4,
         Some("habitat-oxygen") => 5,
         Some("habitat-water") => 6,
-        Some("habitat-recordings"|"habitat-experiments") => 7,
+        Some("habitat-recordings"|"habitat-experiments"|"habitat-recording-why"|"habitat-recording-why-water"|"habitat-recording-why-heat"|"habitat-recording-why-air"|"habitat-recording-why-evidence") => 7,
         _ => 0,
     };
+    form.why.section=match args.panel.as_deref(){Some("habitat-why-water")=>1,Some("habitat-why-heat")=>2,Some("habitat-why-air")=>3,Some("habitat-why-evidence")=>4,_=>0};
+    form.recording.why_mode=args.panel.as_deref().is_some_and(|p|p.starts_with("habitat-recording-why"));
+    form.recording.why.section=match args.panel.as_deref(){Some("habitat-recording-why-water")=>1,Some("habitat-recording-why-heat")=>2,Some("habitat-recording-why-air")=>3,Some("habitat-recording-why-evidence")=>4,_=>0};
     form.recording.experiment_mode=args.panel.as_deref()==Some("habitat-experiments");
     if let Some(path)=&args.habitat_recording {form.tab=7;form.recording.metric=args.habitat_metric.as_deref().and_then(|v|cosmogon_sim::habitat_recording::Metric::parse(v).ok()).unwrap_or_default();form.recording.start(path.clone(),args.habitat_sample);}
     if let Some(path)=&args.habitat_compare {form.recording.start_comparison(path.clone());}

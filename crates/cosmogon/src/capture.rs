@@ -124,6 +124,7 @@ fn photo_metadata(sim: &crate::sim::Sim, rig: &crate::camera::CameraRig, setting
         "greenhouse_planner": habitat.crop.metadata(),
         "habitat_recording": habitat.recording.metadata(),
         "habitat_audio": environment.metadata(&sim.universe),
+        "habitat_why": habitat.diagnostic_metadata(&sim.universe),
         "habitat_reports": sim.universe.habitats.iter().map(|h|h.report()).collect::<Vec<_>>(),
         "landing_registry": cosmogon_sim::planet::landing::VERSION,
         "camera_position_render_m": rig.eye().to_array(), "orientation_xyzw": rig.rotation.to_array(),
