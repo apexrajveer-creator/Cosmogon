@@ -32,6 +32,7 @@ struct Args {
     latitude: f64,
     longitude: f64,
     definition: Option<String>,
+    alignment: String,
     parameter: String,
     sweep_start: Option<f64>,
     sweep_end: Option<f64>,
@@ -70,6 +71,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         latitude: 0.0,
         longitude: 0.0,
         definition: None,
+        alignment: "elapsed".into(),
         parameter: "albedo".into(),
         sweep_start: None,
         sweep_end: None,
@@ -91,9 +93,11 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut explicit_target = false;
     let mut explicit_coordinates = false;
     let mut explicit_samples = false;
+    let mut explicit_sweep = false;
     if let Some(c) = it.next() {
         a.cmd = c;
-        if a.cmd=="habitat" {a.samples=25;a.interval_days=1.0/24.0;a.scenario=Scenario::SolarSystemLab;}
+        if matches!(a.cmd.as_str(),"habitat"|"habitat-sweep") {a.samples=25;a.interval_days=1.0/24.0;a.scenario=Scenario::SolarSystemLab;}
+        if a.cmd=="habitat-sweep" {a.parameter="firm_power_w".into();}
         if a.cmd=="habitat-definition" {a.scenario=Scenario::SolarSystemLab;a.target="Mars".into();}
     }
     if matches!(a.cmd.as_str(), "--help" | "-h" | "help") {
@@ -115,12 +119,15 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if a.cmd=="habitat-inspect" && flag!="--recording" {return Err(format!("{flag} is not a habitat inspection option"));}
         if a.cmd=="habitat" && !matches!(flag.as_str(),"--definition"|"--habitat-id"|"--initial"|"--output"|"--samples"|"--interval-days"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat study option"));}
         if a.cmd=="habitat-definition" && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat-definition option"));}
+        if a.cmd=="habitat-sweep" && !matches!(flag.as_str(),"--definition"|"--habitat-id"|"--initial"|"--output"|"--samples"|"--interval-days"|"--parameter"|"--from"|"--to"|"--runs") {return Err(format!("{flag} is not a habitat sweep option"));}
+        if a.cmd=="habitat-compare" && !matches!(flag.as_str(),"--recording"|"--reference"|"--measure"|"--alignment"|"--output") {return Err(format!("{flag} is not a habitat comparison option"));}
+        if matches!(flag.as_str(),"--parameter"|"--from"|"--to"|"--runs"|"--samples"|"--interval-days") {explicit_sweep=true;}
         match flag.as_str() {
             "--samples" => {
                 let requested=number::<usize>(val()?,&flag)?;explicit_samples=true;
                 if a.cmd=="section" && !(2..=1024).contains(&requested) {return Err("Section samples must be between 2 and 1024".into());}
-                if a.cmd=="habitat" && !(1..=1024).contains(&requested) {return Err("Habitat samples must be between 1 and 1024".into());}
-                a.samples=if a.cmd=="habitat" {requested} else {requested.clamp(2,4096)};
+                if matches!(a.cmd.as_str(),"habitat"|"habitat-sweep") && !(1..=1024).contains(&requested) {return Err("Habitat samples must be between 1 and 1024".into());}
+                a.samples=if matches!(a.cmd.as_str(),"habitat"|"habitat-sweep") {requested} else {requested.clamp(2,4096)};
             },
             "--interval-days" => a.interval_days = number(val()?, &flag)?,
             "--target" => { a.target = val()?; explicit_target = true; },
@@ -134,8 +141,9 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--reference" => a.reference = Some(val()?),
             "--recording" => a.recording = Some(val()?),
             "--initial" => a.initial = Some(val()?),
-            "--habitat-id" => {if !matches!(a.cmd.as_str(),"habitat"|"greenhouse") {return Err("--habitat-id requires habitat or greenhouse".into());}a.habitat_id=Some(number(val()?,&flag)?);},
+            "--habitat-id" => {if !matches!(a.cmd.as_str(),"habitat"|"habitat-sweep"|"greenhouse") {return Err("--habitat-id requires habitat or greenhouse".into());}a.habitat_id=Some(number(val()?,&flag)?);},
             "--definition" => a.definition = Some(val()?),
+            "--alignment" => {if a.cmd!="habitat-compare" {return Err("--alignment requires habitat-compare".into());}a.alignment=val()?;},
             "--parameter" => a.parameter = val()?,
             "--from" => a.sweep_start = Some(number(val()?, &flag)?),
             "--to" => a.sweep_end = Some(number(val()?, &flag)?),
@@ -172,6 +180,16 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     }
     if matches!(a.cmd.as_str(),"habitat"|"habitat-definition") && a.initial.is_some() && (explicit_scenario || explicit_seed) {return Err("Choose saved --initial world or new --scenario/--seed, not both".into());}
     if a.cmd=="greenhouse" && a.habitat_id.is_some() && a.initial.is_none() {return Err("Greenhouse habitat context requires --initial saved world".into());}
+    if a.cmd=="habitat-sweep" {
+        if a.initial.is_none() || a.output.is_none() {return Err("habitat-sweep requires --initial SAVE and --output NEW_DIR".into());}
+        if a.definition.is_some() && explicit_sweep {return Err("Choose a saved sweep --definition or parameter/range/sample flags".into());}
+        if a.definition.is_none() {habitat_sweep_plan(&a)?;}
+    }
+    if a.cmd=="habitat-compare" {
+        if a.recording.is_none() || a.reference.is_none() {return Err("habitat-compare requires --recording A and --reference B".into());}
+        cosmogon_sim::habitat_comparison::Alignment::parse(&a.alignment)?;
+        cosmogon_sim::habitat_recording::Metric::parse(a.measure.as_deref().unwrap_or("water"))?;
+    }
     if a.cmd=="habitat-inspect" && a.recording.is_none() {return Err("habitat-inspect requires --recording STUDY_FOLDER".into());}
     if a.cmd=="habitat" {
         if a.definition.is_none() && a.initial.is_none() {return Err("habitat requires --definition FILE or --initial saved world".into());}
@@ -210,6 +228,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     Ok(a)
 }
 fn help() {
+    eprintln!("cosmogon-cli habitat-sweep --initial SAVE --output NEW_DIR --parameter firm_power_w --from 0 --to 4000 --runs 3 [--samples 25 --interval-days 0.041666666666666664]\n  or --definition SWEEP_PLAN; optional --habitat-id ID\ncosmogon-cli habitat-compare --recording A --reference B [--measure water --alignment elapsed|world --output NEW_DIR]");
     eprintln!("cosmogon-cli habitat-inspect --recording STUDY_FOLDER   # validate and inspect recorded habitat observations");
     println!(
         r#"Cosmogon headless tools
@@ -308,6 +327,8 @@ fn main() {
                 Err(e)=>{eprintln!("Habitat inspection failed: {e}");std::process::exit(1);},
             }
         },
+        "habitat-sweep" => {if let Err(e)=habitat_sweep(&a) {eprintln!("Habitat sweep failed: {e}");std::process::exit(1);}},
+        "habitat-compare" => {if let Err(e)=habitat_compare(&a) {eprintln!("Habitat comparison failed: {e}");std::process::exit(1);}},
         "habitat-definition" => {if let Err(e)=habitat_definition(&a) {eprintln!("Habitat definition failed: {e}");std::process::exit(1);}},
         "habitat" => {if let Err(e)=habitat(&a) {eprintln!("Habitat study failed: {e}");std::process::exit(1);}},
         "section" => {if let Err(e)=section(&a) {eprintln!("Terrain section failed: {e}");std::process::exit(1);}},
@@ -672,6 +693,24 @@ fn section(a: &Args) -> Result<(),String> {
     println!("{}",serde_json::to_string_pretty(&section).map_err(|e|e.to_string())?);Ok(())
 }
 
+fn habitat_sweep_plan(a:&Args)->Result<cosmogon_sim::habitat_sweep::Plan,String> {
+    use cosmogon_sim::habitat_sweep::{Parameter,Plan};
+    if let Some(p)=&a.definition {Plan::read(std::path::Path::new(p))} else {Plan::linear(Parameter::parse(&a.parameter)?,a.sweep_start.ok_or("Sweep requires --from")?,a.sweep_end.ok_or("Sweep requires --to")?,a.sweep_runs,a.samples,a.interval_days*cosmogon_sim::time::SECONDS_PER_DAY)}
+}
+fn habitat_sweep(a:&Args)->Result<(),String> {
+    let plan=habitat_sweep_plan(a)?;let base=save::read_file(std::path::Path::new(a.initial.as_deref().expect("validated initial"))).map_err(|e|e.to_string())?;
+    let id=a.habitat_id.or_else(||(base.habitats.len()==1).then(||base.habitats[0].id)).ok_or("Choose --habitat-id when the common world has multiple habitats")?;
+    let report=cosmogon_sim::habitat_sweep::execute(&base,id,&plan,std::path::Path::new(a.output.as_deref().expect("validated output")))?;
+    println!("{}",serde_json::to_string_pretty(&report).map_err(|e|e.to_string())?);Ok(())
+}
+fn habitat_compare(a:&Args)->Result<(),String> {
+    use cosmogon_sim::{habitat_comparison as comparison,habitat_recording::{Metric,Recording}};
+    let left=Recording::read(std::path::Path::new(a.recording.as_deref().expect("validated A")))?;let right=Recording::read(std::path::Path::new(a.reference.as_deref().expect("validated B")))?;
+    let metric=Metric::parse(a.measure.as_deref().unwrap_or("water"))?;let alignment=comparison::Alignment::parse(&a.alignment)?;
+    if let Some(path)=&a.output {comparison::export(&left,&right,metric,alignment,std::path::Path::new(path))?;}
+    println!("{}",serde_json::to_string_pretty(&comparison::report(&left,&right,metric,alignment)).map_err(|e|e.to_string())?);Ok(())
+}
+
 fn habitat(a:&Args)->Result<(),String> {
     use cosmogon_sim::habitat::{self,Definition};
     if a.output.as_ref().is_some_and(|p|std::path::Path::new(p).exists()) {return Err("Existing exports are protected; choose a new folder".into());}
@@ -757,6 +796,14 @@ mod argument_tests {
     fn habitat_inspection_requires_a_folder_and_rejects_ignored_options() {
         for v in [vec!["habitat-inspect"],vec!["habitat-inspect","--recording","x","--samples","3"],vec!["habitat-inspect","--recording","x","--scenario","sol"],vec!["habitat-inspect","--output","x"]] {assert!(args(&v).is_err());}
         assert_eq!(args(&["habitat-inspect","--recording","x"]).unwrap().recording.as_deref(),Some("x"));
+    }
+
+    #[test]
+    fn habitat_sweep_and_comparison_reject_ignored_and_ambiguous_options() {
+        for v in [vec!["habitat-sweep"],vec!["habitat-sweep","--initial","s","--output","o","--from","0","--to","1","--runs","17"],vec!["habitat-sweep","--initial","s","--output","o","--definition","p","--samples","25"],vec!["habitat-sweep","--initial","s","--output","o","--definition","p","--seed","2"],vec!["habitat-compare","--recording","a"],vec!["habitat-compare","--recording","a","--reference","b","--alignment","nearest"],vec!["habitat-compare","--recording","a","--reference","b","--samples","25"]] {assert!(args(&v).is_err(),"{:?}",v);}
+        assert!(args(&["habitat-sweep","--initial","s","--output","o","--from","0","--to","4000","--samples","1"]).is_ok());
+        assert!(args(&["habitat-sweep","--initial","s","--output","o","--definition","p","--habitat-id","0"]).is_ok());
+        assert!(args(&["habitat-compare","--recording","a","--reference","b","--measure","methane","--alignment","world"]).is_ok());
     }
 
 }

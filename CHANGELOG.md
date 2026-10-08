@@ -2,6 +2,8 @@
 
 ## Unreleased — native exploration, research and habitat engineering
 
+- Add controlled habitat single-setting experiments through ordinary deterministic configuration edits, preserving common initial inventory and protected per-run evidence. Native worker sweeps and two-recording curves share exact stored-time/interval-supported differences with CLI JSON/CSV. No interpolation, field-validation, global-optimization, save or golden claim.
+
 - Reopen bounded habitat studies in native Recordings with actual metric curves, explicit unavailable gaps and selected rows. Shared CLI inspection checks source/endpoint/fingerprint/budget/report/CSV consistency; asynchronous transactional imports and photo metadata preserve recorded/live scope. No world or golden change.
 
 - Connect optional finite Sabatier CO₂ reduction, isolated methane/raw water, later powered recycling and reference reaction heat to habitat controls, saves and actual source-pinned exports. Ratings are assumptions; no closed-loop or hardware-validation claim. Existing optional electrolysis and golden world are unchanged.

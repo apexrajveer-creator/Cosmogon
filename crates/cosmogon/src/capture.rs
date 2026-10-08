@@ -87,7 +87,7 @@ fn capture(mut commands: Commands, args: Res<Args>, mut frames: Local<u32>, mut 
     if (args.new.is_some() || args.load.is_some() || args.continue_latest) && *state.get() != AppState::Observing {
         return;
     }
-    if args.habitat_recording.is_some() && habitat.recording.pending() {return;}
+    if (args.habitat_recording.is_some() || args.habitat_sweep.is_some()) && habitat.recording.pending() {return;}
     if args.research_recording.is_some() && !research.import_automatic_done { return; }
     if args.research_batch.is_some() && !batch.automatic_done { return; }
     *frames += 1;

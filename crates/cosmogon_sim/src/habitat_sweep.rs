@@ -1,0 +1,402 @@
+//! Bounded single-parameter experiments through the ordinary habitat edit/scheduler.
+use crate::{
+    habitat,
+    habitat_recording::{Metric, Recording},
+    sandbox::Edit,
+    Universe,
+};
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Parameter {
+    #[default]
+    FirmPowerW,
+    SolarAreaM2,
+    BatteryCapacityJ,
+    WaterRecoveryFraction,
+    TemperatureSetpointK,
+    ElectrolysisPowerW,
+    ElectrolysisRateKgS,
+    SabatierPowerW,
+    SabatierRateKgS,
+}
+impl Parameter {
+    pub const ALL: [Self; 9] = [
+        Self::FirmPowerW,
+        Self::SolarAreaM2,
+        Self::BatteryCapacityJ,
+        Self::WaterRecoveryFraction,
+        Self::TemperatureSetpointK,
+        Self::ElectrolysisPowerW,
+        Self::ElectrolysisRateKgS,
+        Self::SabatierPowerW,
+        Self::SabatierRateKgS,
+    ];
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::FirmPowerW => "firm_power_w",
+            Self::SolarAreaM2 => "solar_area_m2",
+            Self::BatteryCapacityJ => "battery_capacity_j",
+            Self::WaterRecoveryFraction => "water_recovery_fraction",
+            Self::TemperatureSetpointK => "temperature_setpoint_k",
+            Self::ElectrolysisPowerW => "electrolysis_power_w",
+            Self::ElectrolysisRateKgS => "electrolysis_rate_kg_s",
+            Self::SabatierPowerW => "sabatier_power_w",
+            Self::SabatierRateKgS => "sabatier_rate_kg_s",
+        }
+    }
+    pub fn parse(s: &str) -> Result<Self, String> {
+        Self::ALL
+            .into_iter()
+            .find(|p| p.id() == s)
+            .ok_or_else(|| format!("Unsupported habitat sweep parameter {s}"))
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::FirmPowerW => "External firm supply",
+            Self::SolarAreaM2 => "Horizontal solar panel area",
+            Self::BatteryCapacityJ => "Battery capacity (fixed initial energy)",
+            Self::WaterRecoveryFraction => "Water recovery fraction",
+            Self::TemperatureSetpointK => "Cabin temperature setpoint",
+            Self::ElectrolysisPowerW => "Electrolysis equipment power",
+            Self::ElectrolysisRateKgS => "Electrolysis oxygen rate",
+            Self::SabatierPowerW => "CO₂ reduction equipment power",
+            Self::SabatierRateKgS => "CO₂ reduction rate",
+        }
+    }
+    pub fn unit(self) -> &'static str {
+        match self {
+            Self::FirmPowerW | Self::ElectrolysisPowerW | Self::SabatierPowerW => "W",
+            Self::SolarAreaM2 => "m²",
+            Self::BatteryCapacityJ => "J",
+            Self::WaterRecoveryFraction => "fraction",
+            Self::TemperatureSetpointK => "K",
+            Self::ElectrolysisRateKgS | Self::SabatierRateKgS => "kg/s",
+        }
+    }
+    pub fn set(self, c: &mut habitat::Config, value: f64) -> Result<(), String> {
+        if !value.is_finite() {
+            return Err("Sweep values must be finite".into());
+        }
+        match self {
+            Self::FirmPowerW => c.firm_power_w = value,
+            Self::SolarAreaM2 => c.solar_area_m2 = value,
+            Self::BatteryCapacityJ => c.battery_capacity_j = value,
+            Self::WaterRecoveryFraction => c.water_recovery_fraction = value,
+            Self::TemperatureSetpointK => c.temperature_setpoint_k = value,
+            Self::ElectrolysisPowerW => {
+                c.electrolysis
+                    .as_mut()
+                    .ok_or("Enable electrolysis before sweeping its assumptions")?
+                    .power_limit_w = value
+            }
+            Self::ElectrolysisRateKgS => {
+                c.electrolysis
+                    .as_mut()
+                    .ok_or("Enable electrolysis before sweeping its assumptions")?
+                    .oxygen_rate_kg_s = value
+            }
+            Self::SabatierPowerW => {
+                c.sabatier
+                    .as_mut()
+                    .ok_or("Enable CO₂ reduction before sweeping its assumptions")?
+                    .power_limit_w = value
+            }
+            Self::SabatierRateKgS => {
+                c.sabatier
+                    .as_mut()
+                    .ok_or("Enable CO₂ reduction before sweeping its assumptions")?
+                    .co2_rate_kg_s = value
+            }
+        }
+        c.validate()
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Plan {
+    pub format: String,
+    pub schema_version: u32,
+    pub parameter: Parameter,
+    pub values: Vec<f64>,
+    pub samples: usize,
+    pub interval_s: f64,
+}
+impl Plan {
+    pub fn linear(
+        parameter: Parameter,
+        from: f64,
+        to: f64,
+        runs: usize,
+        samples: usize,
+        interval_s: f64,
+    ) -> Result<Self, String> {
+        if !(2..=16).contains(&runs) || !from.is_finite() || !to.is_finite() {
+            return Err("A habitat sweep needs 2–16 runs and finite endpoints".into());
+        }
+        let values = (0..runs)
+            .map(|i| {
+                if i == runs - 1 {
+                    to
+                } else {
+                    from + (to - from) * i as f64 / (runs - 1) as f64
+                }
+            })
+            .collect();
+        let plan = Self {
+            format: "cosmogon-habitat-sweep-plan".into(),
+            schema_version: 1,
+            parameter,
+            values,
+            samples,
+            interval_s,
+        };
+        plan.validate()?;
+        Ok(plan)
+    }
+    pub fn validate(&self) -> Result<(), String> {
+        if self.format != "cosmogon-habitat-sweep-plan" || self.schema_version != 1 {
+            return Err("Unsupported habitat sweep plan format or schema".into());
+        }
+        if !(2..=16).contains(&self.values.len())
+            || !(1..=1024).contains(&self.samples)
+            || self.samples * self.values.len() > 8192
+        {
+            return Err(
+                "Sweep requires 2–16 runs, 1–1024 samples and at most 8192 total observations"
+                    .into(),
+            );
+        }
+        if self
+            .values
+            .iter()
+            .enumerate()
+            .any(|(i, v)| !v.is_finite() || self.values[..i].contains(v))
+        {
+            return Err("Sweep values must be finite and distinct".into());
+        }
+        if !self.interval_s.is_finite()
+            || !(1.0..=30.0 * crate::time::SECONDS_PER_DAY).contains(&self.interval_s)
+            || self.interval_s * (self.samples - 1) as f64 > 30.0 * crate::time::SECONDS_PER_DAY
+        {
+            return Err("Sweep intervals must be finite, at least one second, and within a 30-day total horizon".into());
+        }
+        Ok(())
+    }
+    pub fn read(path: &std::path::Path) -> Result<Self, String> {
+        use std::io::Read;
+        let f = std::fs::File::open(path).map_err(|e| e.to_string())?;
+        if !f.metadata().map_err(|e| e.to_string())?.is_file() {
+            return Err("Sweep plan must be a regular file".into());
+        }
+        let mut bytes = Vec::new();
+        f.take(65537)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        if bytes.len() > 65536 {
+            return Err("Sweep plan exceeds 64 KiB".into());
+        }
+        let plan: Self = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        plan.validate()?;
+        Ok(plan)
+    }
+    pub fn validate_world(&self, base: &Universe, id: u64) -> Result<(), String> {
+        self.configurations(base, id).map(|_| ())
+    }
+    fn configurations(&self, base: &Universe, id: u64) -> Result<Vec<habitat::Config>, String> {
+        self.validate()?;
+        let h = base
+            .habitats
+            .iter()
+            .find(|h| h.id == id)
+            .ok_or("No such habitat in the common starting world")?;
+        if !base.time.is_finite()
+            || !((base.time + self.interval_s * (self.samples - 1) as f64).is_finite())
+            || (self.samples > 1 && base.time + self.interval_s <= base.time)
+        {
+            return Err("Sweep observation times are not representable in this world".into());
+        }
+        self.values
+            .iter()
+            .map(|&value| {
+                let mut c = h.config.clone();
+                self.parameter.set(&mut c, value)?;
+                let mut preview = base.clone();
+                preview.apply_edit(Edit::ConfigureHabitat {
+                    system: h.definition.body.system,
+                    id,
+                    config: Box::new(c.clone()),
+                })?;
+                Ok(c)
+            })
+            .collect()
+    }
+}
+pub fn execute(
+    base: &Universe,
+    id: u64,
+    plan: &Plan,
+    path: &std::path::Path,
+) -> Result<serde_json::Value, String> {
+    use std::io::Write;
+    // Preview every ordinary edit before creating output; no silent capacity clamping.
+    let configs = plan.configurations(base, id)?;
+    let base_text = crate::save::to_json(base, "Habitat sweep common starting world")
+        .map_err(|e| e.to_string())?;
+    let plan_text = serde_json::to_vec_pretty(plan).map_err(|e| e.to_string())?;
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::create_dir(path)
+        .map_err(|e| format!("Existing sweep results are protected; choose a new folder: {e}"))?;
+    let write = |name: &str, bytes: &[u8]| -> Result<(), String> {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path.join(name))
+            .map_err(|e| format!("Incomplete habitat sweep: {e}"))?;
+        f.write_all(bytes)
+            .map_err(|e| format!("Incomplete habitat sweep: {e}"))
+    };
+    write("base.cosmo", base_text.as_bytes())?;
+    write("plan.json", &plan_text)?;
+    let system = base
+        .habitats
+        .iter()
+        .find(|h| h.id == id)
+        .expect("validated habitat")
+        .definition
+        .body
+        .system;
+    let mut runs = Vec::new();
+    for (i, config) in configs.into_iter().enumerate() {
+        let mut world = base.clone();
+        world.apply_edit(Edit::ConfigureHabitat {
+            system,
+            id,
+            config: Box::new(config),
+        })?;
+        let initial = world.clone();
+        let mut rows = Vec::with_capacity(plan.samples);
+        for k in 0..plan.samples {
+            world.advance_to(initial.time + k as f64 * plan.interval_s, None, None);
+            rows.push(habitat::sample(&world, id)?);
+        }
+        let folder = format!("run-{i:03}");
+        habitat::export(&initial, &world, id, &rows, &path.join(&folder))?;
+        let recording = Recording::read(&path.join(&folder))?;
+        let final_values = Metric::ALL
+            .into_iter()
+            .map(|m| {
+                (
+                    m.id().to_string(),
+                    serde_json::json!({"unit":m.unit(),"value":m.value(rows.last().unwrap())}),
+                )
+            })
+            .collect::<serde_json::Map<String, serde_json::Value>>();
+        runs.push(serde_json::json!({"index":i,"value":plan.values[i],"folder":folder,"recording":recording.summary,"final_metrics":final_values}));
+    }
+    let manifest = serde_json::json!({"format":"cosmogon-habitat-sweep","schema_version":1,"complete":true,"habitat_id":id,"common_state_fingerprint":crate::research::state_fingerprint(base)?,"common_data_versions":crate::save::data_versions(base),"parameter":plan.parameter.id(),"unit":plan.parameter.unit(),"plan":plan,"runs":runs,"mechanism":"Independent clones of one common state; one ordinary configuration edit at the common time; old-configuration remainders complete before the change. Initial stocks are preserved.","limits":"Model sensitivity under assumed equipment and environment, not confidence intervals, optimization proof, causal inference about field hardware or field calibration. Completion manifest is written last; folders lacking it are incomplete."});
+    write(
+        "manifest.json",
+        &serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?,
+    )?;
+    Ok(manifest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn world() -> Universe {
+        let mut u = Universe::new(crate::UniverseSettings {
+            scenario: crate::Scenario::SolarSystemLab,
+            ..Default::default()
+        });
+        u.apply_edit(Edit::CreateHabitat {
+            definition: Box::new(habitat::Definition::at(
+                crate::BodyRef { system: 0, body: 3 },
+                0.0,
+                0.0,
+            )),
+        })
+        .unwrap();
+        u
+    }
+    #[test]
+    fn sweep_preserves_common_state_and_replays_exactly() {
+        let u = world();
+        let before = crate::research::state_fingerprint(&u).unwrap();
+        let plan = Plan::linear(Parameter::FirmPowerW, 0., 4000., 3, 3, 3600.).unwrap();
+        let root =
+            std::env::temp_dir().join(format!("cosmogon-habitat-sweep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let result = execute(&u, 0, &plan, &root.join("a")).unwrap();
+        execute(&u, 0, &plan, &root.join("b")).unwrap();
+        assert_eq!(crate::research::state_fingerprint(&u).unwrap(), before);
+        for i in 0..3 {
+            let name = format!("run-{i:03}");
+            for file in ["samples.json", "samples.csv", "report.json"] {
+                assert_eq!(
+                    std::fs::read(root.join("a").join(&name).join(file)).unwrap(),
+                    std::fs::read(root.join("b").join(&name).join(file)).unwrap()
+                );
+            }
+            for file in ["initial.cosmo", "final.cosmo"] {
+                let normalize = |folder: &str| {
+                    let mut v: serde_json::Value = serde_json::from_slice(
+                        &std::fs::read(root.join(folder).join(&name).join(file)).unwrap(),
+                    )
+                    .unwrap();
+                    v["header"].as_object_mut().unwrap().remove("saved_at_unix");
+                    v
+                };
+                assert_eq!(normalize("a"), normalize("b"));
+            }
+            let r = Recording::read(&root.join("a").join(name)).unwrap();
+            assert_eq!(r.rows[0].habitat.state, u.habitats[0].state);
+            let mut expected = u.habitats[0].config.clone();
+            expected.firm_power_w = plan.values[i];
+            assert_eq!(r.rows[0].habitat.config, expected);
+        }
+        assert_eq!(result["complete"], true);
+        assert!(execute(&u, 0, &plan, &root.join("a")).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn invalid_all_branch_edits_and_limits_fail_before_output() {
+        let u = world();
+        let root = std::env::temp_dir().join(format!(
+            "cosmogon-habitat-sweep-invalid-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        for (p, a, b) in [
+            (Parameter::BatteryCapacityJ, 72e6, 1.),
+            (Parameter::ElectrolysisPowerW, 100., 200.),
+            (Parameter::WaterRecoveryFraction, 0.8, 1.1),
+            (Parameter::FirmPowerW, 10., -1.),
+        ] {
+            let plan = Plan::linear(p, a, b, 2, 3, 60.).unwrap();
+            assert!(execute(&u, 0, &plan, &root).is_err());
+            assert!(!root.exists());
+        }
+        for (a, b, n, s, t) in [
+            (0., 0., 2, 3, 60.),
+            (0., 1., 17, 3, 60.),
+            (0., 1., 16, 1024, 60.),
+            (0., 1., 2, 1025, 60.),
+            (0., 1., 2, 25, 2. * 86400.),
+            (0., f64::NAN, 2, 3, 60.),
+        ] {
+            assert!(Plan::linear(Parameter::FirmPowerW, a, b, n, s, t).is_err());
+        }
+        let plan = Plan::linear(Parameter::FirmPowerW, 0., 1., 2, 1, 60.).unwrap();
+        let mut future = serde_json::to_value(&plan).unwrap();
+        future["schema_version"] = 2.into();
+        assert!(serde_json::from_value::<Plan>(future)
+            .unwrap()
+            .validate()
+            .is_err());
+    }
+}

@@ -35,6 +35,11 @@ pub struct Args {
     pub terrain_section: Option<String>,
     pub habitat_definition: Option<String>,
     pub habitat_recording: Option<String>,
+    pub habitat_compare: Option<String>,
+    pub habitat_alignment: Option<String>,
+    pub habitat_sweep: Option<String>,
+    pub habitat_study_output: Option<String>,
+    pub habitat_study_id: Option<u64>,
     pub habitat_metric: Option<String>,
     pub habitat_sample: Option<usize>,
     pub greenhouse_definition: Option<String>,
@@ -125,6 +130,11 @@ impl Args {
                 "--continue" => a.continue_latest = true,
                 "--capture-metadata" => a.capture_metadata = true,
                 "--free-camera" => a.free_camera = true,
+                "--habitat-compare" => a.habitat_compare=Some(val()),
+                "--habitat-alignment" => a.habitat_alignment=Some(val()),
+                "--habitat-sweep" => a.habitat_sweep=Some(val()),
+                "--habitat-study-output" => a.habitat_study_output=Some(val()),
+                "--habitat-study-id" => {let v=val();a.habitat_study_id=Some(v.parse().unwrap_or(u64::MAX));},
                 "--habitat-recording" => a.habitat_recording=Some(val()),
                 "--habitat-metric" => a.habitat_metric=Some(val()),
                 "--habitat-sample" => {let v=val();a.habitat_sample=Some(v.parse().unwrap_or(usize::MAX));},
@@ -174,7 +184,15 @@ impl Args {
     }
 
     fn validate_surface(&self) -> Result<(), String> {
-        if (self.habitat_metric.is_some() || self.habitat_sample.is_some()) && self.habitat_recording.is_none() {return Err("--habitat-metric/--habitat-sample require --habitat-recording".into());}
+        if (self.habitat_metric.is_some() || self.habitat_sample.is_some()) && self.habitat_recording.is_none() && self.habitat_sweep.is_none() {return Err("--habitat-metric/--habitat-sample require --habitat-recording or --habitat-sweep".into());}
+        if self.habitat_compare.is_some() && self.habitat_recording.is_none() {return Err("--habitat-compare requires --habitat-recording A".into());}
+        if self.habitat_alignment.is_some() && self.habitat_compare.is_none() && self.habitat_sweep.is_none() {return Err("--habitat-alignment requires a comparison or sweep".into());}
+        if let Some(a)=&self.habitat_alignment {cosmogon_sim::habitat_comparison::Alignment::parse(a)?;}
+        if self.habitat_study_id==Some(u64::MAX) {return Err("Invalid --habitat-study-id".into());}
+        if self.habitat_sweep.is_some() {
+            if self.load.is_none() || self.habitat_study_output.is_none() {return Err("--habitat-sweep requires --load SAVE and --habitat-study-output NEW_DIR".into());}
+            if self.habitat_recording.is_some() || self.greenhouse_definition.is_some() || self.habitat_definition.is_some() {return Err("Choose a sweep launch or imported recording/crop/habitat definition".into());}
+        } else if self.habitat_study_output.is_some() || self.habitat_study_id.is_some() {return Err("--habitat-study-output/--habitat-study-id require --habitat-sweep".into());}
         if self.habitat_recording.is_some() && self.greenhouse_definition.is_some() {return Err("Choose a habitat recording or a crop planner definition for the launch pane".into());}
         if let Some(metric)=&self.habitat_metric {cosmogon_sim::habitat_recording::Metric::parse(metric)?;}
         if self.habitat_sample.is_some_and(|n|n>=1024) {return Err("--habitat-sample must be an index between 0 and 1023".into());}
@@ -222,6 +240,13 @@ mod tests {
     fn habitat_recording_options_reject_ignored_metrics_and_invalid_indices() {
         for v in [vec!["--habitat-metric","water"],vec!["--habitat-sample","1"],vec!["--habitat-recording","x","--habitat-metric","unknown"],vec!["--habitat-recording","x","--habitat-sample","nan"],vec!["--habitat-recording","x","--habitat-sample","1024"],vec!["--habitat-recording","x","--greenhouse-definition","y"]] {assert!(Args::parse_from(v.into_iter().map(String::from)).validate_surface().is_err());}
         let a=Args::parse_from(["--habitat-recording","x","--habitat-metric","methane","--habitat-sample","24"].into_iter().map(String::from));assert!(a.validate_surface().is_ok());assert!(matches!(a.new,Some(Scenario::SolarSystemLab)));assert_eq!(a.habitat_sample,Some(24));
+    }
+
+    #[test]
+    fn habitat_comparison_and_sweep_launch_options_are_explicit() {
+        for v in [vec!["--habitat-compare","b"],vec!["--habitat-alignment","world"],vec!["--habitat-recording","a","--habitat-compare","b","--habitat-alignment","nearest"],vec!["--habitat-sweep","p"],vec!["--habitat-sweep","p","--load","s","--habitat-study-output","o","--habitat-recording","a"],vec!["--habitat-study-id","0"],vec!["--habitat-sweep","p","--load","s","--habitat-study-output","o","--habitat-study-id","bad"]] {assert!(Args::parse_from(v.into_iter().map(String::from)).validate_surface().is_err());}
+        assert!(Args::parse_from(["--habitat-recording","a","--habitat-compare","b","--habitat-alignment","world"].into_iter().map(String::from)).validate_surface().is_ok());
+        assert!(Args::parse_from(["--habitat-sweep","p","--load","s","--habitat-study-output","o","--habitat-sample","24"].into_iter().map(String::from)).validate_surface().is_ok());
     }
 
 }

@@ -198,6 +198,8 @@ pub fn panel(
     mut sim: ResMut<Sim>,
     time: Res<Time>,
 ) -> Result {
+    let selected=form.selected;
+    form.recording.launch_if_ready(&sim.universe,selected,sim.is_reference());
     form.recording.poll();
     if let Some(id) = state.habitat_requested.take() {
         form.selected = Some(id);
@@ -233,7 +235,7 @@ pub fn panel(
         ui.horizontal_wrapped(|ui| {for (i,label) in ["Budgets","Controls","Build & import","Model & export","Crop planner","Oxygen","Water recovery","Recordings"].iter().enumerate() {ui.selectable_value(&mut form.tab,i,*label);}});
         if let Some(status)=&form.status {ui.colored_label(ACCENT,status);}
         if form.tab==7 {
-            super::habitat_recordings::panel(ui,&mut form.recording);
+            super::habitat_recordings::panel(ui,&mut form.recording,&sim.universe,&mut form.selected,sim.is_reference());
         } else if form.tab==4 {
             super::greenhouse::panel(ui,&mut form.crop,&sim.universe,form.selected);
         } else if form.tab==2 || sim.universe.habitats.is_empty() {
@@ -337,10 +339,17 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>) {
         Some("greenhouse") => 4,
         Some("habitat-oxygen") => 5,
         Some("habitat-water") => 6,
-        Some("habitat-recordings") => 7,
+        Some("habitat-recordings"|"habitat-experiments") => 7,
         _ => 0,
     };
+    form.recording.experiment_mode=args.panel.as_deref()==Some("habitat-experiments");
     if let Some(path)=&args.habitat_recording {form.tab=7;form.recording.metric=args.habitat_metric.as_deref().and_then(|v|cosmogon_sim::habitat_recording::Metric::parse(v).ok()).unwrap_or_default();form.recording.start(path.clone(),args.habitat_sample);}
+    if let Some(path)=&args.habitat_compare {form.recording.start_comparison(path.clone());}
+    if let Some(a)=&args.habitat_alignment {form.recording.alignment=cosmogon_sim::habitat_comparison::Alignment::parse(a).unwrap_or_default();}
+    if let Some(path)=&args.habitat_sweep {
+        form.tab=7;form.recording.metric=args.habitat_metric.as_deref().and_then(|v|cosmogon_sim::habitat_recording::Metric::parse(v).ok()).unwrap_or_default();
+        match cosmogon_sim::habitat_sweep::Plan::read(std::path::Path::new(path)) {Ok(plan)=>form.recording.launch=Some(super::habitat_recordings::Launch {plan,id:args.habitat_study_id,output:args.habitat_study_output.clone().unwrap_or_default(),sample:args.habitat_sample,initial_path:args.load.clone()}),Err(e)=>form.recording.status=Some(e)}
+    }
     if let Some(path)=&args.greenhouse_definition {form.tab=4;form.crop.status=form.crop.import(std::path::Path::new(path)).err();}
 }
 

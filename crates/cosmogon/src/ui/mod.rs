@@ -251,12 +251,12 @@ fn init_ui_state(mut ui: ResMut<UiState>, args: Res<crate::args::Args>) {
         ui.surface_horizon = args.surface_horizon;
         ui.body_tab = BodyTab::Surface;
     }
-    if args.habitat_definition.is_some() || args.greenhouse_definition.is_some() || args.habitat_recording.is_some() {ui.habitat_open=true;}
+    if args.habitat_definition.is_some() || args.greenhouse_definition.is_some() || args.habitat_sweep.is_some() || args.habitat_recording.is_some() {ui.habitat_open=true;}
     match args.panel.as_deref() {
         Some("create") => ui.create_open = true,
         Some("physics") => ui.physics_open = true,
         Some("surface") => ui.body_tab = BodyTab::Surface,
-        Some("habitat" | "habitat-controls" | "habitat-build" | "habitat-model" | "habitat-oxygen" | "habitat-water" | "habitat-recordings" | "greenhouse") => ui.habitat_open = true,
+        Some("habitat" | "habitat-controls" | "habitat-build" | "habitat-model" | "habitat-oxygen" | "habitat-water" | "habitat-recordings" | "habitat-experiments" | "greenhouse") => ui.habitat_open = true,
         Some("section" | "section-map") => ui.surface_study_open = true,
         Some("alerts") => ui.alerts_open = true,
         Some("sound") => { ui.alerts_open = true; ui.alerts_tab = 1; }

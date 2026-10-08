@@ -278,6 +278,9 @@ impl Metric {
             _ => "kg",
         }
     }
+    pub fn is_interval(self) -> bool {
+        matches!(self,Self::DeliveredPower | Self::UnservedPower | Self::ElectrolysisOxygen | Self::SabatierWater | Self::SabatierHeat)
+    }
     pub fn value(self, row: &Sample) -> Option<f64> {
         let h = &row.habitat;
         let s = &h.state;

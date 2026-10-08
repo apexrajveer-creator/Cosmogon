@@ -42,6 +42,8 @@ The connected [CO₂ reduction](docs/HABITAT_SABATIER.md) build adds optional fi
 
 The active [habitat recording viewer](docs/HABITAT_RECORDINGS.md) reopens validated source-pinned trajectories/snapshots, shows actual native metric graphs and selected rows independently of the live world, and shares bounded inspection with CLI `habitat-inspect`. [Design memo](docs/HABITAT_RECORDINGS_DESIGN.md). Checks: 264 passed plus one existing ignored, 40 distinct CLI/native cases, ten accepted inspected layouts and a 48-second packaged run; [verification](docs/HABITAT_RECORDINGS_VALIDATION.md). Full directive remains incomplete.
 
+The connected [controlled habitat experiments](docs/HABITAT_COMPARISONS.md) build adds typed single-setting sweeps, exact common-state branches, protected complete manifests and native/CLI time/interval-supported comparisons. [Design and methodological memo](docs/HABITAT_COMPARISON_DESIGN.md). Checks: 271 passed plus one existing ignored, fifty distinct CLI/native cases, eleven final inspected layouts and a 48-second packaged run; [verification](docs/HABITAT_COMPARISONS_VALIDATION.md). Hardware calibration, interactions/uncertainty and physical greenhouse exchange remain incomplete.
+
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
   [GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases) with macOS, Windows and Linux builds.

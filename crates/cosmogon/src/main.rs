@@ -44,6 +44,21 @@ fn main() -> bevy::app::AppExit {
                 Err(e)=>{eprintln!("Cannot open habitat recording: {e}");return bevy::app::AppExit::error();},
             }
         }
+        if let Some(path)=&args.habitat_compare {
+            if let Err(e)=cosmogon_sim::habitat_recording::Recording::read(std::path::Path::new(path)) {eprintln!("Cannot open habitat comparison: {e}");return bevy::app::AppExit::error();}
+        }
+        if let Some(path)=&args.habitat_sweep {
+            let checked=(||->Result<(),String> {
+                let plan=cosmogon_sim::habitat_sweep::Plan::read(std::path::Path::new(path))?;
+                let u=cosmogon_sim::save::read_file(std::path::Path::new(args.load.as_deref().expect("validated sweep load"))).map_err(|e|e.to_string())?;
+                let id=args.habitat_study_id.or_else(||(u.habitats.len()==1).then(||u.habitats[0].id)).ok_or("Choose --habitat-study-id for multiple habitats")?;
+                plan.validate_world(&u,id)?;
+                if args.habitat_sample.is_some_and(|n|n>=plan.samples) {return Err("Requested observation index is outside the sweep plan".into());}
+                if std::path::Path::new(args.habitat_study_output.as_deref().expect("validated sweep output")).exists() {return Err("Existing sweep results are protected; choose a new folder".into());}
+                Ok(())
+            })();
+            if let Err(e)=checked {eprintln!("Cannot run habitat sweep: {e}");return bevy::app::AppExit::error();}
+        }
         if let Some(path)=&args.greenhouse_definition {if let Err(e)=cosmogon_sim::greenhouse::Definition::read(std::path::Path::new(path)).and_then(|d|d.calculate()) {eprintln!("Cannot open greenhouse definition: {e}");return bevy::app::AppExit::error();}}
         if let Some(path)=&args.load {if let Err(e)=cosmogon_sim::save::read_file(std::path::Path::new(path)) {eprintln!("Cannot load automated world: {e}");return bevy::app::AppExit::error();}}
         if let Some(path)=&args.habitat_definition {if let Err(e)=cosmogon_sim::habitat::Definition::read(std::path::Path::new(path)) {eprintln!("Cannot open habitat definition: {e}");return bevy::app::AppExit::error();}}
@@ -66,7 +81,7 @@ fn main() -> bevy::app::AppExit {
     // The pipelined renderer's shutdown waits without servicing its main-thread
     // executor. Imported-table automation may finish during GPU initialization;
     // render those short jobs on the main thread so teardown cannot deadlock.
-    let plugins = if (args.habitat_recording.is_some() || args.greenhouse_definition.is_some() || args.habitat_definition.is_some() || args.research_recording.is_some() || args.surface_site.is_some() || args.mars_terrain.is_some() || args.terrain_section.is_some()) && args.quit_after_capture {
+    let plugins = if (args.habitat_sweep.is_some() || args.habitat_recording.is_some() || args.greenhouse_definition.is_some() || args.habitat_definition.is_some() || args.research_recording.is_some() || args.surface_site.is_some() || args.mars_terrain.is_some() || args.terrain_section.is_some()) && args.quit_after_capture {
         plugins.disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>()
     } else {
         plugins

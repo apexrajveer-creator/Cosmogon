@@ -50,3 +50,5 @@ New work must meet the relevant definitions of done; partial implementations rem
 9. **Finite CO₂ reduction (built, partial phase 9):** optional Sabatier processing consumes captured CO₂ and stored H₂, keeps finite methane/raw-water products, processes held raw water later with existing powered recycling, and adds reference heat. See [HABITAT_SABATIER](HABITAT_SABATIER.md). No unlimited disposal, instantaneous recycling or closed-loop recovery guarantee.
 
 10. **Habitat recording graphs (built, partial phase 9/16):** bounded shared source/endpoint/CSV consistency reader, independent native observation curves/selected rows and CLI inspection. See [HABITAT_RECORDINGS](HABITAT_RECORDINGS.md). No field validation or unimplemented physical greenhouse claim.
+
+11. **Controlled habitat comparisons (built, partial phase 9/16):** ordinary-edit single-setting branches, exact common base and every run, worker-driven native experiments and shared stored-time/interval-supported differences. See [HABITAT_COMPARISONS](HABITAT_COMPARISONS.md). No interaction analysis, field calibration or global optimization claim.
