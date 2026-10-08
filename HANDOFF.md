@@ -60,6 +60,8 @@ The connected [controlled moisture studies](docs/MOISTURE_STUDIES.md) build adds
 
 The connected [paired habitat experiments](docs/PAIRED_HABITAT_EXPERIMENTS.md) build adds two settings at two levels, all four atomic common-state branches, actual final conditional/average/interaction contrasts, protected source-pinned analysis and shared native/CLI reopening. Snapshots retain explicit pre-edit flow warnings. Checks: 324 passed plus one existing ignored, 35 distinct offline/refusal/native cases, nine inspected packaged layouts and a 48-second normal run; [verification](docs/PAIRED_HABITAT_VALIDATION.md). Single-setting behavior, simulation laws, saves and the golden remain unchanged. Selectable-time paired trajectory analysis follows; uncertainty, calibration, physical greenhouse and the master directive remain incomplete.
 
+The connected [paired trajectories](docs/PAIRED_TRAJECTORIES.md) build adds selectable actual stored-time tables, signed discrete effect curves, four retained recordings, explicit support gaps and protected complete JSON/40-column CSV analyses. Loaded design identity stays separate from unopened folder text. Checks: 328 passed plus one existing ignored, 46 distinct cases, thirteen inspected final packaged layouts and a 48-second normal run; [verification](docs/PAIRED_TRAJECTORIES_VALIDATION.md). Original final analyses, simulation laws, saves and the golden remain unchanged. Explicit independent replay verification follows; empirical calibration, physical greenhouse and the master directive remain incomplete.
+
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
   [GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases) with macOS, Windows and Linux builds.

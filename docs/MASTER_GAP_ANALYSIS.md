@@ -69,4 +69,6 @@ New work must meet the relevant definitions of done; partial implementations rem
 
 19. **Paired habitat experiments (built, partial phase 9/16):** two settings at two levels, all four exact common-state branches, actual conditional effects and interaction contrasts. Keep single-setting studies and make unavailable interval/source support explicit; no statistical-noise, global-optimization or field-calibration claim.
 
-20. **Paired trajectory analysis (next, partial phase 9/16):** actual four-response/contrast curves and selectable stored-time tables with protected numeric exports, explicit gaps and interval support. Preserve completed final reports and ordinary studies; no interpolation, field-calibration or statistical-confidence claim.
+20. **Paired trajectory analysis (built, partial phase 9/16):** actual four-response/contrast curves and selectable stored-time tables with protected numeric exports, explicit gaps and interval support. Preserve completed final reports and ordinary studies; no interpolation, field-calibration or statistical-confidence claim.
+
+21. **Recorded design replay (next, partial phase 9/16):** explicit independent recomputation of four source-pinned branches at every recorded time, exact full-sample/endpoint comparisons, native worker progress/cancellation and protected mismatch reports. Reproducibility is separate from empirical/hardware validation; keep original observations read-only.

@@ -240,3 +240,4 @@ First end-to-end vertical slice, shipped as a double-clickable macOS app.
 
 ## 0.1.0 — Prototype (2026-07)
 Original prototype; see docs/AUDIT.md.
+- Paired habitat trajectories: native selectable stored-time response/contrast tables, signed discrete effect curves with unavailable gaps, protected all-time JSON/40-column CSV export and explicit CLI observation inspection. Loaded design identity stays separate from editable folder text. Original final analyses, simulation laws, saves and golden fingerprint remain unchanged.

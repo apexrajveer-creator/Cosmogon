@@ -122,3 +122,5 @@ The experimental habitat also offers optional finite [cabin humidity and condens
 Controlled moisture [studies](docs/MOISTURE_STUDIES.md) compare six water-phase/equipment assumptions from one exact starting world using native or CLI experiments, preserving all inventories and source-pinned trajectories. These are conditional model studies; field calibration and physical greenhouse exchange remain incomplete.
 
 Paired habitat [experiments](docs/PAIRED_HABITAT_EXPERIMENTS.md) compare all four combinations of two settings, show actual conditional/interaction results and reopen complete source-pinned designs.
+
+[Paired trajectory analysis](docs/PAIRED_TRAJECTORIES.md) shows recorded conditional/interaction effects over time and exports every supported observation with source identity.

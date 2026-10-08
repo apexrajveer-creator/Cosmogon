@@ -50,6 +50,9 @@ impl Contrasts {
     }
 }
 pub fn report(plan: &Plan, recordings: &[Recording]) -> Result<Value, String> {
+    report_at(plan, recordings, plan.samples.saturating_sub(1))
+}
+pub fn report_at(plan: &Plan, recordings: &[Recording], index: usize) -> Result<Value, String> {
     plan.validate()?;
     let secondary = plan
         .secondary
@@ -58,14 +61,15 @@ pub fn report(plan: &Plan, recordings: &[Recording]) -> Result<Value, String> {
     if recordings.len() != 4 || recordings.iter().any(|r| r.rows.len() != plan.samples) {
         return Err("A paired experiment requires four complete branch recordings".into());
     }
-    let index = plan.samples - 1;
+    if index >= plan.samples {
+        return Err("Requested paired observation is outside the recording".into());
+    }
     let reference = &recordings[0];
     let time = reference.rows[index].simulation_time_s;
     let metrics = Metric::ALL.into_iter().map(|metric| {
         let mut supported = true;
         let responses = std::array::from_fn(|i| {
-            let pairs = habitat_comparison::pairs(reference,&recordings[i],metric,Alignment::World);
-            let pair = &pairs[index];
+            let pair = habitat_comparison::pair_at(reference,&recordings[i],metric,Alignment::World,index).expect("validated complete rows");
             supported &= pair.support=="matched" && pair.b_index==Some(index);
             pair.b_value
         });
@@ -77,10 +81,204 @@ pub fn report(plan: &Plan, recordings: &[Recording]) -> Result<Value, String> {
         "b":{"parameter":secondary.parameter.id(),"unit":secondary.parameter.unit(),"levels":secondary.values},
         "order":[[0,0],[1,0],[0,1],[1,1]],"completed_interval_configurations_match_current":recordings.iter().map(|r|r.rows[index].habitat.budget.configuration.as_ref()==Some(&r.rows[index].habitat.config)).collect::<Vec<_>>(),"observation_index":index,"simulation_time_s":time,"metrics":metrics,
         "formulas":{"a_at_b0":"Y10 - Y00","a_at_b1":"Y11 - Y01","b_at_a0":"Y01 - Y00","b_at_a1":"Y11 - Y10","average_a":"(A at B0 + A at B1)/2","average_b":"(B at A0 + B at A1)/2","difference_in_differences":"(Y11 - Y01) - (Y10 - Y00)","standard_ab_effect":"difference_in_differences / 2"},
-        "scope":"Final stored observation of four common-state branches; initial stores fixed. A0/A1 and B0/B1 mean first/second supplied levels, not necessarily increasing values. Responses remain visible when contrasts lack support.",
+        "scope":if index==plan.samples-1 {"Final stored observation of four common-state branches; initial stores fixed. A0/A1 and B0/B1 mean first/second supplied levels, not necessarily increasing values. Responses remain visible when contrasts lack support."} else {"Selected stored observation of four common-state branches; initial stores fixed. A0/A1 and B0/B1 mean first/second supplied levels, not necessarily increasing values. Responses remain visible when contrasts lack support."},
         "limits":"Conditional model contrasts at these two levels. No interpolation, p-values, significance, confidence intervals, independent noise replications, global optimum or field-hardware validation. First-versus-last corners change both settings and cannot isolate either effect."}),
     )
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Effect {
+    #[default]
+    AverageA,
+    AverageB,
+    InteractionDifference,
+}
+impl Effect {
+    pub const ALL: [Self; 3] = [Self::AverageA, Self::AverageB, Self::InteractionDifference];
+    pub fn parse(s: &str) -> Result<Self, String> {
+        Self::ALL.into_iter().find(|e| e.id() == s).ok_or_else(|| {
+            "Paired effect must be average_a, average_b or difference_in_differences".into()
+        })
+    }
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::AverageA => "average_a",
+            Self::AverageB => "average_b",
+            Self::InteractionDifference => "difference_in_differences",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::AverageA => "Average A change",
+            Self::AverageB => "Average B change",
+            Self::InteractionDifference => "Difference of conditional A changes",
+        }
+    }
+    pub fn value(self, c: &Contrasts) -> Option<f64> {
+        match self {
+            Self::AverageA => c.average_a,
+            Self::AverageB => c.average_b,
+            Self::InteractionDifference => c.difference_in_differences,
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Point {
+    pub observation_index: usize,
+    pub simulation_time_s: f64,
+    pub branch_indices: [Option<usize>; 4],
+    pub branch_support: [&'static str; 4],
+    pub branch_world_time_s: [Option<f64>; 4],
+    pub completed_interval_end_s: [Option<f64>; 4],
+    pub completed_interval_seconds: [Option<f64>; 4],
+    pub completed_interval_configurations_match_current: [bool; 4],
+    pub contrasts: Contrasts,
+}
+/// Exact common-time observations only. Missing values/support remain gaps; no resampling.
+pub fn curve(plan: &Plan, recordings: &[Recording], metric: Metric) -> Result<Vec<Point>, String> {
+    plan.validate()?;
+    if plan.secondary.is_none()
+        || recordings.len() != 4
+        || recordings.iter().any(|r| r.rows.len() != plan.samples)
+    {
+        return Err("Paired curves require four complete branch recordings".into());
+    }
+    let reference = &recordings[0];
+    Ok((0..plan.samples)
+        .map(|index| {
+            let pairs: [habitat_comparison::Pair; 4] = std::array::from_fn(|i| {
+                habitat_comparison::pair_at(
+                    reference,
+                    &recordings[i],
+                    metric,
+                    Alignment::World,
+                    index,
+                )
+                .expect("validated rows")
+            });
+            let supported = pairs
+                .iter()
+                .all(|p| p.support == "matched" && p.b_index == Some(index));
+            Point {
+                observation_index: index,
+                simulation_time_s: reference.rows[index].simulation_time_s,
+                branch_indices: std::array::from_fn(|i| pairs[i].b_index),
+                branch_support: std::array::from_fn(|i| if pairs[i].support=="matched" && pairs[i].b_index!=Some(index) {"different_observation_index"}else{pairs[i].support}),
+                branch_world_time_s: std::array::from_fn(|i| pairs[i].b_world_time_s),
+                completed_interval_end_s: std::array::from_fn(|i| {
+                    pairs[i]
+                        .b_index
+                        .map(|j| recordings[i].rows[j].habitat.last_time)
+                }),
+                completed_interval_seconds: std::array::from_fn(|i| {
+                    pairs[i]
+                        .b_index
+                        .map(|j| recordings[i].rows[j].habitat.budget.seconds)
+                }),
+                completed_interval_configurations_match_current: std::array::from_fn(|i| {
+                    let h = &recordings[i].rows[index].habitat;
+                    h.budget.configuration.as_ref() == Some(&h.config)
+                }),
+                contrasts: Contrasts::of(std::array::from_fn(|i| pairs[i].b_value), supported),
+            }
+        })
+        .collect())
+}
+impl Design {
+    pub fn plan(&self) -> Result<Plan, String> {
+        serde_json::from_value(self.manifest["plan"].clone()).map_err(|e| e.to_string())
+    }
+    pub fn report_at(&self, index: usize) -> Result<Value, String> {
+        report_at(&self.plan()?, &self.recordings, index)
+    }
+    pub fn curve(&self, metric: Metric) -> Result<Vec<Point>, String> {
+        curve(&self.plan()?, &self.recordings, metric)
+    }
+    pub fn trajectory_report(&self) -> Result<Value, String> {
+        let plan = self.plan()?;
+        let metrics = Metric::ALL
+            .into_iter()
+            .map(|m| {
+                Ok((
+                    m.id().into(),
+                    json!({"unit":m.unit(),"points":curve(&plan,&self.recordings,m)?}),
+                ))
+            })
+            .collect::<Result<serde_json::Map<String, Value>, String>>()?;
+        Ok(
+            json!({"format":"cosmogon-habitat-factorial-trajectories","schema_version":1,"plan":plan,
+            "common_state_fingerprint":self.manifest["common_state_fingerprint"],"common_data_versions":self.manifest["common_data_versions"],
+            "habitat_id":self.manifest["habitat_id"],"recordings":self.recordings.iter().map(|r|&r.summary).collect::<Vec<_>>(),
+            "method_source":METHOD_SOURCE,"order":self.analysis["order"],"formulas":self.analysis["formulas"],"limits":self.analysis["limits"],
+            "scope":"All exact stored common-world observations. Interval contrasts require matching positive completed durations and ends. Missing values remain null or empty CSV cells. Snapshot flows may retain pre-edit configurations; flags are retained. No interpolation or live-state substitution.","final_analysis":self.analysis,"metrics":metrics}),
+        )
+    }
+    pub fn export_trajectories(&self, path: &Path) -> Result<(), String> {
+        use std::io::Write;
+        // Validate and serialize before creating output; the completion marker is written last.
+        let report = self.trajectory_report()?;
+        let bytes = serde_json::to_vec_pretty(&report).map_err(|e| e.to_string())?;
+        let plan = self.plan()?;
+        let mut csv=String::from("metric,unit,observation_index,simulation_time_s,y00,y10,y01,y11,a_at_b0,a_at_b1,b_at_a0,b_at_a1,average_a,average_b,difference_in_differences,standard_ab_effect,support00,support10,support01,support11,index00,index10,index01,index11,world_time00_s,world_time10_s,world_time01_s,world_time11_s,interval_end00_s,interval_end10_s,interval_end01_s,interval_end11_s,interval_seconds00,interval_seconds10,interval_seconds01,interval_seconds11,interval_config_matches00,interval_config_matches10,interval_config_matches01,interval_config_matches11\n");
+        let cell = |v: Option<f64>| v.map(|x| format!("{x:.17e}")).unwrap_or_default();
+        for m in Metric::ALL {
+            for p in curve(&plan, &self.recordings, m)? {
+                let c = &p.contrasts;
+                let mut cells = vec![
+                    m.id().into(),
+                    m.unit().into(),
+                    p.observation_index.to_string(),
+                    format!("{:.17e}", p.simulation_time_s),
+                ];
+                cells.extend(c.responses.into_iter().map(cell));
+                cells.extend(
+                    [
+                        c.a_at_b0,
+                        c.a_at_b1,
+                        c.b_at_a0,
+                        c.b_at_a1,
+                        c.average_a,
+                        c.average_b,
+                        c.difference_in_differences,
+                        c.standard_ab_effect,
+                    ]
+                    .into_iter()
+                    .map(cell),
+                );
+                cells.extend(p.branch_support.map(str::to_string));
+                cells.extend(
+                    p.branch_indices
+                        .map(|i| i.map(|j| j.to_string()).unwrap_or_default()),
+                );
+                for v in [
+                    p.branch_world_time_s,
+                    p.completed_interval_end_s,
+                    p.completed_interval_seconds,
+                ] {
+                    cells.extend(v.into_iter().map(cell));
+                }
+                cells.extend(
+                    p.completed_interval_configurations_match_current
+                        .map(|v| v.to_string()),
+                );
+                csv.push_str(&cells.join(","));
+                csv.push('\n');
+            }
+        }
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::create_dir(path).map_err(|e| {
+            format!("Existing trajectory analyses are protected; choose a new folder: {e}")
+        })?;
+        for (name,data) in [("trajectories.json",bytes),("contrasts.csv",csv.into_bytes()),("manifest.json",serde_json::to_vec_pretty(&json!({"format":"cosmogon-habitat-factorial-trajectory-export","schema_version":1,"complete":true,"observation_count":plan.samples,"metric_count":Metric::ALL.len(),"common_state_fingerprint":self.manifest["common_state_fingerprint"],"files":["trajectories.json","contrasts.csv"]})).map_err(|e|e.to_string())?)] {
+            let mut f=std::fs::OpenOptions::new().write(true).create_new(true).open(path.join(name)).map_err(|e|format!("Incomplete trajectory analysis: {e}"))?;
+            f.write_all(&data).map_err(|e|format!("Incomplete trajectory analysis: {e}"))?;
+        }
+        Ok(())
+    }
+}
+
 pub struct Design {
     pub recordings: Vec<Recording>,
     pub manifest: Value,
@@ -293,6 +491,123 @@ mod tests {
             analysis["metrics"]["vapor"]["contrasts"]["average_a"],
             Value::Null
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn selectable_times_match_independent_arithmetic_and_interval_gaps() {
+        let u = world();
+        let p = plan();
+        let mut recordings = (0..4)
+            .map(|branch| Recording {
+                rows: (0..3)
+                    .map(|index| {
+                        let mut h = u.habitats[0].clone();
+                        // Independent response law: Y = 100 + t*(3*A - 5*B + 7*A*B).
+                        let a = (branch % 2) as f64;
+                        let b = (branch / 2) as f64;
+                        let t = index as f64;
+                        h.state.potable_water_kg = 100.0 + t * (3.0 * a - 5.0 * b + 7.0 * a * b);
+                        h.budget.delivered_w = h.state.potable_water_kg;
+                        h.budget.seconds = 60.0;
+                        h.budget.environment_available = true;
+                        h.last_time = 1000.0 + 60.0 * t;
+                        crate::habitat::Sample {
+                            simulation_time_s: h.last_time,
+                            habitat: h,
+                        }
+                    })
+                    .collect(),
+                summary: json!({}),
+            })
+            .collect::<Vec<_>>();
+        let points = curve(&p, &recordings, Metric::Water).unwrap();
+        for (index, point) in points.iter().enumerate() {
+            let t = index as f64;
+            assert_eq!(point.contrasts.a_at_b0, Some(3.0 * t));
+            assert_eq!(point.contrasts.a_at_b1, Some(10.0 * t));
+            assert_eq!(point.contrasts.average_a, Some(6.5 * t));
+            assert_eq!(point.contrasts.average_b, Some(-1.5 * t));
+            assert_eq!(point.contrasts.difference_in_differences, Some(7.0 * t));
+            let selected = report_at(&p, &recordings, index).unwrap();
+            assert_eq!(selected["observation_index"], index);
+            assert_eq!(
+                selected["metrics"]["water"]["contrasts"],
+                serde_json::to_value(&point.contrasts).unwrap()
+            );
+        }
+        assert_eq!(
+            report(&p, &recordings).unwrap(),
+            report_at(&p, &recordings, 2).unwrap()
+        );
+        assert!(report_at(&p, &recordings, 3).is_err());
+        recordings[1].rows[1].habitat.budget.seconds = 30.0;
+        let interval = curve(&p, &recordings, Metric::DeliveredPower).unwrap();
+        assert!(interval[0].contrasts.average_a.is_some());
+        assert_eq!(interval[1].contrasts.average_a, None);
+        assert_eq!(interval[1].branch_support[1], "different_interval_support");
+        assert!(interval[1].contrasts.responses.iter().all(Option::is_some));
+        assert!(interval[2].contrasts.average_a.is_some());
+        assert!(curve(&p, &recordings, Metric::Water).unwrap()[1]
+            .contrasts
+            .average_a
+            .is_some());
+        recordings[2].rows[1].simulation_time_s += 0.001;
+        let points = curve(&p, &recordings, Metric::Water).unwrap();
+        assert_eq!(points[1].branch_indices[2], None);
+        assert_eq!(points[1].contrasts.responses[2], None);
+        assert_eq!(points[1].contrasts.average_b, None);
+        assert!(points[2].contrasts.average_b.is_some());
+    }
+    #[test]
+    fn trajectory_export_retains_support_identity_and_is_exact_and_protected() {
+        let u = world();
+        let p = plan();
+        let root = std::env::temp_dir().join(format!(
+            "cosmogon-factorial-trajectories-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        crate::habitat_sweep::execute(&u, 0, &p, &root.join("design")).unwrap();
+        let d = read(&root.join("design")).unwrap();
+        let before = std::fs::read(root.join("design/factorial.json")).unwrap();
+        d.export_trajectories(&root.join("a")).unwrap();
+        d.export_trajectories(&root.join("b")).unwrap();
+        for name in ["trajectories.json", "contrasts.csv", "manifest.json"] {
+            assert_eq!(
+                std::fs::read(root.join("a").join(name)).unwrap(),
+                std::fs::read(root.join("b").join(name)).unwrap()
+            );
+        }
+        assert!(d.export_trajectories(&root.join("a")).is_err());
+        assert_eq!(
+            std::fs::read(root.join("design/factorial.json")).unwrap(),
+            before
+        );
+        let report: Value =
+            serde_json::from_slice(&std::fs::read(root.join("a/trajectories.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            report["common_state_fingerprint"],
+            d.manifest["common_state_fingerprint"]
+        );
+        assert_eq!(report["final_analysis"], d.analysis);
+        for metric in Metric::ALL {
+            let points = &report["metrics"][metric.id()]["points"];
+            assert_eq!(points.as_array().unwrap().len(), 3);
+            assert_eq!(
+                points[2]["contrasts"],
+                d.analysis["metrics"][metric.id()]["contrasts"]
+            );
+        }
+        assert!(report["metrics"]["water"]["points"][0]
+            ["completed_interval_configurations_match_current"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == false));
+        let csv = std::fs::read_to_string(root.join("a/contrasts.csv")).unwrap();
+        assert_eq!(csv.lines().count(), 1 + 3 * Metric::ALL.len());
+        assert!(csv.lines().all(|l| l.split(',').count() == 40));
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

@@ -23,6 +23,7 @@ struct Args {
     output: Option<String>,
     initial: Option<String>,
     recording: Option<String>,
+    observation: Option<usize>,
     reference: Option<String>,
     site: Option<String>,
     mars_terrain: Option<String>,
@@ -62,6 +63,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         output: None,
         initial: None,
         recording: None,
+        observation: None,
         reference: None,
         site: None,
         mars_terrain: None,
@@ -117,7 +119,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if a.cmd=="greenhouse" && !matches!(flag.as_str(),"--definition"|"--output"|"--initial"|"--habitat-id") {return Err(format!("{flag} is not a greenhouse planning option"));}
         if a.cmd=="greenhouse-definition" && flag!="--output" {return Err(format!("{flag} is not a greenhouse-definition option"));}
         if a.cmd=="habitat-diagnose" && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
-        if a.cmd=="habitat-inspect" && flag!="--recording" {return Err(format!("{flag} is not a habitat inspection option"));}
+        if a.cmd=="habitat-inspect" && !matches!(flag.as_str(),"--recording"|"--observation"|"--output") {return Err(format!("{flag} is not a habitat inspection option"));}
         if a.cmd=="habitat" && !matches!(flag.as_str(),"--definition"|"--habitat-id"|"--initial"|"--output"|"--samples"|"--interval-days"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat study option"));}
         if a.cmd=="habitat-definition" && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat-definition option"));}
         if a.cmd=="habitat-sweep" && !matches!(flag.as_str(),"--definition"|"--habitat-id"|"--initial"|"--output"|"--samples"|"--interval-days"|"--parameter"|"--from"|"--to"|"--runs") {return Err(format!("{flag} is not a habitat sweep option"));}
@@ -141,6 +143,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--longitude" => { a.longitude = number(val()?, &flag)?; explicit_coordinates = true; },
             "--reference" => a.reference = Some(val()?),
             "--recording" => a.recording = Some(val()?),
+            "--observation" => {if a.cmd!="habitat-inspect" {return Err("--observation requires habitat-inspect".into());}let n=number::<usize>(val()?,&flag)?;if n>=1024 {return Err("Observation index must be between 0 and 1023".into());}a.observation=Some(n);},
             "--initial" => a.initial = Some(val()?),
             "--habitat-id" => {if !matches!(a.cmd.as_str(),"habitat"|"habitat-sweep"|"greenhouse"|"habitat-diagnose") {return Err("--habitat-id requires habitat, habitat-sweep, habitat-diagnose or greenhouse".into());}a.habitat_id=Some(number(val()?,&flag)?);},
             "--definition" => a.definition = Some(val()?),
@@ -232,7 +235,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
 fn help() {
     eprintln!("cosmogon-cli habitat-sweep --initial SAVE --output NEW_DIR --parameter firm_power_w --from 0 --to 4000 --runs 3 [--samples 25 --interval-days 0.041666666666666664]\n  or --definition SWEEP_PLAN; optional --habitat-id ID\ncosmogon-cli habitat-compare --recording A --reference B [--measure water --alignment elapsed|world --output NEW_DIR]");
     eprintln!("cosmogon-cli habitat-diagnose --initial SAVE --habitat-id ID [--output NEW_DIR]   # explain completed power/water/heat");
-    eprintln!("cosmogon-cli habitat-inspect --recording STUDY_FOLDER   # validate and inspect recorded habitat observations");
+    eprintln!("cosmogon-cli habitat-inspect --recording STUDY_FOLDER [--observation INDEX --output NEW_TRAJECTORY_DIR]   # validate and inspect recorded habitat observations");
     println!(
         r#"Cosmogon headless tools
   surface --target Mars          Sample authoritative MOLA height and source-cell coverage JSON
@@ -326,8 +329,7 @@ fn main() {
         "greenhouse" => {if let Err(e)=greenhouse(&a) {eprintln!("Greenhouse planning failed: {e}");std::process::exit(1);}},
         "habitat-diagnose" => {if let Err(e)=habitat_diagnose(&a) {eprintln!("Habitat diagnosis failed: {e}");std::process::exit(1);}},
         "habitat-inspect" => {
-            let path=std::path::Path::new(a.recording.as_deref().expect("validated recording"));
-            let inspected=if path.join("plan.json").exists() {cosmogon_sim::habitat_factorial::read(path).map(|d|d.analysis)} else {cosmogon_sim::habitat_recording::Recording::read(path).map(|r|r.summary)};
+            let inspected=habitat_inspect(&a);
             match inspected {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).unwrap()),Err(e)=>{eprintln!("Habitat inspection failed: {e}");std::process::exit(1);}}
         },
         "habitat-sweep" => {if let Err(e)=habitat_sweep(&a) {eprintln!("Habitat sweep failed: {e}");std::process::exit(1);}},
@@ -715,6 +717,19 @@ fn habitat_sweep(a:&Args)->Result<(),String> {
     let report=cosmogon_sim::habitat_sweep::execute(&base,id,&plan,std::path::Path::new(a.output.as_deref().expect("validated output")))?;
     println!("{}",serde_json::to_string_pretty(&report).map_err(|e|e.to_string())?);Ok(())
 }
+fn habitat_inspect(a:&Args)->Result<serde_json::Value,String> {
+    let path=std::path::Path::new(a.recording.as_deref().expect("validated recording"));
+    if path.join("plan.json").exists() {
+        let design=cosmogon_sim::habitat_factorial::read(path)?;
+        let report=if let Some(index)=a.observation {design.report_at(index)?} else {design.analysis.clone()};
+        if let Some(output)=&a.output {design.export_trajectories(std::path::Path::new(output))?;}
+        Ok(report)
+    } else {
+        if a.observation.is_some() || a.output.is_some() {return Err("--observation/--output require a complete paired design folder".into());}
+        Ok(cosmogon_sim::habitat_recording::Recording::read(path)?.summary)
+    }
+}
+
 fn habitat_compare(a:&Args)->Result<(),String> {
     use cosmogon_sim::{habitat_comparison as comparison,habitat_recording::{Metric,Recording}};
     let left=Recording::read(std::path::Path::new(a.recording.as_deref().expect("validated A")))?;let right=Recording::read(std::path::Path::new(a.reference.as_deref().expect("validated B")))?;
@@ -808,6 +823,11 @@ mod argument_tests {
         let a=args(&["surface","--site","curiosity"]).unwrap();
         assert_eq!(a.target,"Mars");assert_eq!(a.latitude,-4.59);assert_eq!(a.longitude,137.44);
         for values in [vec!["surface","--site","unknown"],vec!["surface","--site","curiosity","--target","Earth"],vec!["surface","--site","curiosity","--latitude","0"],vec!["run","--site","curiosity"]] {assert!(args(&values).is_err());}
+    }
+    #[test]
+    fn paired_inspection_options_are_bounded_and_do_not_apply_to_other_commands() {
+        let a=args(&["habitat-inspect","--recording","design","--observation","0","--output","new"]).unwrap();assert_eq!(a.observation,Some(0));assert_eq!(a.output.as_deref(),Some("new"));
+        for v in [vec!["habitat-inspect","--recording","x","--observation","1024"],vec!["habitat-inspect","--recording","x","--observation","-1"],vec!["inspect","--recording","x","--observation","1"],vec!["habitat-inspect","--recording","x","--observation"]] {assert!(args(&v).is_err());}
     }
     #[test]
     fn habitat_inspection_requires_a_folder_and_rejects_ignored_options() {

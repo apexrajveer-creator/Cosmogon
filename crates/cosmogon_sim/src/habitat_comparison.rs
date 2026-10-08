@@ -36,54 +36,62 @@ pub struct Pair {
     pub b_minus_a: Option<f64>,
     pub support: &'static str,
 }
+/// One exact stored observation; shared by pair plots and bounded factorial curves.
+pub fn pair_at(
+    a: &Recording,
+    b: &Recording,
+    metric: Metric,
+    alignment: Alignment,
+    i: usize,
+) -> Option<Pair> {
+    let ta = a.rows.first()?.simulation_time_s;
+    let tb = b.rows.first()?.simulation_time_s;
+    let ar = a.rows.get(i)?;
+    let t = alignment.coordinate(ar.simulation_time_s, ta);
+    let index = b
+        .rows
+        .binary_search_by(|br| alignment.coordinate(br.simulation_time_s, tb).total_cmp(&t))
+        .ok();
+    let br = index.map(|j| &b.rows[j]);
+    let av = metric.value(ar);
+    let bv = br.and_then(|r| metric.value(r));
+    let same_interval = br.is_some_and(|r| {
+        ar.habitat.budget.seconds > 0.0
+            && ar.habitat.budget.seconds == r.habitat.budget.seconds
+            && alignment.coordinate(ar.habitat.last_time, ta)
+                == alignment.coordinate(r.habitat.last_time, tb)
+    });
+    let support = if br.is_none() {
+        "no_exact_timestamp"
+    } else if metric.is_interval() && !same_interval {
+        "different_interval_support"
+    } else if av.is_none() || bv.is_none() {
+        "unavailable_value"
+    } else {
+        "matched"
+    };
+    Some(Pair {
+        a_index: i,
+        b_index: index,
+        coordinate_s: t,
+        a_world_time_s: ar.simulation_time_s,
+        b_world_time_s: br.map(|r| r.simulation_time_s),
+        a_value: av,
+        b_value: bv,
+        b_minus_a: if support == "matched" {
+            av.zip(bv).map(|(x, y)| y - x)
+        } else {
+            None
+        },
+        support,
+    })
+}
 pub fn pairs(a: &Recording, b: &Recording, metric: Metric, alignment: Alignment) -> Vec<Pair> {
-    let ta = a.rows[0].simulation_time_s;
-    let tb = b.rows[0].simulation_time_s;
-    a.rows
-        .iter()
-        .enumerate()
-        .map(|(i, ar)| {
-            let t = alignment.coordinate(ar.simulation_time_s, ta);
-            let index = b
-                .rows
-                .binary_search_by(|br| alignment.coordinate(br.simulation_time_s, tb).total_cmp(&t))
-                .ok();
-            let br = index.map(|j| &b.rows[j]);
-            let av = metric.value(ar);
-            let bv = br.and_then(|r| metric.value(r));
-            let same_interval = br.is_some_and(|r| {
-                ar.habitat.budget.seconds > 0.0
-                    && ar.habitat.budget.seconds == r.habitat.budget.seconds
-                    && alignment.coordinate(ar.habitat.last_time, ta)
-                        == alignment.coordinate(r.habitat.last_time, tb)
-            });
-            let support = if br.is_none() {
-                "no_exact_timestamp"
-            } else if metric.is_interval() && !same_interval {
-                "different_interval_support"
-            } else if av.is_none() || bv.is_none() {
-                "unavailable_value"
-            } else {
-                "matched"
-            };
-            Pair {
-                a_index: i,
-                b_index: index,
-                coordinate_s: t,
-                a_world_time_s: ar.simulation_time_s,
-                b_world_time_s: br.map(|r| r.simulation_time_s),
-                a_value: av,
-                b_value: bv,
-                b_minus_a: if support == "matched" {
-                    av.zip(bv).map(|(x, y)| y - x)
-                } else {
-                    None
-                },
-                support,
-            }
-        })
+    (0..a.rows.len())
+        .filter_map(|i| pair_at(a, b, metric, alignment, i))
         .collect()
 }
+
 pub fn report(
     a: &Recording,
     b: &Recording,

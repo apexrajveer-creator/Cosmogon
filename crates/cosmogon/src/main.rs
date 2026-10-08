@@ -62,6 +62,12 @@ fn main() -> bevy::app::AppExit {
             .map_err(|e|e.to_string()).and_then(|u|habitat_audio::export(&u,args.habitat_audio.expect("validated audio id"),std::path::Path::new(output)));
         return match result {Ok(())=>{println!("Saved habitat sound preview to {output}");AppExit::Success},Err(e)=>{eprintln!("Cannot export habitat sound: {e}");AppExit::error()}};
     }
+    if args.habitat_effect.is_some() {
+        let paired=if let Some(path)=&args.habitat_recording {cosmogon_sim::habitat_factorial::read(std::path::Path::new(path)).map(|_|())}
+        else if let Some(path)=&args.habitat_sweep {cosmogon_sim::habitat_sweep::Plan::read(std::path::Path::new(path)).and_then(|p|if p.secondary.is_some(){Ok(())}else{Err("Paired effect selection requires a paired plan".into())})}
+        else {Err("Paired effect selection requires a complete paired design or paired plan".into())};
+        if let Err(e)=paired {eprintln!("Cannot select paired effect: {e}");return AppExit::error();}
+    }
     // Reject invalid automated inputs before starting the renderer. Early GPU teardown
     // can otherwise wait for a render task that still needs the main-thread executor.
     // Interactive opening remains asynchronous and reports errors in the workspace.

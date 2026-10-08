@@ -191,3 +191,5 @@ Finite cabin moisture: explicit `config.moisture` enables the model; `--panel ha
 Controlled moisture studies reuse the existing native/CLI habitat sweeps; [MOISTURE_STUDIES](docs/MOISTURE_STUDIES.md) lists canonical settings/units and example commands. Humidity settings must already be enabled; all ordinary branch edits validate before output.
 
 [PAIRED_HABITAT_EXPERIMENTS](docs/PAIRED_HABITAT_EXPERIMENTS.md) documents schema-2 paired plans, CLI sweep/inspection, native root reopening and `--panel habitat-paired` capture equivalents.
+
+[PAIRED_TRAJECTORIES](docs/PAIRED_TRAJECTORIES.md) documents CLI `--observation` and protected analysis `--output`, native curve/table/files capture panels and explicit effect selection.
