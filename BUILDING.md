@@ -193,3 +193,5 @@ Controlled moisture studies reuse the existing native/CLI habitat sweeps; [MOIST
 [PAIRED_HABITAT_EXPERIMENTS](docs/PAIRED_HABITAT_EXPERIMENTS.md) documents schema-2 paired plans, CLI sweep/inspection, native root reopening and `--panel habitat-paired` capture equivalents.
 
 [PAIRED_TRAJECTORIES](docs/PAIRED_TRAJECTORIES.md) documents CLI `--observation` and protected analysis `--output`, native curve/table/files capture panels and explicit effect selection.
+
+[HABITAT_REPLAY](docs/HABITAT_REPLAY.md) documents `cosmogon-cli habitat-verify`, native `--habitat-verify`, replay captures and protected report outputs.

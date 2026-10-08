@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — saved habitat analysis
+
+- Add selectable stored-time paired response tables/effect curves and protected complete numeric exports, plus explicit independent whole-design replay verification. Reconstruct all four branches, compare every complete typed observation and endpoint/source identity, retain bounded differences, native progress/cancellation and protected reports. Preserve original recordings/final analyses, simulation laws, saves and golden `0xf2c4140a45ae509b`; no empirical calibration claim.
+
 ## Unreleased — finite cabin moisture
 - Add paired two-setting/two-level habitat designs, four atomic common-state branches, actual conditional/interaction contrasts and protected source-pinned results with shared native/CLI reopening. Preserve single-setting plans, simulation laws, saves and the golden.
 

@@ -104,6 +104,7 @@ pub struct Study {
     paired_export: Option<Task<Result<(),String>>>,
     pub why_mode: bool,
     pub why: super::habitat_why::View,
+    pub replay: super::habitat_replay::View,
     pub alignment: Alignment,
     comparison_path: String,
     comparison_output: String,
@@ -137,7 +138,7 @@ impl Study {
         self.status = Some("Checking recorded sources, endpoints and observations…".into());
     }
     pub fn pending(&self) -> bool {
-        self.paired_export.is_some() || self.task.is_some()
+        self.replay.pending() || self.paired_export.is_some() || self.task.is_some()
             || self.comparison_task.is_some()
             || self.sweep_task.is_some()
             || self.launch.is_some()
@@ -220,6 +221,7 @@ impl Study {
         self.selected = index;
         self.factorial_mode &= result.manifest["factorial_analysis"].is_object();
         self.paired_curve=curve.map(|points|(self.metric,points));
+        self.replay.reset();
         self.paired_source=if result.paired.is_some() {result.path.clone()}else{String::new()};
         self.paired=result.paired;
         self.sweep_manifest = Some(result.manifest);
@@ -235,7 +237,7 @@ impl Study {
             return Err("Requested observation index is outside the recording".into());
         }
         self.sweep_manifest = None;
-        self.paired=None;self.paired_curve=None;
+        self.paired=None;self.paired_curve=None;self.replay.reset();
         self.factorial_mode = false;
         self.recording = Some(r);
         self.path = path;
@@ -244,7 +246,7 @@ impl Study {
         Ok(())
     }
     pub fn poll(&mut self) {
-        self.why.poll();
+        self.why.poll();self.replay.poll();
         if let Some(result)=self.paired_export.as_mut().and_then(|task|block_on(future::poll_once(task))) {
             self.paired_export=None;
             self.status=Some(match result {Ok(())=>"Protected paired trajectory analysis exported; observations are unchanged.".into(),Err(e)=>format!("Trajectory export failed: {e}. Recorded views are preserved.")});
@@ -275,7 +277,7 @@ impl Study {
             match result {
                 Ok(r) => {
                     self.sweep_manifest = None;
-                    self.paired=None;self.paired_curve=None;
+                    self.paired=None;self.paired_curve=None;self.replay.reset();
                     self.factorial_mode = false;
                     self.comparison = Some(r);
                     self.comparison_path = self.pending_comparison_path.clone();
@@ -298,12 +300,15 @@ impl Study {
                 self.status=Some(format!("Sweep failed: {e}. Previous recorded views are preserved. A folder without completion manifest is incomplete."));
             }
         }
+        if self.replay.launch && self.paired.is_some() && self.task.is_none() && self.comparison_task.is_none() && self.sweep_task.is_none() {
+            self.replay.start(self.paired_source.clone());
+        }
     }
     pub fn metadata(&self) -> Option<serde_json::Value> {
         let r = self.recording.as_ref()?;
         let row = &r.rows[self.selected.min(r.rows.len() - 1)];
         Some(
-            serde_json::json!({"summary":r.summary,"metric":self.metric.id(),"unit":self.metric.unit(),"selected_observation":self.selected,"selected_row":row,"why":self.why_mode.then(||self.why.metadata(&row.habitat,row.simulation_time_s,"recorded_completed_interval")),"selected_value":self.metric.value(row),"comparison":self.comparison.as_ref().map(|b| {let pairs=habitat_comparison::pairs(r,b,self.metric,self.alignment);let pair=&pairs[self.selected.min(pairs.len()-1)];serde_json::json!({"summary":b.summary,"alignment":self.alignment,"selected_pair":pair,"selected_row":pair.b_index.map(|j|&b.rows[j]),"report":habitat_comparison::report(r,b,self.metric,self.alignment)})}),"sweep":self.sweep_manifest,"paired_results_visible":self.factorial_mode,"paired_source":self.paired.as_ref().map(|_|&self.paired_source),"paired_selected_analysis":self.paired.as_ref().and_then(|d|d.report_at(self.selected).ok()),"paired_curve":self.paired_curve.as_ref().filter(|(m,_)|*m==self.metric).map(|(_,points)|serde_json::json!({"metric":self.metric.id(),"effect":self.effect.id(),"point_count":points.len(),"available_count":points.iter().filter(|p|self.effect.value(&p.contrasts).is_some()).count(),"selected_point":points.get(self.selected),"pane":self.paired_pane})),"scope":"Independent recorded view at capture request, possibly hidden; no live-world or camera change"}),
+            serde_json::json!({"summary":r.summary,"metric":self.metric.id(),"unit":self.metric.unit(),"selected_observation":self.selected,"selected_row":row,"why":self.why_mode.then(||self.why.metadata(&row.habitat,row.simulation_time_s,"recorded_completed_interval")),"selected_value":self.metric.value(row),"comparison":self.comparison.as_ref().map(|b| {let pairs=habitat_comparison::pairs(r,b,self.metric,self.alignment);let pair=&pairs[self.selected.min(pairs.len()-1)];serde_json::json!({"summary":b.summary,"alignment":self.alignment,"selected_pair":pair,"selected_row":pair.b_index.map(|j|&b.rows[j]),"report":habitat_comparison::report(r,b,self.metric,self.alignment)})}),"sweep":self.sweep_manifest,"paired_results_visible":self.factorial_mode,"replay":self.replay.metadata(),"paired_source":self.paired.as_ref().map(|_|&self.paired_source),"paired_selected_analysis":self.paired.as_ref().and_then(|d|d.report_at(self.selected).ok()),"paired_curve":self.paired_curve.as_ref().filter(|(m,_)|*m==self.metric).map(|(_,points)|serde_json::json!({"metric":self.metric.id(),"effect":self.effect.id(),"point_count":points.len(),"available_count":points.iter().filter(|p|self.effect.value(&p.contrasts).is_some()).count(),"selected_point":points.get(self.selected),"pane":self.paired_pane})),"scope":"Independent recorded view at capture request, possibly hidden; no live-world or camera change"}),
         )
     }
 }
@@ -758,7 +763,7 @@ fn paired_graph(ui:&mut egui::Ui,points:&[Point],effect:Effect,selected:&mut usi
         let y=plot.bottom()-plot.height()*n as f32/3.;
         painter.line_segment([egui::pos2(plot.left(),y),egui::pos2(plot.right(),y)],egui::Stroke::new(1.0_f32,egui::Color32::from_gray(40)));
         let v=lo+range*n as f64/3.;
-        painter.text(egui::pos2(plot.left()-4.,y),egui::Align2::RIGHT_CENTER,if range<0.01 || v.abs()>=1e5 {format!("{v:.3e}")}else{format!("{v:.3}")},egui::FontId::proportional(10.),MUTED);
+        if !values.is_empty() {painter.text(egui::pos2(plot.left()-4.,y),egui::Align2::RIGHT_CENTER,if range<0.01 || v.abs()>=1e5 {format!("{v:.3e}")}else{format!("{v:.3}")},egui::FontId::proportional(10.),MUTED);}
         if points.len()>1 || n==0 {painter.text(egui::pos2(plot.left()+plot.width()*n as f32/3.,plot.bottom()+5.),if n==3 {egui::Align2::RIGHT_TOP}else{egui::Align2::CENTER_TOP},format!("{:.2}",duration*n as f64/3./3600.),egui::FontId::proportional(10.),MUTED);}
     }
     // Discrete marks only: connecting samples would imply an unobserved response between them.
@@ -773,15 +778,19 @@ fn paired_graph(ui:&mut egui::Ui,points:&[Point],effect:Effect,selected:&mut usi
     if let Some(v)=effect.value(&p.contrasts) {painter.circle_filled(at(p,v),4.,egui::Color32::WHITE);}
 }
 fn paired_results(ui:&mut egui::Ui,study:&mut Study) {
-    if let Some(status)=&study.status {if study.pending() || status.contains("failed:") || status.contains("Could not") {ui.colored_label(ACCENT,status);}}
+    if let Some(status)=&study.status {if study.task.is_some() || study.sweep_task.is_some() || study.comparison_task.is_some() || study.paired_export.is_some() || status.contains("failed:") || status.contains("Could not") {ui.colored_label(ACCENT,status);}}
     let Some(design)=&study.paired else {ui.label("Open a completed paired experiment first.");return;};
     let plan=match design.plan() {Ok(p)=>p,Err(e)=>{ui.colored_label(ACCENT,e);return;}};
     study.selected=study.selected.min(plan.samples-1);
     ui.strong("Paired settings · four actual recorded responses");
-    ui.horizontal(|ui| {ui.selectable_value(&mut study.paired_pane,0,"Time curves");ui.selectable_value(&mut study.paired_pane,1,"Four-response table");ui.selectable_value(&mut study.paired_pane,2,"Files & method");});
+    ui.horizontal(|ui| {ui.selectable_value(&mut study.paired_pane,0,"Time curves");ui.selectable_value(&mut study.paired_pane,1,"Four-response table");ui.selectable_value(&mut study.paired_pane,2,"Files & method");ui.selectable_value(&mut study.paired_pane,3,"Replay");});
     ui.label(format!("A: {} · {:?} {}",plan.parameter.label(),plan.values,plan.parameter.unit()));
     let second=plan.secondary.as_ref().expect("verified paired design");
     ui.label(format!("B: {} · {:?} {}",second.parameter.label(),second.values,second.parameter.unit()));
+    if study.paired_pane==3 {
+        let pending=study.task.is_some() || study.sweep_task.is_some() || study.comparison_task.is_some() || study.paired_export.is_some();
+        study.replay.show(ui,&study.paired_source,pending);return;
+    }
     if study.paired_pane==2 {
         ui.label("All stored times and 18 metrics: four responses, eight contrasts, interval support, source/common-state identity and formulas.");
         ui.label("New trajectory analysis folder");ui.text_edit_singleline(&mut study.paired_output);

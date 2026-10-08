@@ -376,7 +376,7 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
         Some("habitat-oxygen") => 5,
         Some("habitat-water") => 6,
         Some("habitat-humidity"|"habitat-humidity-settings"|"habitat-humidity-model")=>9,
-        Some("habitat-paired"|"habitat-paired-table"|"habitat-paired-files"|"habitat-recordings"|"habitat-experiments"|"habitat-recording-why"|"habitat-recording-why-water"|"habitat-recording-why-heat"|"habitat-recording-why-air"|"habitat-recording-why-evidence") => 7,
+        Some("habitat-paired"|"habitat-paired-table"|"habitat-paired-files"|"habitat-paired-replay"|"habitat-recordings"|"habitat-experiments"|"habitat-recording-why"|"habitat-recording-why-water"|"habitat-recording-why-heat"|"habitat-recording-why-air"|"habitat-recording-why-evidence") => 7,
         _ => 0,
     };
     form.moisture_pane=match args.panel.as_deref(){Some("habitat-humidity-settings")=>1,Some("habitat-humidity-model")=>2,_=>0};
@@ -388,7 +388,8 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
     form.recording.experiment_mode=args.panel.as_deref()==Some("habitat-experiments");
     if let Some(path)=&args.habitat_recording {form.tab=7;form.recording.metric=args.habitat_metric.as_deref().and_then(|v|cosmogon_sim::habitat_recording::Metric::parse(v).ok()).unwrap_or_default();form.recording.start(path.clone(),args.habitat_sample);}
     form.recording.factorial_mode=args.panel.as_deref().is_some_and(|p|p.starts_with("habitat-paired"));
-    form.recording.paired_pane=match args.panel.as_deref() {Some("habitat-paired-table")=>1,Some("habitat-paired-files")=>2,_=>0};
+    form.recording.paired_pane=match args.panel.as_deref() {Some("habitat-paired-table")=>1,Some("habitat-paired-files")=>2,Some("habitat-paired-replay")=>3,_=>0};
+    form.recording.replay.launch=args.habitat_verify;
     form.recording.effect=args.habitat_effect.as_deref().and_then(|s|cosmogon_sim::habitat_factorial::Effect::parse(s).ok()).unwrap_or_default();
     if let Some(path)=&args.habitat_compare {form.recording.start_comparison(path.clone());}
     if let Some(a)=&args.habitat_alignment {form.recording.alignment=cosmogon_sim::habitat_comparison::Alignment::parse(a).unwrap_or_default();}

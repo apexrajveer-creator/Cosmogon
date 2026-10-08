@@ -71,4 +71,6 @@ New work must meet the relevant definitions of done; partial implementations rem
 
 20. **Paired trajectory analysis (built, partial phase 9/16):** actual four-response/contrast curves and selectable stored-time tables with protected numeric exports, explicit gaps and interval support. Preserve completed final reports and ordinary studies; no interpolation, field-calibration or statistical-confidence claim.
 
-21. **Recorded design replay (next, partial phase 9/16):** explicit independent recomputation of four source-pinned branches at every recorded time, exact full-sample/endpoint comparisons, native worker progress/cancellation and protected mismatch reports. Reproducibility is separate from empirical/hardware validation; keep original observations read-only.
+21. **Recorded design replay (built, partial phase 9/16):** explicit independent recomputation of four source-pinned branches at every recorded time, exact full-sample/endpoint comparisons, native worker progress/cancellation and protected mismatch reports. Reproducibility is separate from empirical/hardware validation; keep original observations read-only.
+
+22. **Recorded graph navigation (next, partial phase 16):** explicit time-window zoom/pan, truthful linear/log display support, actual point cursors and separately retained display layouts without altering numerical observations/exports. Apply to ordinary and paired habitat recordings; broader research graphs and accessibility remain incomplete.

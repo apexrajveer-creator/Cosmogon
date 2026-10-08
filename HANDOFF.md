@@ -62,6 +62,8 @@ The connected [paired habitat experiments](docs/PAIRED_HABITAT_EXPERIMENTS.md) b
 
 The connected [paired trajectories](docs/PAIRED_TRAJECTORIES.md) build adds selectable actual stored-time tables, signed discrete effect curves, four retained recordings, explicit support gaps and protected complete JSON/40-column CSV analyses. Loaded design identity stays separate from unopened folder text. Checks: 328 passed plus one existing ignored, 46 distinct cases, thirteen inspected final packaged layouts and a 48-second normal run; [verification](docs/PAIRED_TRAJECTORIES_VALIDATION.md). Original final analyses, simulation laws, saves and the golden remain unchanged. Explicit independent replay verification follows; empirical calibration, physical greenhouse and the master directive remain incomplete.
 
+The connected [recorded design replay](docs/HABITAT_REPLAY.md) build independently reconstructs four retained branches at every stored time, compares complete observations/endpoints/source versions, and exposes worker progress/cancellation with protected mismatch reports. Checks: 333 passed plus one existing ignored, 34 distinct cases, twelve inspected packaged layouts and a 48-second normal run; [verification](docs/HABITAT_REPLAY_VALIDATION.md). Original recordings, analyses, simulation laws, saves and the golden remain unchanged. Recorded graph navigation follows; empirical calibration, physical greenhouse and the master directive remain incomplete.
+
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
   [GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases) with macOS, Windows and Linux builds.
@@ -105,6 +107,7 @@ Map of the 1.0 features (start here when changing one):
 | Performance recordings | — | `performance.rs`, `ui/performance.rs` |
 | Finite cabin moisture / condensate | `moisture.rs`, `habitat.rs` | `ui/habitat_humidity.rs`; actual recordings/WHY and CLI habitat exports |
 | Paired habitat experiments / contrasts | `habitat_sweep.rs`, `habitat_factorial.rs` | `ui/habitat_recordings.rs`; CLI sweep/inspect, native Paired results |
+| Saved paired-design replay verification | `habitat_replay.rs`, `habitat_factorial.rs` | `ui/habitat_replay.rs`; CLI `habitat-verify` |
 | Habitat WHY / diagnostics exports | `habitat_diagnostics.rs` | `ui/habitat_why.rs`, `ui/habitat_recordings.rs`; CLI `habitat-diagnose` |
 | Habitat equipment listening / WAV | completed `habitat.rs` budgets | `habitat_audio.rs`, `audio.rs`, `ui/alerts.rs` |
 | Sound modes/mixer | — | `audio.rs`, `ui/alerts.rs` (synthesised; no audio files) |

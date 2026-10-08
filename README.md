@@ -124,3 +124,5 @@ Controlled moisture [studies](docs/MOISTURE_STUDIES.md) compare six water-phase/
 Paired habitat [experiments](docs/PAIRED_HABITAT_EXPERIMENTS.md) compare all four combinations of two settings, show actual conditional/interaction results and reopen complete source-pinned designs.
 
 [Paired trajectory analysis](docs/PAIRED_TRAJECTORIES.md) shows recorded conditional/interaction effects over time and exports every supported observation with source identity.
+
+[Saved-design replay verification](docs/HABITAT_REPLAY.md) independently reconstructs every paired observation and reports exact differences while preserving the original data.

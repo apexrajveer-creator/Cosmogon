@@ -119,6 +119,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if a.cmd=="greenhouse" && !matches!(flag.as_str(),"--definition"|"--output"|"--initial"|"--habitat-id") {return Err(format!("{flag} is not a greenhouse planning option"));}
         if a.cmd=="greenhouse-definition" && flag!="--output" {return Err(format!("{flag} is not a greenhouse-definition option"));}
         if a.cmd=="habitat-diagnose" && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
+        if a.cmd=="habitat-verify" && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a habitat replay verification option"));}
         if a.cmd=="habitat-inspect" && !matches!(flag.as_str(),"--recording"|"--observation"|"--output") {return Err(format!("{flag} is not a habitat inspection option"));}
         if a.cmd=="habitat" && !matches!(flag.as_str(),"--definition"|"--habitat-id"|"--initial"|"--output"|"--samples"|"--interval-days"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat study option"));}
         if a.cmd=="habitat-definition" && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat-definition option"));}
@@ -195,6 +196,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         cosmogon_sim::habitat_recording::Metric::parse(a.measure.as_deref().unwrap_or("water"))?;
     }
     if a.cmd=="habitat-diagnose" && (a.initial.is_none() || a.habitat_id.is_none()) {return Err("habitat-diagnose requires --initial SAVE and explicit --habitat-id ID".into());}
+    if a.cmd=="habitat-verify" && a.recording.is_none() {return Err("habitat-verify requires --recording COMPLETE_PAIRED_FOLDER".into());}
     if a.cmd=="habitat-inspect" && a.recording.is_none() {return Err("habitat-inspect requires --recording STUDY_FOLDER".into());}
     if a.cmd=="habitat" {
         if a.definition.is_none() && a.initial.is_none() {return Err("habitat requires --definition FILE or --initial saved world".into());}
@@ -235,6 +237,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
 fn help() {
     eprintln!("cosmogon-cli habitat-sweep --initial SAVE --output NEW_DIR --parameter firm_power_w --from 0 --to 4000 --runs 3 [--samples 25 --interval-days 0.041666666666666664]\n  or --definition SWEEP_PLAN; optional --habitat-id ID\ncosmogon-cli habitat-compare --recording A --reference B [--measure water --alignment elapsed|world --output NEW_DIR]");
     eprintln!("cosmogon-cli habitat-diagnose --initial SAVE --habitat-id ID [--output NEW_DIR]   # explain completed power/water/heat");
+    eprintln!("cosmogon-cli habitat-verify --recording COMPLETE_PAIRED_FOLDER [--output NEW_REPORT_DIR]   # recompute every actual row and endpoint");
     eprintln!("cosmogon-cli habitat-inspect --recording STUDY_FOLDER [--observation INDEX --output NEW_TRAJECTORY_DIR]   # validate and inspect recorded habitat observations");
     println!(
         r#"Cosmogon headless tools
@@ -328,6 +331,9 @@ fn main() {
         "greenhouse-definition" => {if let Err(e)=greenhouse_definition(&a) {eprintln!("Greenhouse definition failed: {e}");std::process::exit(1);}},
         "greenhouse" => {if let Err(e)=greenhouse(&a) {eprintln!("Greenhouse planning failed: {e}");std::process::exit(1);}},
         "habitat-diagnose" => {if let Err(e)=habitat_diagnose(&a) {eprintln!("Habitat diagnosis failed: {e}");std::process::exit(1);}},
+        "habitat-verify" => {
+            match habitat_verify(&a) {Ok(v)=>{println!("{}",serde_json::to_string_pretty(&v).unwrap());if v["verified"]!=true {eprintln!("Replay differs from saved observations; results are preserved.");std::process::exit(1);}},Err(e)=>{eprintln!("Habitat replay did not complete: {e}");std::process::exit(1);}}
+        },
         "habitat-inspect" => {
             let inspected=habitat_inspect(&a);
             match inspected {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).unwrap()),Err(e)=>{eprintln!("Habitat inspection failed: {e}");std::process::exit(1);}}
@@ -717,6 +723,12 @@ fn habitat_sweep(a:&Args)->Result<(),String> {
     let report=cosmogon_sim::habitat_sweep::execute(&base,id,&plan,std::path::Path::new(a.output.as_deref().expect("validated output")))?;
     println!("{}",serde_json::to_string_pretty(&report).map_err(|e|e.to_string())?);Ok(())
 }
+fn habitat_verify(a:&Args)->Result<serde_json::Value,String> {
+    let report=cosmogon_sim::habitat_replay::verify(std::path::Path::new(a.recording.as_deref().expect("validated replay folder")))?;
+    if let Some(output)=&a.output {cosmogon_sim::habitat_replay::export(&report,std::path::Path::new(output))?;}
+    Ok(report)
+}
+
 fn habitat_inspect(a:&Args)->Result<serde_json::Value,String> {
     let path=std::path::Path::new(a.recording.as_deref().expect("validated recording"));
     if path.join("plan.json").exists() {
@@ -823,6 +835,11 @@ mod argument_tests {
         let a=args(&["surface","--site","curiosity"]).unwrap();
         assert_eq!(a.target,"Mars");assert_eq!(a.latitude,-4.59);assert_eq!(a.longitude,137.44);
         for values in [vec!["surface","--site","unknown"],vec!["surface","--site","curiosity","--target","Earth"],vec!["surface","--site","curiosity","--latitude","0"],vec!["run","--site","curiosity"]] {assert!(args(&values).is_err());}
+    }
+    #[test]
+    fn replay_verification_requires_a_folder_and_refuses_unrelated_options() {
+        for v in [vec!["habitat-verify"],vec!["habitat-verify","--recording","x","--observation","0"],vec!["habitat-verify","--recording","x","--samples","3"],vec!["habitat-verify","--recording","x","--measure","water"],vec!["habitat-verify","--recording","x","--scenario","sol"]] {assert!(args(&v).is_err());}
+        assert_eq!(args(&["habitat-verify","--recording","design","--output","new"]).unwrap().recording.as_deref(),Some("design"));
     }
     #[test]
     fn paired_inspection_options_are_bounded_and_do_not_apply_to_other_commands() {

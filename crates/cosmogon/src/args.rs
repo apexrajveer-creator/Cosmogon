@@ -44,6 +44,7 @@ pub struct Args {
     pub habitat_study_id: Option<u64>,
     pub habitat_metric: Option<String>,
     pub habitat_effect: Option<String>,
+    pub habitat_verify: bool,
     pub habitat_sample: Option<usize>,
     pub greenhouse_definition: Option<String>,
     pub surface_altitude: f64,
@@ -151,6 +152,7 @@ impl Args {
                 "--habitat-recording" => a.habitat_recording=Some(val()),
                 "--habitat-metric" => a.habitat_metric=Some(val()),
                 "--habitat-effect" => a.habitat_effect=Some(val()),
+                "--habitat-verify" => a.habitat_verify=true,
                 "--habitat-sample" => {let v=val();a.habitat_sample=Some(v.parse().unwrap_or(usize::MAX));},
                 "--greenhouse-definition" => a.greenhouse_definition=Some(val()),
                 "--habitat-definition" => a.habitat_definition=Some(val()),
@@ -214,7 +216,7 @@ impl Args {
             if self.capture.is_some() || self.profile.is_some() || self.habitat_sweep.is_some() || self.habitat_definition.is_some() || self.research_export.is_some() || self.new.is_some() || self.advance_years!=0.0 {return Err("Sound export reads one saved interval; do not combine with a renderer or simulation launch".into());}
             if self.habitat_recording.is_some() || self.greenhouse_definition.is_some() || self.research_recording.is_some() || self.research_workspace.is_some() || self.research_plan.is_some() || self.research_batch.is_some() || self.terrain_section.is_some() || self.mars_terrain.is_some() || self.surface_site.is_some() || self.panel.is_some() || self.menu.is_some() || self.continue_latest || self.what_if.is_some() || self.tour.is_some() || self.nbody.is_some() || self.focus.is_some() || self.latlon.is_some() {return Err("Sound export cannot ignore other workspace, camera or study requests".into());}
         }
-        if (self.habitat_metric.is_some() || self.habitat_sample.is_some() || self.habitat_effect.is_some()) && self.habitat_recording.is_none() && self.habitat_sweep.is_none() {return Err("--habitat-metric/--habitat-sample/--habitat-effect require --habitat-recording or --habitat-sweep".into());}
+        if (self.habitat_metric.is_some() || self.habitat_sample.is_some() || self.habitat_effect.is_some() || self.habitat_verify) && self.habitat_recording.is_none() && self.habitat_sweep.is_none() {return Err("--habitat-metric/--habitat-sample/--habitat-effect/--habitat-verify require --habitat-recording or --habitat-sweep".into());}
         if self.habitat_compare.is_some() && self.habitat_recording.is_none() {return Err("--habitat-compare requires --habitat-recording A".into());}
         if self.habitat_alignment.is_some() && self.habitat_compare.is_none() && self.habitat_sweep.is_none() {return Err("--habitat-alignment requires a comparison or sweep".into());}
         if let Some(a)=&self.habitat_alignment {cosmogon_sim::habitat_comparison::Alignment::parse(a)?;}
@@ -284,6 +286,11 @@ mod tests {
         let b = Args::parse_from(["--profile", "out.json", "--load", "saved.cosmo", "--profile-frames", "999999"].into_iter().map(String::from));
         assert!(b.new.is_none());
         assert_eq!(b.profile_frames, 3600);
+    }
+    #[test]
+    fn replay_launch_requires_an_explicit_recorded_design_or_sweep() {
+        assert!(Args::parse_from(["--habitat-verify"].into_iter().map(String::from)).validate_surface().is_err());
+        let a=Args::parse_from(["--habitat-recording","root","--habitat-verify"].into_iter().map(String::from));assert!(a.validate_surface().is_ok());assert!(a.habitat_verify);
     }
     #[test]
     fn paired_effect_options_are_explicit_and_validated() {
