@@ -9,6 +9,7 @@
 
 mod args;
 mod audio;
+mod habitat_audio;
 mod camera;
 mod capture;
 mod interact;
@@ -33,10 +34,20 @@ use bevy_egui::EguiPlugin;
 fn main() -> bevy::app::AppExit {
     let started = std::time::Instant::now();
     let args = args::Args::parse();
+    if let Some(output)=&args.habitat_audio_export {
+        let result=cosmogon_sim::save::read_file(std::path::Path::new(args.load.as_deref().expect("validated audio load")))
+            .map_err(|e|e.to_string()).and_then(|u|habitat_audio::export(&u,args.habitat_audio.expect("validated audio id"),std::path::Path::new(output)));
+        return match result {Ok(())=>{println!("Saved habitat sound preview to {output}");AppExit::Success},Err(e)=>{eprintln!("Cannot export habitat sound: {e}");AppExit::error()}};
+    }
     // Reject invalid automated inputs before starting the renderer. Early GPU teardown
     // can otherwise wait for a render task that still needs the main-thread executor.
     // Interactive opening remains asynchronous and reports errors in the workspace.
     if args.quit_after_capture {
+        if let Some(id)=args.habitat_audio {
+            let result=cosmogon_sim::save::read_file(std::path::Path::new(args.load.as_deref().expect("validated audio load"))).map_err(|e|e.to_string())
+                .and_then(|u|habitat_audio::source(&u,id).map(|_|()));
+            if let Err(e)=result {eprintln!("Cannot preview habitat sound: {e}");return AppExit::error();}
+        }
         if let Some(path)=&args.habitat_recording {
             match cosmogon_sim::habitat_recording::Recording::read(std::path::Path::new(path)) {
                 Ok(r) if args.habitat_sample.is_none_or(|n|n<r.rows.len())=>{},
@@ -81,7 +92,7 @@ fn main() -> bevy::app::AppExit {
     // The pipelined renderer's shutdown waits without servicing its main-thread
     // executor. Imported-table automation may finish during GPU initialization;
     // render those short jobs on the main thread so teardown cannot deadlock.
-    let plugins = if (args.habitat_sweep.is_some() || args.habitat_recording.is_some() || args.greenhouse_definition.is_some() || args.habitat_definition.is_some() || args.research_recording.is_some() || args.surface_site.is_some() || args.mars_terrain.is_some() || args.terrain_section.is_some()) && args.quit_after_capture {
+    let plugins = if (args.habitat_audio.is_some() || args.habitat_sweep.is_some() || args.habitat_recording.is_some() || args.greenhouse_definition.is_some() || args.habitat_definition.is_some() || args.research_recording.is_some() || args.surface_site.is_some() || args.mars_terrain.is_some() || args.terrain_section.is_some()) && args.quit_after_capture {
         plugins.disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>()
     } else {
         plugins

@@ -24,22 +24,23 @@ impl SoundMode {
 }
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
-pub struct SoundMix { pub mode: SoundMode, pub music: f32, pub effects: f32, pub alerts: f32 }
-impl Default for SoundMix { fn default() -> Self { Self { mode: SoundMode::Cinematic, music: 0.5, effects: 1.0, alerts: 0.5 } } }
+pub struct SoundMix { pub mode: SoundMode, pub music: f32, pub effects: f32, pub alerts: f32, pub environment: f32 }
+impl Default for SoundMix { fn default() -> Self { Self { mode: SoundMode::Cinematic, music: 0.5, effects: 1.0, alerts: 0.5, environment: 0.5 } } }
 impl SoundMix {
-    pub fn sanitize(&mut self) { for v in [&mut self.music, &mut self.effects, &mut self.alerts] { *v = if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 }; } }
-    fn gain(&self, master: f32, channel: SoundChannel, quiet_alerts: bool) -> f32 {
+    pub fn sanitize(&mut self) { for v in [&mut self.music, &mut self.effects, &mut self.alerts, &mut self.environment] { *v = if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 }; } }
+    pub(crate) fn gain(&self, master: f32, channel: SoundChannel, quiet_alerts: bool) -> f32 {
         let master = if master.is_finite() { master.clamp(0.0, 1.0) } else { 0.0 };
         let gain = match channel {
             SoundChannel::Music => self.music,
             SoundChannel::Cinematic => self.effects * match self.mode { SoundMode::Realistic => 0.0, SoundMode::Cinematic => 1.0, SoundMode::Hybrid => 0.35 },
             SoundChannel::Alert => if quiet_alerts { 0.0 } else { self.alerts },
+            SoundChannel::Environment => self.environment,
         };
         master * if gain.is_finite() { gain.clamp(0.0, 1.0) } else { 0.0 }
     }
 }
 #[derive(Component, Clone, Copy, Debug)]
-enum SoundChannel { Music, Cinematic, Alert }
+pub(crate) enum SoundChannel { Music, Cinematic, Alert, Environment }
 fn quiet_alerts(settings: &UserSettings, photo: bool) -> bool { settings.notifications.do_not_disturb || settings.notifications.mute_sounds || photo }
 
 const SR: u32 = 44_100;
@@ -191,6 +192,7 @@ pub struct SoundPlugin;
 impl Plugin for SoundPlugin {
     fn build(&self, app: &mut App) {
         app.add_audio_source::<Synth>()
+            .add_plugins(crate::habitat_audio::HabitatAudioPlugin)
             .add_message::<SoundCue>()
             .init_resource::<SoundWatch>()
             .add_systems(OnEnter(AppState::Observing), start_ambient)
@@ -217,7 +219,10 @@ fn stop_ambient(mut commands: Commands, q: Query<Entity, With<SoundChannel>>) {
 
 fn mix_volume(settings: Res<UserSettings>, ui: Res<crate::ui::UiState>, mut q: Query<(&mut AudioSink, &SoundChannel)>) {
     // Existing one-shots must respond immediately to mute/mode changes too.
-    for (mut sink, &channel) in &mut q { sink.set_volume(Volume::Linear(settings.audio.gain(settings.sound_volume, channel, quiet_alerts(&settings, ui.photo_mode)))); }
+    for (mut sink, &channel) in &mut q {
+        let gain=if matches!(channel,SoundChannel::Environment) && ui.photo_mode {0.0} else {settings.audio.gain(settings.sound_volume, channel, quiet_alerts(&settings, ui.photo_mode))};
+        sink.set_volume(Volume::Linear(gain));
+    }
 }
 
 /// Supernovae are cinematic presentation cues; milestone alerts are routed by notifications.
@@ -267,22 +272,26 @@ mod tests {
         assert_eq!(mix.gain(0.0, SoundChannel::Cinematic, false), 0.0);
         mix.mode = SoundMode::Realistic;
         assert_eq!(mix.gain(1.0, SoundChannel::Cinematic, false), 0.0);
+        assert_eq!(mix.gain(1.0, SoundChannel::Environment, true), 0.5);
+        assert_eq!(mix.gain(0.0, SoundChannel::Environment, false), 0.0);
         assert_eq!(mix.gain(1.0, SoundChannel::Alert, false), 0.5);
         mix.mode = SoundMode::Hybrid;
         assert_eq!(mix.gain(1.0, SoundChannel::Cinematic, false), 0.35);
-        mix.effects = f32::NAN; mix.music = f32::INFINITY; mix.alerts = -10.0; mix.sanitize();
-        for c in [SoundChannel::Music, SoundChannel::Cinematic, SoundChannel::Alert] { assert_eq!(mix.gain(1.0, c, false), 0.0); }
+        mix.effects = f32::NAN; mix.music = f32::INFINITY; mix.alerts = -10.0; mix.environment=f32::NAN; mix.sanitize();
+        for c in [SoundChannel::Music, SoundChannel::Cinematic, SoundChannel::Alert, SoundChannel::Environment] { assert_eq!(mix.gain(1.0, c, false), 0.0); }
     }
     #[test]
     fn old_preferences_preserve_the_mix_and_new_preferences_round_trip() {
         let mut settings: UserSettings = toml::from_str("sound_volume = 0.4\n").unwrap();
         assert_eq!(settings.audio.mode, SoundMode::Cinematic);
+        assert_eq!(settings.audio.environment,0.5);
         assert_eq!(settings.audio.gain(settings.sound_volume, SoundChannel::Music, false), 0.2);
         settings.audio.mode = SoundMode::Realistic; settings.audio.music = 0.0;
         settings.notifications.do_not_disturb = true;
         settings.notifications.rules[4].pause = true;
         let restored: UserSettings = toml::from_str(&toml::to_string(&settings).unwrap()).unwrap();
         assert_eq!(restored.audio.mode, SoundMode::Realistic); assert_eq!(restored.audio.music, 0.0);
+        assert_eq!(restored.audio.environment,0.5);
         assert!(restored.notifications.do_not_disturb); assert!(restored.notifications.rules[4].pause);
     }
 

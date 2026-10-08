@@ -259,7 +259,7 @@ fn init_ui_state(mut ui: ResMut<UiState>, args: Res<crate::args::Args>) {
         Some("habitat" | "habitat-controls" | "habitat-build" | "habitat-model" | "habitat-oxygen" | "habitat-water" | "habitat-recordings" | "habitat-experiments" | "greenhouse") => ui.habitat_open = true,
         Some("section" | "section-map") => ui.surface_study_open = true,
         Some("alerts") => ui.alerts_open = true,
-        Some("sound") => { ui.alerts_open = true; ui.alerts_tab = 1; }
+        Some("sound"|"habitat-sound"|"habitat-sound-export") => { ui.alerts_open = true; ui.alerts_tab = 1; }
         Some("routing") => { ui.alerts_open = true; ui.alerts_tab = 2; }
         Some("performance") => ui.performance_open = true,
         Some("camera") => ui.camera_open = true,

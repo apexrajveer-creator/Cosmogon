@@ -34,6 +34,8 @@ pub struct Args {
     pub mars_terrain: Option<String>,
     pub terrain_section: Option<String>,
     pub habitat_definition: Option<String>,
+    pub habitat_audio: Option<u64>,
+    pub habitat_audio_export: Option<String>,
     pub habitat_recording: Option<String>,
     pub habitat_compare: Option<String>,
     pub habitat_alignment: Option<String>,
@@ -131,6 +133,8 @@ impl Args {
                 "--capture-metadata" => a.capture_metadata = true,
                 "--free-camera" => a.free_camera = true,
                 "--habitat-compare" => a.habitat_compare=Some(val()),
+                "--habitat-audio" => {let v=val();a.habitat_audio=Some(v.parse().unwrap_or(u64::MAX));},
+                "--habitat-audio-export" => a.habitat_audio_export=Some(val()),
                 "--habitat-alignment" => a.habitat_alignment=Some(val()),
                 "--habitat-sweep" => a.habitat_sweep=Some(val()),
                 "--habitat-study-output" => a.habitat_study_output=Some(val()),
@@ -184,6 +188,13 @@ impl Args {
     }
 
     fn validate_surface(&self) -> Result<(), String> {
+        if self.habitat_audio==Some(u64::MAX) {return Err("Invalid --habitat-audio ID".into());}
+        if self.habitat_audio.is_some() && self.load.is_none() {return Err("--habitat-audio requires --load SAVE".into());}
+        if self.habitat_audio_export.is_some() {
+            if self.habitat_audio.is_none() {return Err("--habitat-audio-export requires --habitat-audio ID and --load SAVE".into());}
+            if self.capture.is_some() || self.profile.is_some() || self.habitat_sweep.is_some() || self.habitat_definition.is_some() || self.research_export.is_some() || self.new.is_some() || self.advance_years!=0.0 {return Err("Sound export reads one saved interval; do not combine with a renderer or simulation launch".into());}
+            if self.habitat_recording.is_some() || self.greenhouse_definition.is_some() || self.research_recording.is_some() || self.research_workspace.is_some() || self.research_plan.is_some() || self.research_batch.is_some() || self.terrain_section.is_some() || self.mars_terrain.is_some() || self.surface_site.is_some() || self.panel.is_some() || self.menu.is_some() || self.continue_latest || self.what_if.is_some() || self.tour.is_some() || self.nbody.is_some() || self.focus.is_some() || self.latlon.is_some() {return Err("Sound export cannot ignore other workspace, camera or study requests".into());}
+        }
         if (self.habitat_metric.is_some() || self.habitat_sample.is_some()) && self.habitat_recording.is_none() && self.habitat_sweep.is_none() {return Err("--habitat-metric/--habitat-sample require --habitat-recording or --habitat-sweep".into());}
         if self.habitat_compare.is_some() && self.habitat_recording.is_none() {return Err("--habitat-compare requires --habitat-recording A".into());}
         if self.habitat_alignment.is_some() && self.habitat_compare.is_none() && self.habitat_sweep.is_none() {return Err("--habitat-alignment requires a comparison or sweep".into());}
@@ -210,6 +221,13 @@ impl Args {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sound_preview_requires_saved_live_context_and_export_is_unambiguous() {
+        for v in [vec!["--habitat-audio","bad"],vec!["--habitat-audio","0"],vec!["--habitat-audio-export","o"],vec!["--load","s","--habitat-audio","0","--habitat-audio-export","o","--capture","x"],vec!["--load","s","--habitat-audio","0","--habitat-audio-export","o","--advance-years","1"]] {
+            assert!(Args::parse_from(v.into_iter().map(String::from)).validate_surface().is_err());
+        }
+        assert!(Args::parse_from(["--load","s","--habitat-audio","0","--habitat-audio-export","o"].into_iter().map(String::from)).validate_surface().is_ok());
+    }
     #[test]
     fn surface_requests_reject_misleading_or_invalid_combinations() {
         for values in [vec!["--mars-terrain","32"],vec!["--mars-terrain",""],vec!["--surface-site","missing"],vec!["--surface-site","curiosity","--surface-altitude","NaN"],vec!["--surface-site","curiosity","--surface-altitude","59"],vec!["--surface-site","curiosity","--focus","Earth"],vec!["--surface-site","curiosity","--latlon","0,0"]] {

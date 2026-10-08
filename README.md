@@ -62,7 +62,7 @@ read-only; clone it to experiment. Time runs from real time to 100 million years
   **pulsars**; **comets** with tails.
 * **Galaxy scale**: the Milky Way from outside, the Local Group, and thousands of galaxies and quasars.
 * **Civilizations beyond their world**: Dyson swarms, terraforming, generation ships founding new branches.
-* **Guided tours**, a **timeline you can rewind**, **photo mode** (P) and a synthesised **soundtrack**.
+* **Guided tours**, a **timeline you can rewind**, **photo mode** (P) and a synthesised **soundtrack**. Optional [habitat equipment listening](docs/HABITAT_AUDIO.md) follows live completed power budgets with explicitly designed textures and WAV/source exports.
 
 ## Worlds and civilizations you can see
 * Every world has its own look, chosen from physics or spacecraft imagery: Io's volcanoes, Europa's cracked ice,

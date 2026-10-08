@@ -125,3 +125,5 @@ validated adapters to existing Edit commands and bounded observer recordings. It
 dependency and is shared with the CLI. Native research state/UI owns selection snapshots, real-time
 recording cadence and export feedback; it edits only through Sim::edit. Registries/recordings are
 not serialized into Universe. See [RESEARCH](docs/RESEARCH.md) for limits and the bundle contract.
+
+The application-only `habitat_audio.rs` reads completed habitat interval configurations and power budgets into an explicit transient interior listener. A native streaming decoder uses bounded atomic presentation levels; ordinary mixer/capture/photo controls remain separate from simulation state. The same decoder exports protected fixed-interval WAV/source artifacts on a worker. No engine audio dependency or golden state change. See [HABITAT_AUDIO](docs/HABITAT_AUDIO.md).

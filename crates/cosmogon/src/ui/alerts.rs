@@ -19,16 +19,17 @@ pub fn sound_settings(ui: &mut egui::Ui, settings: &mut UserSettings) {
     ui.add(egui::Slider::new(&mut settings.audio.music, 0.0..=1.0).text("Music / soundtrack"));
     ui.add_enabled(settings.audio.mode != SoundMode::Realistic, egui::Slider::new(&mut settings.audio.effects, 0.0..=1.0).text("Cinematic effects"));
     ui.add(egui::Slider::new(&mut settings.audio.alerts, 0.0..=1.0).text("Alert volume"));
+    ui.add(egui::Slider::new(&mut settings.audio.environment, 0.0..=1.0).text("Habitat equipment"));
     ui.horizontal(|ui| {
         if ui.button("Realistic preset").clicked() { settings.audio = SoundMix { mode: SoundMode::Realistic, music: 0.0, ..Default::default() }; }
         if ui.button("Cinematic preset").clicked() { settings.audio = SoundMix::default(); }
-        if ui.button("Quiet preset").clicked() { settings.audio = SoundMix { mode: SoundMode::Hybrid, music: 0.15, effects: 0.1, alerts: 0.0 }; settings.notifications.mute_sounds = true; }
+        if ui.button("Quiet preset").clicked() { settings.audio = SoundMix { mode: SoundMode::Hybrid, music: 0.15, effects: 0.1, alerts: 0.0, environment: 0.0 }; settings.notifications.mute_sounds = true; }
     });
     ui.checkbox(&mut settings.notifications.mute_sounds, "Mute all alert sounds");
     ui.checkbox(&mut settings.notifications.critical_sound_only, "Sound for critical alerts only");
     ui.checkbox(&mut settings.notifications.do_not_disturb, "Do Not Disturb");
     ui.label(egui::RichText::new("Do Not Disturb keeps events in the inbox and Chronicle, suppressing popups, alert sounds and configured pauses. Milestone slowdown is a separate preference.").small().color(MUTED));
-    ui.label(egui::RichText::new("This mix controls the existing score and effects. Wind, interiors, weather and physical acoustic propagation are not modeled yet.").small().color(MUTED));
+    ui.label(egui::RichText::new("Equipment preview uses live habitat budgets and designed sound textures. Wind, weather, cabin acoustics and sound pressure are not modeled.").small().color(MUTED));
 }
 
 fn routing(ui: &mut egui::Ui, settings: &mut UserSettings) {
@@ -53,17 +54,29 @@ fn routing(ui: &mut egui::Ui, settings: &mut UserSettings) {
     ui.label(egui::RichText::new("Turning every route off does not erase Chronicle events. Routing takes effect immediately; Save preferences keeps it for future launches.").small().color(MUTED));
 }
 
-pub fn panel(mut contexts: EguiContexts, mut state: ResMut<UiState>, mut notices: ResMut<Notifications>, mut settings: ResMut<UserSettings>, mut sim: ResMut<Sim>, mut rig: ResMut<CameraRig>, time: Res<Time>) -> Result {
+#[allow(clippy::too_many_arguments)]
+pub fn panel(mut contexts: EguiContexts, mut state: ResMut<UiState>, mut notices: ResMut<Notifications>, mut settings: ResMut<UserSettings>, mut sim: ResMut<Sim>, mut rig: ResMut<CameraRig>, time: Res<Time>, mut environment: ResMut<crate::habitat_audio::Listener>, args: Res<crate::args::Args>) -> Result {
     if !state.alerts_open || state.hidden || state.photo_mode { return Ok(()); }
     let ctx = contexts.ctx_mut()?;
     let mut open = state.alerts_open;
-    egui::Window::new("Sound & Alerts").open(&mut open).default_pos([325.0, 75.0]).default_width(600.0).show(ctx, |ui| {
+    let height=(ctx.available_rect().height()-150.0).max(240.0);
+    egui::Window::new("Sound & Alerts").open(&mut open).default_pos([325.0, 75.0]).default_width(600.0).max_height(height).show(ctx, |ui| {
         ui.horizontal(|ui| { ui.selectable_value(&mut state.alerts_tab, 0, "Inbox"); ui.selectable_value(&mut state.alerts_tab, 1, "Sound"); ui.selectable_value(&mut state.alerts_tab, 2, "Routing"); });
         ui.separator();
         match state.alerts_tab {
             1 => {
+                ui.horizontal(|ui| {ui.selectable_value(&mut environment.equipment_view,false,"Mix & alerts");ui.selectable_value(&mut environment.equipment_view,true,"Habitat equipment");});
+                egui::ScrollArea::vertical().max_height((height-125.0).max(160.0)).show(ui,|ui| {
                 ui.add(egui::Slider::new(&mut settings.sound_volume, 0.0..=1.0).text("Master volume"));
+                if environment.equipment_view {
+                    ui.add(egui::Slider::new(&mut settings.audio.environment, 0.0..=1.0).text("Habitat equipment"));
+                    ui.label(egui::RichText::new(format!("{} mode · interior equipment is separate from external effects and alerts",settings.audio.mode.label())).small().color(MUTED));
+                    ui.separator();
+                    crate::habitat_audio::panel(ui,&mut environment,&sim,&args);
+                } else {
                 sound_settings(ui, &mut settings);
+                }
+                });
             }
             2 => routing(ui, &mut settings),
             _ => {

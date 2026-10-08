@@ -197,6 +197,7 @@ pub fn panel(
     mut form: ResMut<HabitatUi>,
     mut sim: ResMut<Sim>,
     time: Res<Time>,
+    mut environment: ResMut<crate::habitat_audio::Listener>,
 ) -> Result {
     let selected=form.selected;
     form.recording.launch_if_ready(&sim.universe,selected,sim.is_reference());
@@ -221,6 +222,7 @@ pub fn panel(
     let mut edit = None;
     let mut export = None;
     let mut clock = None;
+    let mut listen = None;
     let max_height = (ctx.available_rect().height() - 160.0).max(240.0);
     // The planner needs room for its axes and selected-day values on first opening.
     // Keep the window resizable; the scroll area handles smaller screens.
@@ -255,7 +257,8 @@ pub fn panel(
               0=>{
                 ui.label(format!("Fixed minute model · last interval {:.0} s · state {:.1} s behind world clock",b.seconds,sim.universe.time-h.last_time));
                 ui.horizontal(|ui| {if ui.button("Run at 1 min/s").clicked() {clock=Some(true);}
-                    if ui.button("Pause clock").clicked() {clock=Some(false);}});
+                    if ui.button("Pause clock").clicked() {clock=Some(false);}
+                    if ui.button("Listen to equipment").clicked() {listen=Some(h.id);}});
                 if b.seconds==0.0 {ui.label("Waiting for the first completed minute. Change clock speed to see longer engineering timescales.");}
                 if !b.temperature_domain_supported && b.environment_available && b.seconds>0.0 {ui.colored_label(DANGER,"Temperature outside the model’s 100–500 K computation domain; rebuild with viable inputs. Suspended budgets are not predictions.");}
                 if !b.environment_available {ui.colored_label(DANGER,"Exterior environment unavailable. Budgets are suspended; no local weather or zero flux is fabricated.");}
@@ -298,6 +301,7 @@ pub fn panel(
       });
     });
     state.habitat_open = open;
+    if let Some(id)=listen {environment.choose(id,sim.generation);state.habitat_open=false;state.alerts_open=true;state.alerts_tab=1;}
     if let Some(run) = clock {
         if run {
             sim.speed = 1;

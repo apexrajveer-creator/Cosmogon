@@ -69,6 +69,8 @@ remains separate. Automated `--capture` ignores keyboard input; exercise movemen
 
 ## Sound and notification verification
 
+Saved habitat previews use `--load SAVE --habitat-audio ID --panel sound`; capture metadata retains the source interval while playback stays disabled. `--load SAVE --habitat-audio ID --habitat-audio-export NEW_DIR` exports a WAV and exact source report without starting the GPU. See [HABITAT_AUDIO](docs/HABITAT_AUDIO.md) for context and presentation limits.
+
 `--panel alerts|sound|routing` opens the respective Sound & Alerts tab for native captures.
 `--sound-mode realistic|cinematic|hybrid` selects a launch mode; `--quiet` mutes master sound and
 suppresses interruptions for the launch. See [AUDIO_SYSTEM](docs/AUDIO_SYSTEM.md) and
