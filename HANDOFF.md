@@ -38,6 +38,8 @@ The connected [greenhouse planner](docs/GREENHOUSE_PLANNING.md) exposes NASA MEC
 
 The active [finite electrolysis](docs/HABITAT_ELECTROLYSIS.md) build connects bounded water/power consumption to stored O₂ and isolated H₂, shared heat accounting, optional source/version pins, native Oxygen controls and actual CSV/JSON trajectories. [Research memo](docs/ELECTROLYSIS_RESEARCH.md). Current checks: 253 passed plus one existing ignored, 29 CLI/native cases, eight inspected captures and a 48-second packaged run; see [HABITAT_ELECTROLYSIS_VALIDATION](docs/HABITAT_ELECTROLYSIS_VALIDATION.md). Phase 9 and physical greenhouse coupling remain incomplete.
 
+The connected [CO₂ reduction](docs/HABITAT_SABATIER.md) build adds optional finite captured-gas/hydrogen consumption, methane/raw-liquid storage, downstream powered recycling and reference heat release. See [SABATIER_RESEARCH](docs/SABATIER_RESEARCH.md). Current checks: 258 passed plus one existing ignored, 40 CLI/native cases, eleven accepted inspected layouts and a 48-second packaged run; [HABITAT_SABATIER_VALIDATION](docs/HABITAT_SABATIER_VALIDATION.md). Phase 9 remains partial.
+
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
   [GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases) with macOS, Windows and Linux builds.

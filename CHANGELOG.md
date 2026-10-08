@@ -2,6 +2,8 @@
 
 ## Unreleased — native exploration, research and habitat engineering
 
+- Connect optional finite Sabatier CO₂ reduction, isolated methane/raw water, later powered recycling and reference reaction heat to habitat controls, saves and actual source-pinned exports. Ratings are assumptions; no closed-loop or hardware-validation claim. Existing optional electrolysis and golden world are unchanged.
+
 - Add optional finite habitat water electrolysis with separated O₂/H₂ products, crew/power priority, reaction-enthalpy and waste-heat accounting, source/version pins, native controls and actual research exports. Legacy defaults and golden `0xf2c4140a45ae509b` remain unchanged. Equipment is assumed and uncalibrated; physical greenhouse coupling remains incomplete.
 
 - Add source-pinned controlled lettuce crop planning from NASA MEC equations and corrected low-light regimes. Shared native/headless calculations retain source snapshot, analytic cumulative growth/gas exchange, explicit assumed lighting demand, integer-age graphs, protected numeric/comparison exports and exact optional habitat context. Unlimited controlled inputs are exposed; no installation, inventory credit or closed-loop greenhouse claim. No Universe/golden change.

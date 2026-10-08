@@ -122,6 +122,7 @@ pub fn data_versions(u: &Universe) -> std::collections::BTreeMap<String, String>
     }
     if !u.habitats.is_empty() || u.next_habitat_id>0 {m.insert("cosmogon-habitat-budgets".into(),crate::habitat::MODEL.into());}
     if u.habitats.iter().any(crate::habitat::Habitat::uses_electrolysis) {m.insert("cosmogon-water-electrolysis".into(),crate::electrolysis::MODEL.into());}
+    if u.habitats.iter().any(crate::habitat::Habitat::uses_sabatier) {m.insert("cosmogon-sabatier".into(),crate::sabatier::MODEL.into());}
     m
 }
 
@@ -150,6 +151,10 @@ pub fn from_json(s: &str) -> Result<Universe, SaveError> {
     if (expected.contains_key("cosmogon-water-electrolysis") || terrain_versions.get("cosmogon-water-electrolysis").is_some())
         && terrain_versions.get("cosmogon-water-electrolysis").and_then(Value::as_str)!=Some(crate::electrolysis::MODEL) {
         return Err(SaveError::Model("Missing or mismatched electrolysis model version".into()));
+    }
+    if (expected.contains_key("cosmogon-sabatier") || terrain_versions.get("cosmogon-sabatier").is_some())
+        && terrain_versions.get("cosmogon-sabatier").and_then(Value::as_str)!=Some(crate::sabatier::MODEL) {
+        return Err(SaveError::Model("Missing or mismatched Sabatier model version".into()));
     }
     if !u.habitats.is_empty() {
         if terrain_versions.get("cosmogon-habitat-budgets").and_then(Value::as_str)!=Some(crate::habitat::MODEL) {return Err(SaveError::Model("Missing or mismatched model version".into()));}

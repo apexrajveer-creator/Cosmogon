@@ -25,7 +25,7 @@ pub fn controls(ui: &mut egui::Ui, equipment: &mut Option<electrolysis::Config>,
             if energy != original_energy { c.electricity_j_kg_oxygen = energy * 1.0e6; }
             super::habitat::number(ui, "Shared oxygen reserve capacity (kg)", &mut c.oxygen_capacity_kg, 0.0, 1.0e7);
             super::habitat::number(ui, "Isolated hydrogen product capacity (kg)", &mut c.hydrogen_capacity_kg, 0.0, 1.0e7);
-            ui.label("Illustrative ratings, not flight hardware. No automatic venting, compression, tank structure or Sabatier processing.");
+            ui.label("Illustrative ratings, not flight hardware. No automatic venting, compression, tank structure or implicit processing. Enable optional CO₂ reduction in Water recovery.");
         });
     }
 }
