@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased — finite cabin moisture
+- Add paired two-setting/two-level habitat designs, four atomic common-state branches, actual conditional/interaction contrasts and protected source-pinned results with shared native/CLI reopening. Preserve single-setting plans, simulation laws, saves and the golden.
+
 - Add six controlled moisture settings to shared native/CLI habitat experiments with exact common inventories, all-branch preflight and actual phase/water comparisons. Clarify completed moisture intervals/disable semantics and expose phase heat terms before WHY aggregates. No simulation law, save schema or golden change.
 
 

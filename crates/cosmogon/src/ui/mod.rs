@@ -17,7 +17,7 @@ mod habitat_oxygen;
 mod habitat_water;
 mod habitat_humidity;
 mod habitat_why;
-mod habitat_recordings;
+pub(crate) mod habitat_recordings;
 mod greenhouse;
 pub use habitat::HabitatUi;
 pub(crate) use surface_study::Study;

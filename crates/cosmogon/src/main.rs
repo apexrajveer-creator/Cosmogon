@@ -72,11 +72,7 @@ fn main() -> bevy::app::AppExit {
             if let Err(e)=result {eprintln!("Cannot preview habitat sound: {e}");return AppExit::error();}
         }
         if let Some(path)=&args.habitat_recording {
-            match cosmogon_sim::habitat_recording::Recording::read(std::path::Path::new(path)) {
-                Ok(r) if args.habitat_sample.is_none_or(|n|n<r.rows.len())=>{},
-                Ok(_)=>{eprintln!("Requested habitat observation is outside the recording");return bevy::app::AppExit::error();},
-                Err(e)=>{eprintln!("Cannot open habitat recording: {e}");return bevy::app::AppExit::error();},
-            }
+            if let Err(e)=ui::habitat_recordings::check_input(std::path::Path::new(path),args.habitat_sample) {eprintln!("Cannot open habitat recording: {e}");return bevy::app::AppExit::error();}
         }
         if let Some(path)=&args.habitat_compare {
             if let Err(e)=cosmogon_sim::habitat_recording::Recording::read(std::path::Path::new(path)) {eprintln!("Cannot open habitat comparison: {e}");return bevy::app::AppExit::error();}

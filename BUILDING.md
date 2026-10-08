@@ -189,3 +189,5 @@ Crop planning `--panel greenhouse-water|greenhouse-daily-water|greenhouse-inputs
 Finite cabin moisture: explicit `config.moisture` enables the model; `--panel habitat-humidity|habitat-humidity-settings|habitat-humidity-model` captures Overview/Settings/Model. Native and CLI invalid definitions are bounded and refused before GPU startup. `habitat-inspect` and native `--habitat-metric vapor|condensate|humidity|condensation_heat` reopen actual observations. See [HABITAT_HUMIDITY](docs/HABITAT_HUMIDITY.md); predictive accuracy remains uncalibrated.
 
 Controlled moisture studies reuse the existing native/CLI habitat sweeps; [MOISTURE_STUDIES](docs/MOISTURE_STUDIES.md) lists canonical settings/units and example commands. Humidity settings must already be enabled; all ordinary branch edits validate before output.
+
+[PAIRED_HABITAT_EXPERIMENTS](docs/PAIRED_HABITAT_EXPERIMENTS.md) documents schema-2 paired plans, CLI sweep/inspection, native root reopening and `--panel habitat-paired` capture equivalents.

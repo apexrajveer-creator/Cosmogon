@@ -182,7 +182,7 @@ impl Parameter {
         c.validate()
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Plan {
     pub format: String,
@@ -191,6 +191,8 @@ pub struct Plan {
     pub values: Vec<f64>,
     pub samples: usize,
     pub interval_s: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secondary: Option<crate::habitat_factorial::Secondary>,
 }
 impl Plan {
     pub fn linear(
@@ -220,17 +222,22 @@ impl Plan {
             values,
             samples,
             interval_s,
+            secondary: None,
         };
         plan.validate()?;
         Ok(plan)
     }
+    pub fn branch_count(&self) -> usize {
+        self.values.len() * if self.secondary.is_some() { 2 } else { 1 }
+    }
     pub fn validate(&self) -> Result<(), String> {
-        if self.format != "cosmogon-habitat-sweep-plan" || self.schema_version != 1 {
+        let version = if self.secondary.is_some() { 2 } else { 1 };
+        if self.format != "cosmogon-habitat-sweep-plan" || self.schema_version != version {
             return Err("Unsupported habitat sweep plan format or schema".into());
         }
         if !(2..=16).contains(&self.values.len())
             || !(1..=1024).contains(&self.samples)
-            || self.samples * self.values.len() > 8192
+            || self.samples * self.branch_count() > 8192
         {
             return Err(
                 "Sweep requires 2–16 runs, 1–1024 samples and at most 8192 total observations"
@@ -244,6 +251,15 @@ impl Plan {
             .any(|(i, v)| !v.is_finite() || self.values[..i].contains(v))
         {
             return Err("Sweep values must be finite and distinct".into());
+        }
+        if let Some(b) = &self.secondary {
+            if self.values.len() != 2
+                || b.parameter == self.parameter
+                || b.values[0] == b.values[1]
+                || b.values.iter().any(|v| !v.is_finite())
+            {
+                return Err("Paired studies require two distinct settings, each with exactly two finite distinct levels".into());
+            }
         }
         if !self.interval_s.is_finite()
             || !(1.0..=30.0 * crate::time::SECONDS_PER_DAY).contains(&self.interval_s)
@@ -277,7 +293,11 @@ impl Plan {
     pub fn validate_world(&self, base: &Universe, id: u64) -> Result<(), String> {
         self.configurations(base, id).map(|_| ())
     }
-    fn configurations(&self, base: &Universe, id: u64) -> Result<Vec<habitat::Config>, String> {
+    pub(crate) fn configurations(
+        &self,
+        base: &Universe,
+        id: u64,
+    ) -> Result<Vec<habitat::Config>, String> {
         self.validate()?;
         let h = base
             .habitats
@@ -290,11 +310,14 @@ impl Plan {
         {
             return Err("Sweep observation times are not representable in this world".into());
         }
-        self.values
-            .iter()
-            .map(|&value| {
+        (0..self.branch_count())
+            .map(|i| {
+                let value = self.values[i % self.values.len()];
                 let mut c = h.config.clone();
                 self.parameter.set(&mut c, value)?;
+                if let Some(b) = &self.secondary {
+                    b.parameter.set(&mut c, b.values[i / 2])?;
+                }
                 let mut preview = base.clone();
                 preview.apply_edit(Edit::ConfigureHabitat {
                     system: h.definition.body.system,
@@ -343,6 +366,7 @@ pub fn execute(
         .body
         .system;
     let mut runs = Vec::new();
+    let mut paired_recordings = Vec::new();
     for (i, config) in configs.into_iter().enumerate() {
         let mut world = base.clone();
         world.apply_edit(Edit::ConfigureHabitat {
@@ -368,9 +392,24 @@ pub fn execute(
                 )
             })
             .collect::<serde_json::Map<String, serde_json::Value>>();
-        runs.push(serde_json::json!({"index":i,"value":plan.values[i],"folder":folder,"recording":recording.summary,"final_metrics":final_values}));
+        let mut run = serde_json::json!({"index":i,"value":plan.values[i%plan.values.len()],"folder":folder,"recording":recording.summary,"final_metrics":final_values});
+        if let Some(b) = &plan.secondary {
+            run["secondary_value"] = serde_json::json!(b.values[i / 2]);
+            paired_recordings.push(recording);
+        }
+        runs.push(run);
     }
-    let manifest = serde_json::json!({"format":"cosmogon-habitat-sweep","schema_version":1,"complete":true,"habitat_id":id,"common_state_fingerprint":crate::research::state_fingerprint(base)?,"common_data_versions":crate::save::data_versions(base),"parameter":plan.parameter.id(),"unit":plan.parameter.unit(),"plan":plan,"runs":runs,"mechanism":"Independent clones of one common state; one ordinary configuration edit at the common time; old-configuration remainders complete before the change. Initial stocks are preserved.","limits":"Model sensitivity under assumed equipment and environment, not confidence intervals, optimization proof, causal inference about field hardware or field calibration. Completion manifest is written last; folders lacking it are incomplete."});
+    let mut manifest = serde_json::json!({"format":"cosmogon-habitat-sweep","schema_version":1,"complete":true,"habitat_id":id,"common_state_fingerprint":crate::research::state_fingerprint(base)?,"common_data_versions":crate::save::data_versions(base),"parameter":plan.parameter.id(),"unit":plan.parameter.unit(),"plan":plan,"runs":runs,"mechanism":"Independent clones of one common state; one ordinary configuration edit at the common time; old-configuration remainders complete before the change. Initial stocks are preserved.","limits":"Model sensitivity under assumed equipment and environment, not confidence intervals, optimization proof, causal inference about field hardware or field calibration. Completion manifest is written last; folders lacking it are incomplete."});
+    if plan.secondary.is_some() {
+        let analysis = crate::habitat_factorial::report(plan, &paired_recordings)?;
+        write(
+            "factorial.json",
+            &serde_json::to_vec_pretty(&analysis).map_err(|e| e.to_string())?,
+        )?;
+        manifest["schema_version"] = 2.into();
+        manifest["factorial_analysis"] = analysis;
+        manifest["mechanism"]="Four independent common-state clones; both settings changed in one atomic ordinary edit. Standard order A0B0, A1B0, A0B1, A1B1. Initial stocks and old-configuration remainders preserved.".into();
+    }
     write(
         "manifest.json",
         &serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?,

@@ -12,6 +12,20 @@ use cosmogon_sim::{
     Universe,
 };
 
+fn parse_levels(s: &str) -> Result<Vec<f64>,String> {
+    s.split(',').map(|s|s.trim().parse::<f64>().map_err(|_|"Enter finite comma-separated values".into())).collect()
+}
+pub fn check_input(path: &std::path::Path,sample: Option<usize>) -> Result<(),String> {
+    let count=if path.join("plan.json").exists() {cosmogon_sim::habitat_factorial::read(path)?.recordings[0].rows.len()} else {Recording::read(path)?.rows.len()};
+    if sample.is_some_and(|i|i>=count) {return Err("Requested habitat observation is outside the recording".into());}
+    Ok(())
+}
+fn open_design(location:std::path::PathBuf,path:String,sample:Option<usize>) -> Result<SweepResult,String> {
+    let mut design=cosmogon_sim::habitat_factorial::read(&location)?;
+    let b=design.recordings.pop().ok_or("Empty paired design")?;
+    let a=design.recordings.remove(0);
+    Ok(SweepResult {a,b,manifest:design.manifest,path,sample})
+}
 pub struct Launch {
     pub plan: Plan,
     pub id: Option<u64>,
@@ -29,7 +43,7 @@ fn run_sweep(
     let manifest = habitat_sweep::execute(&base, id, &plan, std::path::Path::new(&path))?;
     let a = Recording::read(&std::path::Path::new(&path).join("run-000"))?;
     let b = Recording::read(
-        &std::path::Path::new(&path).join(format!("run-{:03}", plan.values.len() - 1)),
+        &std::path::Path::new(&path).join(format!("run-{:03}", plan.branch_count() - 1)),
     )?;
     Ok(SweepResult {
         a,
@@ -52,6 +66,9 @@ struct SweepForm {
     samples: usize,
     interval_hours: f64,
     output: String,
+    paired: bool,
+    secondary_parameter: Parameter,
+    secondary_values: String,
 }
 impl Default for SweepForm {
     fn default() -> Self {
@@ -61,6 +78,9 @@ impl Default for SweepForm {
             samples: 25,
             interval_hours: 1.0,
             output: String::new(),
+            paired: false,
+            secondary_parameter: Parameter::WaterRecoveryFraction,
+            secondary_values: "0.8, 0.95".into(),
         }
     }
 }
@@ -70,6 +90,7 @@ pub struct Study {
     pub recording: Option<Recording>,
     pub comparison: Option<Recording>,
     pub experiment_mode: bool,
+    pub factorial_mode: bool,
     pub why_mode: bool,
     pub why: super::habitat_why::View,
     pub alignment: Alignment,
@@ -92,6 +113,12 @@ pub struct Study {
 impl Study {
     pub fn start(&mut self, path: String, sample: Option<usize>) {
         let location = std::path::PathBuf::from(&path);
+        if location.join("plan.json").exists() {
+            self.factorial_mode = true;
+            self.sweep_task=Some(AsyncComputeTaskPool::get().spawn(async move {open_design(location,path,sample)}));
+            self.status=Some("Checking all four common-state branches and response analysis…".into());
+            return;
+        }
         self.task =
             Some(AsyncComputeTaskPool::get().spawn(async move { Recording::read(&location) }));
         self.pending_path = path;
@@ -119,6 +146,7 @@ impl Study {
         path: String,
         sample: Option<usize>,
     ) {
+        self.factorial_mode = plan.secondary.is_some();
         self.sweep_task = Some(
             AsyncComputeTaskPool::get()
                 .spawn(async move { run_sweep(base, id, plan, path, sample) }),
@@ -177,6 +205,7 @@ impl Study {
         self.recording = Some(result.a);
         self.comparison = Some(result.b);
         self.selected = index;
+        self.factorial_mode &= result.manifest["factorial_analysis"].is_object();
         self.sweep_manifest = Some(result.manifest);
         self.status = Some(format!(
             "Completed sweep in {}. First and last runs opened; every branch is retained.",
@@ -190,6 +219,7 @@ impl Study {
             return Err("Requested observation index is outside the recording".into());
         }
         self.sweep_manifest = None;
+        self.factorial_mode = false;
         self.recording = Some(r);
         self.path = path;
         self.selected = selected;
@@ -224,6 +254,7 @@ impl Study {
             match result {
                 Ok(r) => {
                     self.sweep_manifest = None;
+                    self.factorial_mode = false;
                     self.comparison = Some(r);
                     self.comparison_path = self.pending_comparison_path.clone();
                     self.status=Some("Comparison observations reopened. Exact stored-time alignment; no live-world change.".into());
@@ -250,7 +281,7 @@ impl Study {
         let r = self.recording.as_ref()?;
         let row = &r.rows[self.selected.min(r.rows.len() - 1)];
         Some(
-            serde_json::json!({"summary":r.summary,"metric":self.metric.id(),"unit":self.metric.unit(),"selected_observation":self.selected,"selected_row":row,"why":self.why_mode.then(||self.why.metadata(&row.habitat,row.simulation_time_s,"recorded_completed_interval")),"selected_value":self.metric.value(row),"comparison":self.comparison.as_ref().map(|b| {let pairs=habitat_comparison::pairs(r,b,self.metric,self.alignment);let pair=&pairs[self.selected.min(pairs.len()-1)];serde_json::json!({"summary":b.summary,"alignment":self.alignment,"selected_pair":pair,"selected_row":pair.b_index.map(|j|&b.rows[j]),"report":habitat_comparison::report(r,b,self.metric,self.alignment)})}),"sweep":self.sweep_manifest,"scope":"Independent recorded view at capture request, possibly hidden; no live-world or camera change"}),
+            serde_json::json!({"summary":r.summary,"metric":self.metric.id(),"unit":self.metric.unit(),"selected_observation":self.selected,"selected_row":row,"why":self.why_mode.then(||self.why.metadata(&row.habitat,row.simulation_time_s,"recorded_completed_interval")),"selected_value":self.metric.value(row),"comparison":self.comparison.as_ref().map(|b| {let pairs=habitat_comparison::pairs(r,b,self.metric,self.alignment);let pair=&pairs[self.selected.min(pairs.len()-1)];serde_json::json!({"summary":b.summary,"alignment":self.alignment,"selected_pair":pair,"selected_row":pair.b_index.map(|j|&b.rows[j]),"report":habitat_comparison::report(r,b,self.metric,self.alignment)})}),"sweep":self.sweep_manifest,"paired_results_visible":self.factorial_mode,"scope":"Independent recorded view at capture request, possibly hidden; no live-world or camera change"}),
         )
     }
 }
@@ -457,7 +488,13 @@ pub fn panel(
         );
         ui.selectable_value(&mut study.experiment_mode, true, "Run experiment");
     });
-    ui.horizontal_wrapped(|ui| {ui.selectable_value(&mut study.why_mode,false,"Curves & comparison");ui.selectable_value(&mut study.why_mode,true,"WHY selected interval");});
+    ui.horizontal_wrapped(|ui| {
+        if ui.selectable_label(!study.why_mode && !study.factorial_mode,"Curves & comparison").clicked() {study.why_mode=false;study.factorial_mode=false;}
+        if ui.selectable_label(study.why_mode && !study.factorial_mode,"WHY selected interval").clicked() {study.why_mode=true;study.factorial_mode=false;}
+        if study.sweep_manifest.as_ref().is_some_and(|m|m["factorial_analysis"].is_object()) && ui.selectable_label(study.factorial_mode,"Paired results").clicked() {study.factorial_mode=true;study.why_mode=false;}
+    });
+    if study.factorial_mode && !study.experiment_mode {paired_results(ui,study);return;}
+
     if study.why_mode && !study.experiment_mode {
         ui.label(egui::RichText::new("Recorded evidence · independent of the live world").color(ACCENT));
         if let Some(r)=&study.recording {
@@ -477,6 +514,7 @@ pub fn panel(
         }
         return;
     }
+    if study.sweep_manifest.as_ref().is_some_and(|m|m["factorial_analysis"].is_object()) {ui.colored_label(ACCENT,"These two corners change both settings. Paired results shows all four combinations and conditional effects.");}
     ui.label(
         egui::RichText::new("Actual exported observations · independent of the live world")
             .color(ACCENT),
@@ -681,6 +719,33 @@ pub fn panel(
         ui.colored_label(ACCENT, status);
     }
 }
+fn paired_results(ui:&mut egui::Ui,study:&mut Study) {
+    let Some(m)=&study.sweep_manifest else {ui.label("Open a completed paired experiment first.");return;};
+    let report=&m["factorial_analysis"];
+    ui.strong("Paired settings · four actual final observations");
+    ui.label(format!("A: {} · {} {}", report["a"]["parameter"].as_str().unwrap_or_default(), report["a"]["levels"],report["a"]["unit"].as_str().unwrap_or_default()));
+    ui.label(format!("B: {} · {} {}", report["b"]["parameter"].as_str().unwrap_or_default(), report["b"]["levels"],report["b"]["unit"].as_str().unwrap_or_default()));
+    egui::ComboBox::from_id_salt("paired-response-metric").selected_text(study.metric.label()).show_ui(ui,|ui| {for metric in Metric::ALL {ui.selectable_value(&mut study.metric,metric,metric.label());}});
+    if report["completed_interval_configurations_match_current"].as_array().is_some_and(|values|values.iter().any(|v|v!=true)) {ui.colored_label(ACCENT,"Flows retain pre-edit settings. Advance before interpreting changed equipment.");}
+    let metric=&report["metrics"][study.metric.id()];let c=&metric["contrasts"];let responses=&c["responses"];
+    ui.label(format!("Final stored world time {} s · observation {} · {}",report["simulation_time_s"],report["observation_index"],study.metric.unit()));
+    egui::Grid::new("paired-responses").striped(true).show(ui,|ui| {
+        ui.label("");ui.strong("A0 (first level)");ui.strong("A1 (second level)");ui.end_row();
+        for (label,left,right) in [("B0 (first)",0,1),("B1 (second)",2,3)] {
+            ui.strong(label);ui.label(value_text(responses[left].as_f64()));ui.label(value_text(responses[right].as_f64()));ui.end_row();
+        }
+    });
+    egui::Grid::new("paired-contrasts").striped(true).show(ui,|ui| {
+        for (label,key) in [("A change at B0","a_at_b0"),("A change at B1","a_at_b1"),("B change at A0","b_at_a0"),("B change at A1","b_at_a1"),("Average A change","average_a"),("Average B change","average_b"),("Difference of conditional A changes","difference_in_differences"),("Standard AB effect (half that difference)","standard_ab_effect")] {
+            ui.label(label);ui.strong(value_text(c[key].as_f64()));ui.end_row();
+        }
+    });
+    if metric["support"]!="matched" {ui.colored_label(ACCENT,"Contrasts unavailable: missing value or mismatched interval support.");}
+    ui.label(egui::RichText::new("Conditional model results at these levels. No statistical significance, predictive confidence, global optimum or hardware calibration. Graph endpoints change both settings.").small().color(MUTED));
+    if ui.button("Copy complete four-branch analysis JSON").clicked() {ui.ctx().copy_text(serde_json::to_string_pretty(report).unwrap_or_default());}
+    ui.hyperlink_to("NIST factorial design method",cosmogon_sim::habitat_factorial::METHOD_SOURCE);
+    ui.label(egui::RichText::new(format!("All four protected recordings and factorial.json: {}",study.path.rsplit_once("/run-").map(|p|p.0).unwrap_or(&study.path))).small().color(MUTED));
+}
 fn experiment(
     ui: &mut egui::Ui,
     study: &mut Study,
@@ -689,7 +754,7 @@ fn experiment(
     reference: bool,
 ) {
     ui.strong("Controlled habitat experiment");
-    ui.label("Vary one setting in independent copies of the current world. Initial stocks stay fixed; the live world continues unchanged. Equipment/environment are assumptions; this measures modeled sensitivity.");
+    ui.label("Vary settings in independent copies of the current world. Initial stocks stay fixed; the live world continues unchanged. Equipment/environment are assumptions; this measures modeled sensitivity.");
     egui::ComboBox::from_id_salt("sweep-habitat")
         .selected_text(
             habitat_id
@@ -718,6 +783,15 @@ fn experiment(
         study.sweep.parameter.unit()
     ));
     ui.text_edit_singleline(&mut study.sweep.values);
+    ui.checkbox(&mut study.sweep.paired,"Pair with a second setting (four combinations)");
+    if study.sweep.paired {
+        egui::ComboBox::from_id_salt("habitat-second-setting").selected_text(study.sweep.secondary_parameter.label()).show_ui(ui,|ui| {
+            for p in Parameter::ALL {ui.selectable_value(&mut study.sweep.secondary_parameter,p,p.label());}
+        });
+        ui.label(format!("Exactly two levels for each setting · second levels ({})",study.sweep.secondary_parameter.unit()));
+        ui.text_edit_singleline(&mut study.sweep.secondary_values);
+    }
+
     ui.horizontal(|ui| {
         ui.label("Observations per run");
         ui.add(egui::DragValue::new(&mut study.sweep.samples).range(1..=1024));
@@ -746,11 +820,15 @@ fn experiment(
     let plan = values.and_then(|values| {
         let p = Plan {
             format: "cosmogon-habitat-sweep-plan".into(),
-            schema_version: 1,
+            schema_version: if study.sweep.paired {2} else {1},
             parameter: study.sweep.parameter,
             values,
             samples: study.sweep.samples,
             interval_s: study.sweep.interval_hours * 3600.,
+            secondary: if study.sweep.paired {
+                let levels=parse_levels(&study.sweep.secondary_values)?;
+                Some(cosmogon_sim::habitat_factorial::Secondary {parameter:study.sweep.secondary_parameter,values:levels.try_into().map_err(|_|"Second setting needs exactly two levels")?})
+            } else {None},
         };
         p.validate()?;
         Ok(p)
@@ -920,6 +998,22 @@ mod tests {
         assert!(!root.join("invalid").exists());
         assert_eq!(study.metadata(),Some(metadata));
         assert_eq!(cosmogon_sim::research::state_fingerprint(&world).unwrap(),before);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn paired_worker_reopens_verified_results_and_preserves_views_on_bad_input() {
+        let mut world=Universe::new(cosmogon_sim::UniverseSettings {scenario:cosmogon_sim::Scenario::SolarSystemLab,..Default::default()});
+        let mut definition=cosmogon_sim::habitat::Definition::at(cosmogon_sim::BodyRef {system:0,body:3},0.0,0.0);
+        definition.config.moisture=Some(cosmogon_sim::moisture::Config::default());
+        world.apply_edit(cosmogon_sim::sandbox::Edit::CreateHabitat {definition:Box::new(definition)}).unwrap();world.advance_to(world.time+86400.0,None,None);
+        let root=std::env::temp_dir().join(format!("cosmogon-native-paired-worker-{}",std::process::id()));let _=std::fs::remove_dir_all(&root);
+        let mut plan=Plan::linear(Parameter::MoisturePowerW,0.0,500.0,2,3,3600.0).unwrap();plan.schema_version=2;plan.secondary=Some(cosmogon_sim::habitat_factorial::Secondary {parameter:Parameter::MoistureAirborneFraction,values:[0.2,1.0]});
+        let result=run_sweep(world,0,plan,root.to_string_lossy().into_owned(),Some(2)).unwrap();
+        let mut study=Study {factorial_mode:true,metric:Metric::Vapor,..Default::default()};study.commit_sweep(result).unwrap();
+        let before=study.metadata();assert!(before.as_ref().unwrap()["paired_results_visible"].as_bool().unwrap());assert_eq!(before.as_ref().unwrap()["sweep"]["runs"].as_array().unwrap().len(),4);
+        let reopened=open_design(root.clone(),root.to_string_lossy().into_owned(),Some(2)).unwrap();study.commit_sweep(reopened).unwrap();assert_eq!(study.metadata(),before);
+        assert!(check_input(&root,Some(3)).is_err());
+        std::fs::write(root.join("factorial.json"),b"{}").unwrap();assert!(open_design(root.clone(),root.to_string_lossy().into_owned(),None).is_err());assert_eq!(study.metadata(),before);
         std::fs::remove_dir_all(root).unwrap();
     }
 

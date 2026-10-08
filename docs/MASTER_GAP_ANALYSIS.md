@@ -67,4 +67,6 @@ New work must meet the relevant definitions of done; partial implementations rem
 
 18. **Controlled moisture equipment studies (built, partial phase 9/16):** typed one-setting sweeps of airborne partition, humidity setpoint and finite collector assumptions from the same retained world, actual time-supported phase/water comparisons and protected source-pinned exports. No calibration, optimal humidity or global optimization claim.
 
-19. **Paired habitat experiments (next, partial phase 9/16):** two settings at two levels, all four exact common-state branches, actual conditional effects and interaction contrasts. Keep single-setting studies and make unavailable interval/source support explicit; no statistical-noise, global-optimization or field-calibration claim.
+19. **Paired habitat experiments (built, partial phase 9/16):** two settings at two levels, all four exact common-state branches, actual conditional effects and interaction contrasts. Keep single-setting studies and make unavailable interval/source support explicit; no statistical-noise, global-optimization or field-calibration claim.
+
+20. **Paired trajectory analysis (next, partial phase 9/16):** actual four-response/contrast curves and selectable stored-time tables with protected numeric exports, explicit gaps and interval support. Preserve completed final reports and ordinary studies; no interpolation, field-calibration or statistical-confidence claim.

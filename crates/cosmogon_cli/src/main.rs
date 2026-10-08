@@ -326,10 +326,9 @@ fn main() {
         "greenhouse" => {if let Err(e)=greenhouse(&a) {eprintln!("Greenhouse planning failed: {e}");std::process::exit(1);}},
         "habitat-diagnose" => {if let Err(e)=habitat_diagnose(&a) {eprintln!("Habitat diagnosis failed: {e}");std::process::exit(1);}},
         "habitat-inspect" => {
-            match cosmogon_sim::habitat_recording::Recording::read(std::path::Path::new(a.recording.as_deref().expect("validated recording"))) {
-                Ok(r)=>println!("{}",serde_json::to_string_pretty(&r.summary).unwrap()),
-                Err(e)=>{eprintln!("Habitat inspection failed: {e}");std::process::exit(1);},
-            }
+            let path=std::path::Path::new(a.recording.as_deref().expect("validated recording"));
+            let inspected=if path.join("plan.json").exists() {cosmogon_sim::habitat_factorial::read(path).map(|d|d.analysis)} else {cosmogon_sim::habitat_recording::Recording::read(path).map(|r|r.summary)};
+            match inspected {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).unwrap()),Err(e)=>{eprintln!("Habitat inspection failed: {e}");std::process::exit(1);}}
         },
         "habitat-sweep" => {if let Err(e)=habitat_sweep(&a) {eprintln!("Habitat sweep failed: {e}");std::process::exit(1);}},
         "habitat-compare" => {if let Err(e)=habitat_compare(&a) {eprintln!("Habitat comparison failed: {e}");std::process::exit(1);}},

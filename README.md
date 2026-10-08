@@ -120,3 +120,5 @@ The controlled lettuce planner now exposes optional source-based transpiration, 
 The experimental habitat also offers optional finite [cabin humidity and condensate](docs/HABITAT_HUMIDITY.md), with explicit phase heat, equipment assumptions, source-supported RH and actual recorded water/power budgets. It does not establish safe cabin conditions or water quality.
 
 Controlled moisture [studies](docs/MOISTURE_STUDIES.md) compare six water-phase/equipment assumptions from one exact starting world using native or CLI experiments, preserving all inventories and source-pinned trajectories. These are conditional model studies; field calibration and physical greenhouse exchange remain incomplete.
+
+Paired habitat [experiments](docs/PAIRED_HABITAT_EXPERIMENTS.md) compare all four combinations of two settings, show actual conditional/interaction results and reopen complete source-pinned designs.

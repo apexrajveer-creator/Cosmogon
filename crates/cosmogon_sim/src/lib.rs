@@ -31,6 +31,7 @@ pub mod habitat_diagnostics;
 pub mod habitat_recording;
 pub mod habitat_comparison;
 pub mod habitat_sweep;
+pub mod habitat_factorial;
 pub mod greenhouse;
 pub mod history;
 pub mod impact;

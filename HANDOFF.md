@@ -58,6 +58,8 @@ The connected [finite cabin moisture](docs/HABITAT_HUMIDITY.md) build adds optio
 
 The connected [controlled moisture studies](docs/MOISTURE_STUDIES.md) build adds six typed single-setting experiments with retained vapor/liquid inventories, shared native/CLI preflight and exact recorded phase/water comparisons. Completed interval timing and disable semantics are explicit; WHY phase drivers appear before aggregates. Checks: 320 passed plus one existing ignored, 36 distinct offline/refusal/native cases, eight inspected packaged layouts and a 48-second normal run; [verification](docs/MOISTURE_STUDIES_VALIDATION.md). No simulation law, save schema or golden change. Paired-setting studies follow; calibration, physical greenhouse and the master directive remain incomplete.
 
+The connected [paired habitat experiments](docs/PAIRED_HABITAT_EXPERIMENTS.md) build adds two settings at two levels, all four atomic common-state branches, actual final conditional/average/interaction contrasts, protected source-pinned analysis and shared native/CLI reopening. Snapshots retain explicit pre-edit flow warnings. Checks: 324 passed plus one existing ignored, 35 distinct offline/refusal/native cases, nine inspected packaged layouts and a 48-second normal run; [verification](docs/PAIRED_HABITAT_VALIDATION.md). Single-setting behavior, simulation laws, saves and the golden remain unchanged. Selectable-time paired trajectory analysis follows; uncertainty, calibration, physical greenhouse and the master directive remain incomplete.
+
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
   [GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases) with macOS, Windows and Linux builds.
@@ -100,6 +102,7 @@ Map of the 1.0 features (start here when changing one):
 | Research controls/models/sources/CSV | `research/` | `research.rs`, `ui/research.rs`; CLI `experiment`, `models` |
 | Performance recordings | — | `performance.rs`, `ui/performance.rs` |
 | Finite cabin moisture / condensate | `moisture.rs`, `habitat.rs` | `ui/habitat_humidity.rs`; actual recordings/WHY and CLI habitat exports |
+| Paired habitat experiments / contrasts | `habitat_sweep.rs`, `habitat_factorial.rs` | `ui/habitat_recordings.rs`; CLI sweep/inspect, native Paired results |
 | Habitat WHY / diagnostics exports | `habitat_diagnostics.rs` | `ui/habitat_why.rs`, `ui/habitat_recordings.rs`; CLI `habitat-diagnose` |
 | Habitat equipment listening / WAV | completed `habitat.rs` budgets | `habitat_audio.rs`, `audio.rs`, `ui/alerts.rs` |
 | Sound modes/mixer | — | `audio.rs`, `ui/alerts.rs` (synthesised; no audio files) |

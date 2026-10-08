@@ -9,7 +9,10 @@ use serde::Serialize;
 use serde_json::Value;
 use std::{io::Read, path::Path};
 
-fn read(path: &Path, limit: u64) -> Result<String, String> {
+pub(crate) fn read(path: &Path, limit: u64) -> Result<String, String> {
+    let metadata=std::fs::metadata(path).map_err(|e|format!("{}: {e}",path.display()))?;
+    if !metadata.is_file() {return Err("Study entries must be regular files".into());}
+    if metadata.len()>limit {return Err(format!("{} exceeds the {} byte study limit",path.display(),limit));}
     let f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     if !f.metadata().map_err(|e| e.to_string())?.is_file() {
         return Err("Study entries must be regular files".into());
