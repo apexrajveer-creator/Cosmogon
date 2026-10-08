@@ -183,3 +183,5 @@ See [HABITAT_DIAGNOSTICS](docs/HABITAT_DIAGNOSTICS.md) for live/recorded panels 
 ## Keyboard customization
 
 `--input-bindings FILE --panel controls|controls-everyday|controls-files` validates a complete physical-key mapping before GPU startup and opens native controls. `--panel help` opens mapping-aware help. Capture metadata retains actual controls; input remains ignored in automated captures. Runtime imports require explicit saving to persist. See [INPUT_BINDINGS](docs/INPUT_BINDINGS.md).
+
+Crop planning `--panel greenhouse-water|greenhouse-daily-water|greenhouse-inputs|greenhouse-compare|greenhouse-model|greenhouse-files` selects the actual water/assumption/comparison/source layouts for captures. `--greenhouse-definition` reads bounded regular version-1/2 inputs and fails invalid definitions before rendering. See [TRANSPIRATION_PLANNING](docs/TRANSPIRATION_PLANNING.md).

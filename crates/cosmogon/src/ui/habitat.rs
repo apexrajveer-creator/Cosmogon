@@ -347,18 +347,20 @@ pub fn panel(
     Ok(())
 }
 
-pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>) {
+pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit: MessageWriter<bevy::app::AppExit>) {
     form.tab = match args.panel.as_deref() {
         Some("habitat-why"|"habitat-why-water"|"habitat-why-heat"|"habitat-why-air"|"habitat-why-evidence") => 8,
         Some("habitat-controls") => 1,
         Some("habitat-build") => 2,
         Some("habitat-model") => 3,
-        Some("greenhouse") => 4,
+        Some("greenhouse"|"greenhouse-water"|"greenhouse-daily-water"|"greenhouse-inputs"|"greenhouse-compare"|"greenhouse-model"|"greenhouse-files") => 4,
         Some("habitat-oxygen") => 5,
         Some("habitat-water") => 6,
         Some("habitat-recordings"|"habitat-experiments"|"habitat-recording-why"|"habitat-recording-why-water"|"habitat-recording-why-heat"|"habitat-recording-why-air"|"habitat-recording-why-evidence") => 7,
         _ => 0,
     };
+    form.crop.pane=match args.panel.as_deref() {Some("greenhouse-inputs")=>1,Some("greenhouse-compare")=>2,Some("greenhouse-model")=>3,Some("greenhouse-files")=>4,_=>0};
+    form.crop.graph=match args.panel.as_deref() {Some("greenhouse-water")=>3,Some("greenhouse-daily-water")=>4,_=>0};
     form.why.section=match args.panel.as_deref(){Some("habitat-why-water")=>1,Some("habitat-why-heat")=>2,Some("habitat-why-air")=>3,Some("habitat-why-evidence")=>4,_=>0};
     form.recording.why_mode=args.panel.as_deref().is_some_and(|p|p.starts_with("habitat-recording-why"));
     form.recording.why.section=match args.panel.as_deref(){Some("habitat-recording-why-water")=>1,Some("habitat-recording-why-heat")=>2,Some("habitat-recording-why-air")=>3,Some("habitat-recording-why-evidence")=>4,_=>0};
@@ -370,7 +372,7 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>) {
         form.tab=7;form.recording.metric=args.habitat_metric.as_deref().and_then(|v|cosmogon_sim::habitat_recording::Metric::parse(v).ok()).unwrap_or_default();
         match cosmogon_sim::habitat_sweep::Plan::read(std::path::Path::new(path)) {Ok(plan)=>form.recording.launch=Some(super::habitat_recordings::Launch {plan,id:args.habitat_study_id,output:args.habitat_study_output.clone().unwrap_or_default(),sample:args.habitat_sample,initial_path:args.load.clone()}),Err(e)=>form.recording.status=Some(e)}
     }
-    if let Some(path)=&args.greenhouse_definition {form.tab=4;form.crop.status=form.crop.import(std::path::Path::new(path)).err();}
+    if let Some(path)=&args.greenhouse_definition {form.tab=4;if let Err(e)=form.crop.import(std::path::Path::new(path)) {error!("Cannot open greenhouse definition at startup: {e}");form.crop.status=Some(e);exit.write(bevy::app::AppExit::error());}}
 }
 
 #[cfg(test)]

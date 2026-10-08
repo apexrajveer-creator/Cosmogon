@@ -146,6 +146,14 @@ fn diagnostic_snapshot(diagnostics: &DiagnosticsStore, gpu_supported: bool) -> s
     serde_json::json!(values)
 }
 
+// Keep the optional presentation resources together without exceeding Bevy's
+// system-parameter arity; minimal measurement apps can omit all three.
+#[derive(bevy::ecs::system::SystemParam)]
+struct PresentationContext<'w> {
+    paths: Option<Res<'w,crate::cinematic::Player>>,
+    bindings: Option<Res<'w,crate::input::Bindings>>,
+    habitat: Option<Res<'w,crate::ui::HabitatUi>>,
+}
 #[allow(clippy::too_many_arguments)]
 fn record(
     mut perf: ResMut<Performance>,
@@ -163,9 +171,9 @@ fn record(
     mut exit: MessageWriter<AppExit>,
     research: Option<Res<crate::research::Research>>,
     batch: Option<Res<crate::research_batch::ResearchBatch>>,
-    presentation_context:(Option<Res<crate::cinematic::Player>>,Option<Res<crate::input::Bindings>>),
+    presentation_context:PresentationContext,
 ) {
-    let (paths,bindings)=presentation_context;
+    let PresentationContext {paths,bindings,habitat}=presentation_context;
     perf.observing_frames += 1;
     let automatic = args.profile.is_some() && !perf.automatic_done;
     let warmup = if automatic { args.profile_warmup.max(1) } else { 1 };
@@ -203,7 +211,7 @@ fn record(
         "platform": {"os": std::env::consts::OS, "arch": std::env::consts::ARCH,
             "adapter": adapter.as_ref().map(|a| &a.name), "backend": adapter.as_ref().map(|a| format!("{:?}", a.backend))},
         "measurement": {"detailed": perf.detailed, "automatic": automatic, "warmup_frames": warmup,
-            "pipelined_rendering": !(args.research_recording.is_some() && args.quit_after_capture),
+            "pipelined_rendering": !((args.habitat_audio.is_some() || args.habitat_sweep.is_some() || args.habitat_recording.is_some() || args.greenhouse_definition.is_some() || args.habitat_definition.is_some() || args.research_recording.is_some() || args.surface_site.is_some() || args.mars_terrain.is_some() || args.terrain_section.is_some()) && args.quit_after_capture),
             "window_capacity": limit, "percentile_method": "nearest-rank",
             "startup_to_observing_ms": perf.startup_to_observing_ms, "last_load_ms": perf.last_load_ms},
         "scene": {"scenario": u.settings.scenario.label(), "seed": u.settings.seed,
@@ -219,6 +227,7 @@ fn record(
             "clearance_m": rig.clearance,
             "camera_path":paths.as_ref().and_then(|p|p.metadata(&sim,&rig)),
             "input_bindings":bindings.as_ref().map(|b|b.metadata()),
+            "greenhouse_planner":habitat.as_ref().map(|h|h.crop.metadata()),
             "camera_mode": if rig.free.is_some() { "free" } else { "orbit" },
             "orientation_xyzw": rig.rotation.to_array(), "presentation": settings.presentation,
             "yaw_rad": rig.yaw, "pitch_rad": rig.pitch, "fov_y_rad": view.fov_y,

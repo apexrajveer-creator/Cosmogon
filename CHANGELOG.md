@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — controlled crop transpiration
+
+Source-pinned optional light-period water/vapor forecasts, explicit maintained humidity at fixed terrestrial reference pressure, gross/light-cycle net carbon and conductance, deterministic quadrature with resolution evidence, native water graphs/comparisons and protected numeric exports. Version-1 definitions preserve identical biomass without fabricated humidity/water; negative source conductance and unknown water versions are refused. No installed greenhouse, finite habitat exchange, field calibration, simulation/save/golden or dependency change.
+
 ## Unreleased — authored camera paths
 * Native keyboard customization for 24 camera/everyday actions, shared input and cinematic interruption, capture/cancel/release gating, conflict validation, dynamic help, explicit protected versioned files and separate preferences. No Universe/save/golden change.
 

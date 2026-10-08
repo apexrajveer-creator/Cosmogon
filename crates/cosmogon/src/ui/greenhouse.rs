@@ -1,13 +1,14 @@
 //! Native planning instrument over the shared source model. No hidden resource credits.
 use super::{ACCENT, MUTED};
 use bevy_egui::egui;
-use cosmogon_sim::greenhouse::{Definition, Forecast, Regime};
+use cosmogon_sim::greenhouse::{Definition, Forecast, MODEL, Regime, WaterAssumptions};
 
 pub struct CropPlanner {
     pub definition: Definition,
     pub result: Option<Forecast>,
     selected_day: usize,
-    graph: usize,
+    pub graph: usize,
+    pub pane: usize,
     import_path: String,
     export_path: String,
     pub status: Option<String>,
@@ -19,6 +20,7 @@ impl Default for CropPlanner {
             result: None,
             selected_day: 30,
             graph: 0,
+            pane: 0,
             import_path: String::new(),
             export_path: String::new(),
             status: None,
@@ -36,7 +38,7 @@ impl CropPlanner {
         Ok(())
     }
     pub fn metadata(&self) -> serde_json::Value {
-        serde_json::json!({"prepared_definition":self.definition,"forecast":self.result,"selected_age_days_after_emergence":self.selected_day,"prepared_inputs_match_forecast":self.result.as_ref().is_some_and(|f|f.definition==self.definition),"semantics":"Session planning view; may be hidden. Forecast does not install a greenhouse or allocate habitat resources."})
+        serde_json::json!({"prepared_definition":self.definition,"forecast":self.result,"selected_age_days_after_emergence":self.selected_day,"pane":self.pane,"graph":self.graph,"prepared_inputs_match_forecast":self.result.as_ref().is_some_and(|f|f.definition==self.definition),"semantics":"Session planning view; may be hidden. Forecast does not install a greenhouse or allocate habitat resources."})
     }
 }
 fn chart(ui: &mut egui::Ui, f: &Forecast, selected: &mut usize, metric: usize) {
@@ -45,6 +47,16 @@ fn chart(ui: &mut egui::Ui, f: &Forecast, selected: &mut usize, metric: usize) {
         match metric {
             1 => r.net_oxygen_kg,
             2 => r.lighting_electric_j / 3.6e6,
+            3 => r
+                .transpiration
+                .as_ref()
+                .map(|w| w.transpired_water_l)
+                .unwrap_or(0.0),
+            4 => r
+                .transpiration
+                .as_ref()
+                .map(|w| w.transpired_water_l_day)
+                .unwrap_or(0.0),
             _ => r.edible_dry_biomass_kg,
         }
     };
@@ -119,28 +131,85 @@ pub fn panel(
 ) {
     ui.strong("Controlled lettuce crop planner");
     ui.label(
-        egui::RichText::new("NASA MEC · five corrected low-light regimes · 30 terrestrial days")
+        egui::RichText::new("NASA MEC · five regimes · 23°C · 16 h light per terrestrial day")
             .color(ACCENT),
     );
-    ui.label("Controlled forecast · no equipment installed or habitat inventory credits.");
     ui.label(
-        egui::RichText::new("23°C · 16 h light/day · 19.2 plants/m² · unlimited water & nutrients")
+        egui::RichText::new("Planning only · no installed equipment or habitat inventory credits")
             .small()
             .color(MUTED),
     );
-    egui::CollapsingHeader::new("Growing regime and fixture assumptions").show(ui,|ui| {
-        egui::ComboBox::from_id_salt("crop-regime").selected_text(planner.definition.regime.label()).show_ui(ui,|ui| {for regime in Regime::ALL {ui.selectable_value(&mut planner.definition.regime,regime,regime.label());}});
-        ui.horizontal(|ui| {ui.label("Planted area (m²)");ui.add(egui::DragValue::new(&mut planner.definition.area_m2).range(0.1..=100_000.0).speed(0.1));});
-        ui.horizontal(|ui| {ui.label("Assumed incident photon efficacy (µmol/J)");ui.add(egui::DragValue::new(&mut planner.definition.fixture_efficacy_umol_j).range(0.1..=10.0).speed(0.05));});
-        ui.label("Waldmann’s Green lettuce · 23°C light/dark · 16 h light per 24 h cycle · 19.2 plants/m² · unlimited regulated CO₂, water and nutrients.");
+    ui.horizontal_wrapped(|ui| {
+        for (i, label) in ["Forecast", "Inputs", "Compare", "Water model", "Files"]
+            .iter()
+            .enumerate()
+        {
+            ui.selectable_value(&mut planner.pane, i, *label);
+        }
     });
+    ui.separator();
+    if planner.pane == 1 {
+        ui.strong("Growing regime and user assumptions");
+        egui::ComboBox::from_id_salt("crop-regime")
+            .selected_text(planner.definition.regime.label())
+            .show_ui(ui, |ui| {
+                for regime in Regime::ALL {
+                    ui.selectable_value(&mut planner.definition.regime, regime, regime.label());
+                }
+            });
+        ui.horizontal(|ui| {
+            ui.label("Planted area (m²)");
+            ui.add(
+                egui::DragValue::new(&mut planner.definition.area_m2)
+                    .range(0.1..=100_000.0)
+                    .speed(0.1),
+            );
+        });
+        ui.horizontal(|ui| {
+            ui.label("Assumed incident photon efficacy (µmol/J)");
+            ui.add(
+                egui::DragValue::new(&mut planner.definition.fixture_efficacy_umol_j)
+                    .range(0.1..=10.0)
+                    .speed(0.05),
+            );
+        });
+        let mut enabled = planner.definition.transpiration.is_some();
+        if ui
+            .checkbox(&mut enabled, "Estimate light-period transpiration")
+            .changed()
+        {
+            planner.definition.model = MODEL.into();
+            planner.definition.transpiration = enabled.then(WaterAssumptions::default);
+        }
+        if let Some(w) = &mut planner.definition.transpiration {
+            ui.horizontal(|ui| {
+                ui.label("Assumed relative humidity (fraction)");
+                ui.add(
+                    egui::DragValue::new(&mut w.relative_humidity)
+                        .range(0.0..=1.0)
+                        .speed(0.005),
+                );
+            });
+            ui.label(
+                "Maintained humidity · fixed assumed 101.325 kPa · source leaf temperature 23°C.",
+            );
+            ui.label("Dry air producing negative conductance is refused. Saturated-air zero flux is a mathematical boundary, not a growing recommendation. Humidity does not model crop stress or alter biomass.");
+        } else {
+            ui.label("Transpiration is unavailable. Older definitions retain biomass-only semantics until explicitly enabled; imported files are never rewritten.");
+        }
+        ui.label("Waldmann’s Green lettuce · 19.2 plants/m² · pinned PPF/CO₂ pairs; no arbitrary regime interpolation.");
+        ui.label("Fixture efficacy includes optical/fixture losses. No pumps, cooling or dehumidification electricity is inferred.");
+    }
     if planner
         .result
         .as_ref()
         .is_none_or(|f| f.definition != planner.definition)
     {
         match planner.definition.calculate() {
-            Ok(result) => planner.result = Some(result),
+            Ok(result) => {
+                planner.result = Some(result);
+                planner.status = None;
+            }
             Err(e) => {
                 planner.status = Some(e);
                 planner.result = None;
@@ -149,85 +218,282 @@ pub fn panel(
     }
     if let Some(f) = &planner.result {
         let last = &f.rows[30];
-        ui.label(format!(
-            "{:.1} m² · {}",
-            f.definition.area_m2,
-            f.definition.regime.label()
-        ));
-        ui.label(format!(
-            "At day 30: {:.3} kg edible dry biomass · {:.3} kg net O₂ · {:.1} kWh lighting",
-            last.edible_dry_biomass_kg,
-            last.net_oxygen_kg,
-            last.lighting_electric_j / 3.6e6
-        ));
-        ui.label(format!(
-            "Lamps-on demand {:.1} W · DLI {:.2} mol photons/(m² day)",
-            f.lamps_on_power_w, f.daily_light_integral_mol_m2_day
-        ));
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut planner.graph, 0, "Edible dry kg");
-            ui.selectable_value(&mut planner.graph, 1, "Net oxygen kg");
-            ui.selectable_value(&mut planner.graph, 2, "Lighting kWh");
-        });
-        chart(ui, f, &mut planner.selected_day, planner.graph);
-        ui.horizontal(|ui| {
-            ui.label("Inspect age after emergence (days)");
-            ui.add(egui::Slider::new(&mut planner.selected_day, 0..=30)).on_hover_text("Select an age here or click the graph. The line connects computed daily observations; cumulative values use analytic integration.");
-        });
-        let r = &f.rows[planner.selected_day];
-        egui::Grid::new("crop-selected-row")
-            .num_columns(2)
-            .striped(true)
-            .show(ui, |ui| {
-                for (label, v) in [
-                    (
-                        "Edible / inedible dry biomass",
-                        format!(
-                            "{:.4} / {:.4} kg",
-                            r.edible_dry_biomass_kg, r.inedible_dry_biomass_kg
-                        ),
-                    ),
-                    (
-                        "Net CO₂ uptake / O₂ production",
-                        format!("{:.4} / {:.4} kg", r.net_co2_kg, r.net_oxygen_kg),
-                    ),
-                    (
-                        "Current daily dry growth",
-                        format!("{:.5} kg/day", r.dry_biomass_kg_day),
-                    ),
-                    (
-                        "Canopy absorbed light",
-                        format!("{:.2}%", r.canopy_absorbed_fraction * 100.0),
-                    ),
-                ] {
-                    ui.label(label);
-                    ui.strong(v);
-                    ui.end_row();
+        match planner.pane {
+            0 => {
+                ui.label(format!(
+                    "{:.1} m² · {}",
+                    f.definition.area_m2,
+                    f.definition.regime.label()
+                ));
+                ui.label(format!(
+                    "Day 30: {:.3} kg edible dry · {:.3} kg O₂ · {:.1} kWh lamps",
+                    last.edible_dry_biomass_kg,
+                    last.net_oxygen_kg,
+                    last.lighting_electric_j / 3.6e6
+                ));
+                if let (Some(w), Some(meta)) = (&last.transpiration, &f.transpiration) {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{:.2} L transpired · assumed RH {:.1}% · {:.3} kPa deficit",
+                            w.transpired_water_l,
+                            meta.assumed_relative_humidity * 100.0,
+                            meta.vapor_pressure_deficit_kpa
+                        ))
+                        .color(ACCENT),
+                    );
+                    ui.label(
+                        egui::RichText::new(
+                            "Liquid-equivalent vapor transfer, not recovered or potable water.",
+                        )
+                        .small()
+                        .color(MUTED),
+                    );
+                } else {
+                    ui.colored_label(
+                        ACCENT,
+                        "Water unavailable · this definition has no humidity assumption.",
+                    );
+                    if planner.graph >= 3 {
+                        planner.graph = 0;
+                    }
                 }
-            });
-        egui::CollapsingHeader::new("Compare the five published regimes").show(ui,|ui| {
-            ui.label("Same area and fixture efficacy. Both light and CO₂ may differ; this table is not a single-variable causal experiment.");
-            if let Ok(cases)=cosmogon_sim::greenhouse::compare(&planner.definition) {
-                egui::Grid::new("crop-comparison").num_columns(4).striped(true).show(ui,|ui| {
-                    for title in ["PPF / CO₂","Edible dry kg","Net O₂ kg","Lamp kWh"] {ui.strong(title);}ui.end_row();
-                    for case in cases {let (p,c,_)=case.definition.regime.values();ui.label(format!("{p:.0} / {c:.0}"));ui.label(format!("{:.3}",case.harvest.edible_dry_biomass_kg));ui.label(format!("{:.3}",case.harvest.net_oxygen_kg));ui.label(format!("{:.1}",case.harvest.lighting_electric_j/3.6e6));ui.end_row();}
+                ui.horizontal_wrapped(|ui| {
+                    for (i, label) in [
+                        "Edible dry kg",
+                        "Net O₂ kg",
+                        "Lighting kWh",
+                        "Total water L",
+                        "Daily water L/d",
+                    ]
+                    .iter()
+                    .enumerate()
+                    {
+                        ui.add_enabled_ui(i < 3 || f.transpiration.is_some(), |ui| {
+                            ui.selectable_value(&mut planner.graph, i, *label);
+                        });
+                    }
+                });
+                chart(ui, f, &mut planner.selected_day, planner.graph);
+                ui.horizontal(|ui| {
+                    ui.label("Age after emergence (terrestrial days)");
+                    ui.add(egui::Slider::new(&mut planner.selected_day,0..=30)).on_hover_text("Click the graph or select a computed age. Biomass is integrated analytically; water uses deterministic numerical quadrature. Lines connect observations, not measured crop data.");
+                });
+                let r = &f.rows[planner.selected_day];
+                egui::Grid::new("crop-selected-row")
+                    .num_columns(2)
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for (label, value) in [
+                            (
+                                "Edible / inedible dry biomass",
+                                format!(
+                                    "{:.4} / {:.4} kg",
+                                    r.edible_dry_biomass_kg, r.inedible_dry_biomass_kg
+                                ),
+                            ),
+                            (
+                                "Net CO₂ uptake / O₂",
+                                format!("{:.4} / {:.4} kg", r.net_co2_kg, r.net_oxygen_kg),
+                            ),
+                            (
+                                "Daily dry growth / light absorbed",
+                                format!(
+                                    "{:.5} kg/d / {:.2}%",
+                                    r.dry_biomass_kg_day,
+                                    r.canopy_absorbed_fraction * 100.0
+                                ),
+                            ),
+                        ] {
+                            ui.label(label);
+                            ui.strong(value);
+                            ui.end_row();
+                        }
+                        if let Some(w) = &r.transpiration {
+                            for (label, value) in [
+                                (
+                                    "Cumulative / daily transpiration",
+                                    format!(
+                                        "{:.4} L / {:.4} L/d",
+                                        w.transpired_water_l, w.transpired_water_l_day
+                                    ),
+                                ),
+                                (
+                                    "Cumulative / daily vapor mass",
+                                    format!(
+                                        "{:.4} kg / {:.4} kg/d",
+                                        w.transpired_vapor_kg, w.transpired_vapor_kg_day
+                                    ),
+                                ),
+                            ] {
+                                ui.label(label);
+                                ui.strong(value);
+                                ui.end_row();
+                            }
+                        }
+                    });
+            }
+            1 => {
+                ui.separator();
+                ui.label(format!(
+                    "Current lamps-on demand {:.1} W · DLI {:.2} mol/(m² day)",
+                    f.lamps_on_power_w, f.daily_light_integral_mol_m2_day
+                ));
+            }
+            2 => {
+                ui.strong("Harvest at the five published regimes");
+                ui.label("Same area, efficacy and humidity assumption. Light and CO₂ may both differ; not a single-variable causal experiment.");
+                if let Ok(cases) = cosmogon_sim::greenhouse::compare(&planner.definition) {
+                    egui::Grid::new("crop-comparison")
+                        .num_columns(5)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for label in [
+                                "PPF / CO₂",
+                                "Dry edible kg",
+                                "Net O₂ kg",
+                                "Lamps kWh",
+                                "Water L",
+                            ] {
+                                ui.strong(label);
+                            }
+                            ui.end_row();
+                            for c in cases {
+                                let (p, co2, _) = c.definition.regime.values();
+                                ui.label(format!("{p:.0} / {co2:.0}"));
+                                ui.label(format!("{:.3}", c.harvest.edible_dry_biomass_kg));
+                                ui.label(format!("{:.3}", c.harvest.net_oxygen_kg));
+                                ui.label(format!("{:.1}", c.harvest.lighting_electric_j / 3.6e6));
+                                ui.label(
+                                    c.harvest
+                                        .transpiration
+                                        .as_ref()
+                                        .map(|w| format!("{:.2}", w.transpired_water_l))
+                                        .unwrap_or("Unavailable".into()),
+                                );
+                                ui.end_row();
+                            }
+                        });
+                }
+                ui.label("PPF: µmol photons/(m² s) · CO₂: µmol/mol air. Water is modeled light-period vapor transfer; no condensate equipment is assumed.");
+            }
+            3 => {
+                ui.strong("Water model and numerical evidence");
+                if let Some(w) = &f.transpiration {
+                    egui::Grid::new("crop-water-model")
+                        .num_columns(2)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for (label, value) in [
+                                (
+                                    "Assumed RH / pressure",
+                                    format!(
+                                        "{:.1}% / {:.3} kPa",
+                                        w.assumed_relative_humidity * 100.0,
+                                        w.assumed_pressure_kpa
+                                    ),
+                                ),
+                                (
+                                    "Saturated / air vapor pressure",
+                                    format!(
+                                        "{:.5} / {:.5} kPa",
+                                        w.saturated_vapor_pressure_kpa, w.air_vapor_pressure_kpa
+                                    ),
+                                ),
+                                (
+                                    "Vapor pressure deficit",
+                                    format!("{:.5} kPa", w.vapor_pressure_deficit_kpa),
+                                ),
+                                (
+                                    "Aerodynamic conductance",
+                                    format!("{:.2} mol/(m² s)", w.aerodynamic_conductance_mol_m2_s),
+                                ),
+                                (
+                                    "Water molecular mass / density",
+                                    format!(
+                                        "{:.3} g/mol / {:.2} g/L",
+                                        w.water_molecular_g_mol, w.water_density_g_l
+                                    ),
+                                ),
+                            ] {
+                                ui.label(label);
+                                ui.strong(value);
+                                ui.end_row();
+                            }
+                        });
+                    let row = &f.rows[planner.selected_day];
+                    if let Some(r) = &row.transpiration {
+                        ui.label(format!(
+                            "Day {}: gross / light-cycle net {:.5} / {:.5} µmol C/(m² s)",
+                            planner.selected_day,
+                            r.gross_carbon_umol_m2_s,
+                            r.light_cycle_net_carbon_umol_m2_s
+                        ));
+                        ui.label(format!(
+                            "Stomatal / series canopy conductance {:.6} / {:.6} mol/(m² s)",
+                            r.stomatal_conductance_mol_m2_s, r.canopy_conductance_mol_m2_s
+                        ));
+                    }
+                    ui.label(format!(
+                        "Simpson {} vs {} subdivisions/day: harvest difference {:.3e} L",
+                        w.subdivisions_per_day,
+                        w.subdivisions_per_day * 2,
+                        w.harvest_resolution_difference_l
+                    ));
+                    ui.label("Resolution difference is numerical evidence, not an error bound or predictive uncertainty. Independent empirical accuracy remains unavailable.");
+                    ui.hyperlink_to(
+                        "NASA BVAD Rev2 · equations 4-23–27 and 4-29",
+                        cosmogon_sim::greenhouse::SOURCE,
+                    );
+                    ui.label(&w.semantics);
+                } else {
+                    ui.label("Transpiration unavailable. Explicitly enable it in Inputs to add a versioned humidity assumption. No water value is fabricated for legacy definitions.");
+                }
+            }
+            _ => {
+                let lamps_on_power_w = f.lamps_on_power_w;
+                ui.strong("Reproducible forecast files");
+                ui.label("Exports all 31 rows, assumptions, coefficients, sources, numerical evidence and exact optional context. Existing folders are protected.");
+                if planner.export_path.is_empty() {
+                    planner.export_path = crate::persistence::data_dir()
+                        .join("greenhouse-study")
+                        .display()
+                        .to_string();
+                }
+                ui.text_edit_singleline(&mut planner.export_path);
+                if ui.button("Save forecast to new folder").clicked() {
+                    planner.status = Some(
+                        match cosmogon_sim::greenhouse::export(
+                            &planner.definition,
+                            Some((world, habitat)),
+                            std::path::Path::new(&planner.export_path),
+                        ) {
+                            Ok(()) => format!("Saved {}", planner.export_path),
+                            Err(e) => e,
+                        },
+                    );
+                }
+                ui.separator();
+                ui.label("Reopen a source-pinned definition");
+                ui.text_edit_singleline(&mut planner.import_path);
+                if ui.button("Open definition").clicked() {
+                    let path = std::path::PathBuf::from(&planner.import_path);
+                    planner.status = Some(match planner.import(&path) {
+                        Ok(()) => "Opened crop definition without rewriting it".into(),
+                        Err(e) => e,
+                    });
+                }
+                egui::CollapsingHeader::new("Source, limits and observed habitat context").show(ui,|ui| {
+                    ui.hyperlink_to("NASA BVAD Rev2",cosmogon_sim::greenhouse::SOURCE);
+                    ui.label(cosmogon_sim::greenhouse::LIMITS);
+                    if let Some(h)=habitat.and_then(|id|world.habitats.iter().find(|h|h.id==id)) {
+                        let pressure=h.state.pressure_pa(&h.config);let ppm=if pressure>0.0 {Some(h.state.co2_pa(&h.config)/pressure*1e6)}else{None};
+                        ui.label(format!("Observed habitat #{}: {:.2} K · {:.2} kPa · CO₂ {} µmol/mol",h.id,h.state.temperature_k,pressure/1000.0,ppm.map(|v|format!("{v:.1}")).unwrap_or("unavailable".into())));
+                        ui.label(format!("Generated/served power {:.1}/{:.1} W; planner lamps require {:.1} W while on. No future headroom, maintained crop boundary or reserve is established.",h.budget.generated_w,h.budget.delivered_w,lamps_on_power_w));
+                    } else {ui.label("No selected habitat; controlled boundary inputs still require an external supplied chamber.");}
+                    ui.label("Humidity dynamics, finite irrigation/nutrients/CO₂, hardware, actual harvest, full facility energy and independent calibration remain incomplete. Dry lettuce is not a complete crew diet.");
                 });
             }
-        });
-        egui::CollapsingHeader::new("Habitat context and missing connections").show(ui,|ui| {
-            if let Some(h)=habitat.and_then(|id|world.habitats.iter().find(|h|h.id==id)) {let p=h.state.pressure_pa(&h.config);let ppm=if p>0.0 {Some(h.state.co2_pa(&h.config)/p*1e6)} else {None};ui.label(format!("Current habitat #{}: {:.2} K · CO₂ {} µmol/mol air",h.id,h.state.temperature_k,ppm.map(|v|format!("{v:.1}")).unwrap_or("unavailable".into())));ui.label(format!("Current generated/served power {:.1}/{:.1} W; crop lamps would require {:.1} W while on. This observation does not establish future headroom or reserve that demand.",h.budget.generated_w,h.budget.delivered_w,f.lamps_on_power_w));}
-            else {ui.label("No selected habitat. This standalone crop forecast still requires a supplied controlled environment.");}
-            ui.label("Closed-loop greenhouse exchange, nutrient stocks, humidity, transpiration, crop stress, cultivation equipment and actual harvest remain unimplemented. Dry edible lettuce is not a complete crew diet; fresh mass and calories are unavailable.");
-        });
-        egui::CollapsingHeader::new("Source equations and reproducible export").show(ui,|ui| {
-            ui.hyperlink_to("NASA BVAD Rev2 · crop equations and corrected low-light cases",cosmogon_sim::greenhouse::SOURCE);
-            if let Some(m)=cosmogon_sim::research::PhysicsModelRegistry::get("greenhouse") {ui.label(m.equations);ui.label(m.expected_error);}
-            ui.label("Exports source coefficients, assumptions, definition, all 31 numeric rows and the exact current world/habitat context. Existing folders are protected. Prediction uncertainty is unavailable.");
-            if planner.export_path.is_empty() {planner.export_path=crate::persistence::data_dir().join("greenhouse-study").display().to_string();}
-            ui.text_edit_singleline(&mut planner.export_path);
-            if ui.button("Save forecast to new folder").clicked() {planner.status=Some(match cosmogon_sim::greenhouse::export(&planner.definition,Some((world,habitat)),std::path::Path::new(&planner.export_path)) {Ok(())=>format!("Saved {}",planner.export_path),Err(e)=>e});}
-            ui.separator();ui.label("Reopen a source-pinned greenhouse definition");ui.text_edit_singleline(&mut planner.import_path);if ui.button("Open definition").clicked() {let path=std::path::PathBuf::from(&planner.import_path);planner.status=Some(match planner.import(&path) {Ok(())=>"Opened crop definition".into(),Err(e)=>e});}
-        });
+        }
     }
     if let Some(status) = &planner.status {
         ui.colored_label(ACCENT, status);
@@ -236,6 +502,36 @@ pub fn panel(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_native_import_has_no_water_and_invalid_water_preserves_result() {
+        let root = std::env::temp_dir().join(format!("cosmogon-water-ui-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("definition.json");
+        let d = Definition {
+            model: cosmogon_sim::greenhouse::LEGACY_MODEL.into(),
+            transpiration: None,
+            ..Default::default()
+        };
+        std::fs::write(&path, serde_json::to_vec(&d).unwrap()).unwrap();
+        let mut planner = CropPlanner::default();
+        planner.import(&path).unwrap();
+        assert!(planner.result.as_ref().unwrap().transpiration.is_none());
+        let previous = planner.metadata();
+        let d = Definition {
+            transpiration: Some(WaterAssumptions {
+                relative_humidity: 0.1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        std::fs::write(&path, serde_json::to_vec(&d).unwrap()).unwrap();
+        assert!(planner.import(&path).is_err());
+        assert_eq!(planner.metadata(), previous);
+        std::fs::write(&path, serde_json::to_vec(&Definition::default()).unwrap()).unwrap();
+        planner.import(&path).unwrap();
+        assert!(planner.result.as_ref().unwrap().transpiration.is_some());
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn failed_import_preserves_prepared_inputs_results_and_metadata() {
         let root = std::env::temp_dir().join(format!("cosmogon-crop-ui-{}", std::process::id()));

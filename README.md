@@ -114,3 +114,5 @@ Habitat [WHY explanations](docs/HABITAT_DIAGNOSTICS.md) trace exact live or reco
 Authored native camera paths connect timed views, lens changes and explicit playback/scrub; [controls and limits](docs/CINEMATIC_PATHS.md). Presentation remains independent of simulation physics.
 
 Native camera and everyday keyboard controls can now be customized with conflict checks, explicit saving and current-key help; see [keyboard controls](docs/INPUT_BINDINGS.md).
+
+The controlled lettuce planner now exposes optional source-based transpiration, water/vapor curves, humidity assumptions and numerical/source evidence alongside biomass, gas exchange and lighting. Physical greenhouse resource coupling and empirical crop calibration remain incomplete; [details](docs/TRANSPIRATION_PLANNING.md).

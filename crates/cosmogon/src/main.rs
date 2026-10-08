@@ -36,6 +36,8 @@ use bevy_egui::EguiPlugin;
 fn main() -> bevy::app::AppExit {
     let started = std::time::Instant::now();
     let args = args::Args::parse();
+    if let Some(path)=&args.greenhouse_definition {if let Err(e)=cosmogon_sim::greenhouse::Definition::read(std::path::Path::new(path)).and_then(|d|d.calculate()) {eprintln!("Cannot open greenhouse definition: {e}");return bevy::app::AppExit::error();}}
+
     if let Some(path)=&args.input_bindings {
         if let Err(e)=input::Definition::read(std::path::Path::new(path)){eprintln!("Cannot open keyboard controls: {e}");return AppExit::error();}
     }
@@ -90,7 +92,6 @@ fn main() -> bevy::app::AppExit {
             })();
             if let Err(e)=checked {eprintln!("Cannot run habitat sweep: {e}");return bevy::app::AppExit::error();}
         }
-        if let Some(path)=&args.greenhouse_definition {if let Err(e)=cosmogon_sim::greenhouse::Definition::read(std::path::Path::new(path)).and_then(|d|d.calculate()) {eprintln!("Cannot open greenhouse definition: {e}");return bevy::app::AppExit::error();}}
         if let Some(path)=&args.load {if let Err(e)=cosmogon_sim::save::read_file(std::path::Path::new(path)) {eprintln!("Cannot load automated world: {e}");return bevy::app::AppExit::error();}}
         if let Some(path)=&args.habitat_definition {if let Err(e)=cosmogon_sim::habitat::Definition::read(std::path::Path::new(path)) {eprintln!("Cannot open habitat definition: {e}");return bevy::app::AppExit::error();}}
         if let Some(path)=&args.terrain_section {if let Err(error)=cosmogon_sim::planet::section::Definition::read(std::path::Path::new(path)).and_then(|d|d.calculate()) {eprintln!("Cannot open terrain section: {error}");return bevy::app::AppExit::error();}}
