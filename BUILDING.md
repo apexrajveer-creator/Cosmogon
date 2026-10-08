@@ -161,3 +161,5 @@ Native `--load /tmp/habitat-day-1/final.cosmo --focus Mars --panel habitat --qui
 ## Greenhouse planning
 
 See [GREENHOUSE_PLANNING](docs/GREENHOUSE_PLANNING.md). CLI `greenhouse-definition --output NEW_FILE` emits inputs, `greenhouse --definition FILE --output NEW_DIR` calculates source-based crop/lighting rows and `--initial SAVE --habitat-id ID` optionally retains exact observation context. Native --panel greenhouse and --greenhouse-definition FILE open the controlled crop planner. Photos retain actual inputs/results. Physical greenhouse installation and habitat resource coupling remain unimplemented.
+
+Optional habitat oxygen generation: see [HABITAT_ELECTROLYSIS](docs/HABITAT_ELECTROLYSIS.md). Native `--panel habitat-oxygen` shows actual reaction stocks/flows and staged equipment controls; imported definitions can explicitly enable `config.electrolysis`. Existing CLI habitat studies and native photos retain the same optional chemistry, source, power/thermal budget and model pin. Legacy defaults keep the reactor absent.

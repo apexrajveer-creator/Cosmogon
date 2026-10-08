@@ -22,6 +22,7 @@ pub mod astro;
 pub mod civ;
 pub mod collision;
 pub mod expansion;
+pub mod electrolysis;
 pub mod habitability;
 pub mod habitat;
 pub mod greenhouse;

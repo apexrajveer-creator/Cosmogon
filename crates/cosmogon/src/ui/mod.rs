@@ -13,6 +13,7 @@ mod research;
 mod research_chart;
 mod surface_study;
 mod habitat;
+mod habitat_oxygen;
 mod greenhouse;
 pub use habitat::HabitatUi;
 pub(crate) use surface_study::Study;
@@ -253,7 +254,7 @@ fn init_ui_state(mut ui: ResMut<UiState>, args: Res<crate::args::Args>) {
         Some("create") => ui.create_open = true,
         Some("physics") => ui.physics_open = true,
         Some("surface") => ui.body_tab = BodyTab::Surface,
-        Some("habitat" | "habitat-controls" | "habitat-build" | "habitat-model" | "greenhouse") => ui.habitat_open = true,
+        Some("habitat" | "habitat-controls" | "habitat-build" | "habitat-model" | "habitat-oxygen" | "greenhouse") => ui.habitat_open = true,
         Some("section" | "section-map") => ui.surface_study_open = true,
         Some("alerts") => ui.alerts_open = true,
         Some("sound") => { ui.alerts_open = true; ui.alerts_tab = 1; }

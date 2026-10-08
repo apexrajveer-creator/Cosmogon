@@ -36,6 +36,8 @@ The active [habitat engineering](docs/HABITAT_ENGINEERING.md) build begins phase
 
 The connected [greenhouse planner](docs/GREENHOUSE_PLANNING.md) exposes NASA MEC low-light lettuce forecasts, protected numeric/source/context exports and native curves without crediting unconstrained crop yields to habitat stocks. Physical greenhouse installation and finite resource coupling remain incomplete; [research memo](docs/GREENHOUSE_RESEARCH.md). Current checks: 248 passed plus one existing ignored, 28 CLI/native cases and six inspected final layouts; see [GREENHOUSE_VALIDATION](docs/GREENHOUSE_VALIDATION.md).
 
+The active [finite electrolysis](docs/HABITAT_ELECTROLYSIS.md) build connects bounded water/power consumption to stored O₂ and isolated H₂, shared heat accounting, optional source/version pins, native Oxygen controls and actual CSV/JSON trajectories. [Research memo](docs/ELECTROLYSIS_RESEARCH.md). Current checks: 253 passed plus one existing ignored, 29 CLI/native cases, eight inspected captures and a 48-second packaged run; see [HABITAT_ELECTROLYSIS_VALIDATION](docs/HABITAT_ELECTROLYSIS_VALIDATION.md). Phase 9 and physical greenhouse coupling remain incomplete.
+
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
   [GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases) with macOS, Windows and Linux builds.

@@ -59,6 +59,8 @@ pub struct Config {
     pub co2_alert_pa: f64,
     pub cold_alert_k: f64,
     pub hot_alert_k: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub electrolysis: Option<crate::electrolysis::Config>,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -94,6 +96,7 @@ impl Default for Config {
             co2_alert_pa: 400.0,
             cold_alert_k: 283.15,
             hot_alert_k: 303.15,
+            electrolysis: None,
         }
     }
 }
@@ -175,6 +178,7 @@ impl Config {
         ] {
             bounds(v, 0.0, 200_000.0, n)?;
         }
+        if let Some(c) = &self.electrolysis {c.validate()?;}
         Ok(())
     }
 }
@@ -262,6 +266,9 @@ impl Definition {
         ] {
             bounds(v, 0.0, 1.0e7, n)?;
         }
+        if let Some(c) = &self.config.electrolysis {
+            if i.oxygen_reserve_kg > c.oxygen_capacity_kg {return Err("Initial O₂ reserve exceeds electrolysis product capacity".into());}
+        }
         Ok(())
     }
     pub fn read(path: &std::path::Path) -> Result<Self, String> {
@@ -280,6 +287,7 @@ impl Definition {
         Ok(value)
     }
 }
+fn zero(v: &f64) -> bool {*v == 0.0}
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct State {
     pub temperature_k: f64,
@@ -294,6 +302,8 @@ pub struct State {
     pub food_water_kg: f64,
     pub dry_waste_kg: f64,
     pub captured_co2_kg: f64,
+    #[serde(default, skip_serializing_if = "zero")]
+    pub hydrogen_kg: f64,
     pub battery_j: f64,
 }
 impl State {
@@ -309,6 +319,7 @@ impl State {
             + self.food_water_kg
             + self.dry_waste_kg
             + self.captured_co2_kg
+            + self.hydrogen_kg
     }
     pub fn oxygen_pa(&self, c: &Config) -> f64 {
         self.oxygen_kg / O2 * R * self.temperature_k / c.volume_m3
@@ -330,6 +341,9 @@ pub struct Totals {
     pub unserved_j: f64,
     pub unserved_person_seconds: f64,
     pub metabolic_person_seconds: f64,
+    /// Cumulative reference enthalpy transferred, not current recoverable chemical stock.
+    #[serde(default, skip_serializing_if = "zero")]
+    pub reaction_enthalpy_j: f64,
 }
 /// Last completed interval; instantaneous estimates are not silently mixed with these.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -359,6 +373,8 @@ pub struct Budget {
     pub mass_residual_kg: f64,
     pub electric_residual_j: f64,
     pub thermal_residual_j: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub electrolysis: Option<crate::electrolysis::Budget>,
 }
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Environment {
@@ -399,6 +415,7 @@ impl Habitat {
             food_water_kg: i.food_water_kg,
             dry_waste_kg: 0.0,
             captured_co2_kg: 0.0,
+            hydrogen_kg: 0.0,
             battery_j: i.battery_j,
         };
         Ok(Self {
@@ -440,6 +457,7 @@ impl Habitat {
             s.food_water_kg,
             s.dry_waste_kg,
             s.captured_co2_kg,
+            s.hydrogen_kg,
             s.battery_j,
         ] {
             bounds(value, 0.0, 1.0e12, "Stored habitat quantity")?;
@@ -453,11 +471,24 @@ impl Habitat {
             t.unserved_j,
             t.metabolic_person_seconds,
             t.unserved_person_seconds,
+            t.reaction_enthalpy_j,
         ] {
             bounds(value, 0.0, 1.0e300, "Cumulative habitat budget")?;
         }
         if self.alert_bits >= 128 {
             return Err("Unsupported habitat alert bits".into());
+        }
+        if let Some(b) = &self.budget.electrolysis {
+            b.validate(self.budget.seconds)?;
+            if self.budget.configuration.as_ref().and_then(|c|c.electrolysis.as_ref()).is_none() {
+                return Err("Electrolysis interval lacks its equipment configuration".into());
+            }
+        }
+        let expected_hydrogen = self.totals.reaction_enthalpy_j
+            / crate::electrolysis::REFERENCE_ENTHALPY_J_KG_OXYGEN
+            * crate::electrolysis::HYDROGEN_PER_OXYGEN;
+        if (s.hydrogen_kg - expected_hydrogen).abs() > 1e-8 * expected_hydrogen.max(1.0) {
+            return Err("Held hydrogen disagrees with cumulative reaction transfer".into());
         }
         bounds(self.budget.seconds, 0.0, PERIOD + 0.001, "Budget interval")?;
         bounds(
@@ -521,7 +552,16 @@ impl Habitat {
                 "New capture capacity is below already captured CO₂; no mass was discarded".into(),
             );
         }
+        if let Some(e) = &c.electrolysis {
+            if e.oxygen_capacity_kg < self.state.oxygen_reserve_kg || e.hydrogen_capacity_kg < self.state.hydrogen_kg {
+                return Err("New electrolysis product capacity is below held O₂ or H₂; no mass was discarded".into());
+            }
+        }
         Ok(())
+    }
+    pub fn uses_electrolysis(&self) -> bool {
+        self.config.electrolysis.is_some() || self.definition.config.electrolysis.is_some()
+            || self.budget.electrolysis.is_some() || self.state.hydrogen_kg > 0.0 || self.totals.reaction_enthalpy_j > 0.0
     }
     /// Only fixed scheduler intervals or explicit edit-time remainders enter here.
     pub fn step(&mut self, time: f64, env: Environment) -> Result<(), String> {
@@ -570,13 +610,23 @@ impl Habitat {
         } else {
             0.0
         };
-        // Order is explicit: base services, CO2 capture, water recovery, heater, radiator.
+        // Reserve nominal crew water before planning optional production. New recycle
+        // water and freed product headroom wait one interval, so requests stay causal.
+        let reactor_start_stocks = (s.potable_water_kg-c.crew as f64*3.217*dt/SECONDS_PER_DAY,s.oxygen_reserve_kg,s.hydrogen_kg);
+        let planned_oxygen = c.electrolysis.as_ref().map(|e|e.planned_oxygen_kg(
+            s.potable_water_kg-c.crew as f64*3.217*dt/SECONDS_PER_DAY,
+            s.oxygen_reserve_kg,s.hydrogen_kg,dt)).unwrap_or(0.0);
+        let reactor_request = c.electrolysis.as_ref().map(|e|
+            (planned_oxygen*e.electricity_j_kg_oxygen/dt).min(e.power_limit_w)).unwrap_or(0.0);
+        // Order is explicit: base services, CO2 capture, water recovery, heater, radiator,
+        // then optional electrolysis. It cannot displace existing life-support power.
         let requests = [
             c.base_load_w,
             c.scrubber_power_w,
             c.recycler_power_w,
             heater_request,
             pump_request,
+            reactor_request,
         ];
         let requested: f64 = requests.iter().sum();
         let discharge = (requested - generated)
@@ -591,7 +641,7 @@ impl Habitat {
             - discharge / c.discharge_efficiency * dt)
             .max(0.0);
         let mut available = generated + discharge;
-        let mut supplied = [0.0; 5];
+        let mut supplied = [0.0; 6];
         for (i, request) in requests.iter().enumerate() {
             supplied[i] = available.min(*request);
             available -= supplied[i];
@@ -649,7 +699,20 @@ impl Habitat {
             * STEFAN_BOLTZMANN
             * (s.temperature_k.powi(4) - exterior.powi(4)).max(0.0)
             * fraction(4);
-        let gross = delivered + losses + metabolic;
+        let reactor = c.electrolysis.as_ref().map(|e| {
+            let mut b = crate::electrolysis::Budget::from_power(e,planned_oxygen,reactor_request,supplied[5],dt);
+            b.constraints = e.constraints(reactor_start_stocks.0,reactor_start_stocks.1,reactor_start_stocks.2,dt,reactor_request,supplied[5]);
+            b
+        });
+        let reaction_enthalpy = reactor.as_ref().map(|b|b.reaction_enthalpy_j).unwrap_or(0.0);
+        if let Some(b) = &reactor {
+            s.potable_water_kg = (s.potable_water_kg-b.water_consumed_kg).max(0.0);
+            s.oxygen_reserve_kg += b.oxygen_generated_kg;
+            s.hydrogen_kg += b.hydrogen_generated_kg;
+        }
+        // Reaction enthalpy leaves the thermal balance; the remaining reactor electricity
+        // is waste heat. Never count all bus electricity as heat AND as reaction energy.
+        let gross = delivered + losses + metabolic - reaction_enthalpy/dt;
         let rejection = rejection_capacity.min(
             ((s.temperature_k - c.temperature_setpoint_k).max(0.0) * c.heat_capacity_j_k / dt
                 + gross)
@@ -698,7 +761,9 @@ impl Habitat {
             mass_residual_kg: s.mass_kg() - old_mass,
             electric_residual_j: electrical_residual,
             thermal_residual_j: (storage - net - conduction) * dt,
+            electrolysis: reactor,
         };
+        self.totals.reaction_enthalpy_j += reaction_enthalpy;
         self.totals.generated_j += generated * dt;
         self.totals.delivered_j += delivered * dt;
         self.totals.losses_j += losses * dt;
@@ -732,7 +797,7 @@ impl Habitat {
         bits
     }
     pub fn report(&self) -> serde_json::Value {
-        serde_json::json!({"format":"cosmogon-habitat-report","schema_version":1,"habitat":self,"oxygen_partial_pressure_pa":self.state.oxygen_pa(&self.config),"co2_partial_pressure_pa":self.state.co2_pa(&self.config),"total_pressure_pa":self.state.pressure_pa(&self.config),"data_states":{"crew_rates":"Published nominal reference model (NASA BVAD), not individual measurements","equipment_and_initial_stocks":"User-assumed design inputs","current_stores_and_budgets":"Modelled","exterior_temperature":"Global reduced climate model; local measured weather unavailable","horizontal_irradiance":"Derived from primary-star state and approximate body frame"},"uncertainty":null,"uncertainty_scope":"Input and predictive model uncertainty are not quantified","source":{"url":SOURCE,"version":"NASA BVAD Rev2 February 2022, Table 3-31","equipment":"User-assumed capacities, powers, efficiencies and alert thresholds"},"limits":"Reduced nominal demand and lumped thermal model, not validated mission hardware, local weather, purification quality, medical response or safety certification. No greenhouse, leaks, humidity dynamics, maintenance, radiation or resupply."})
+        serde_json::json!({"format":"cosmogon-habitat-report","schema_version":1,"habitat":self,"oxygen_partial_pressure_pa":self.state.oxygen_pa(&self.config),"co2_partial_pressure_pa":self.state.co2_pa(&self.config),"total_pressure_pa":self.state.pressure_pa(&self.config),"data_states":{"crew_rates":"Published nominal reference model (NASA BVAD), not individual measurements","equipment_and_initial_stocks":"User-assumed design inputs","current_stores_and_budgets":"Modelled","exterior_temperature":"Global reduced climate model; local measured weather unavailable","horizontal_irradiance":"Derived from primary-star state and approximate body frame"},"electrolysis_source":self.uses_electrolysis().then(crate::electrolysis::source),"uncertainty":null,"uncertainty_scope":"Input and predictive model uncertainty are not quantified","source":{"url":SOURCE,"version":"NASA BVAD Rev2 February 2022, Table 3-31","equipment":"User-assumed capacities, powers, efficiencies and alert thresholds"},"limits":"Reduced nominal demand and lumped thermal model, not validated mission hardware, local weather, purification quality, medical response or safety certification. No greenhouse, leaks, humidity dynamics, maintenance, radiation or resupply."})
     }
 }
 pub const ALERTS: [&str; 7] = [
@@ -871,7 +936,7 @@ pub fn export(
     {
         return Err("Observer samples must identify this habitat".into());
     }
-    let mut csv=String::from("simulation_time_s,completed_habitat_time_s,interval_s,temperature_k,total_pressure_pa,oxygen_partial_pressure_pa,co2_partial_pressure_pa,battery_j,oxygen_kg,oxygen_reserve_kg,potable_water_kg,wastewater_kg,brine_kg,food_dry_kg,food_water_kg,dry_waste_kg,captured_co2_kg,environment_available,temperature_domain_supported,horizontal_irradiance_w_m2,exterior_temperature_k,generated_w,requested_w,delivered_w,unserved_w,battery_losses_w,curtailed_w,served_cycle_fraction,metabolic_heat_w,heater_w,radiator_rejection_w,conduction_w,thermal_storage_w,mass_residual_kg,electric_residual_j,thermal_residual_j,total_unserved_j,total_unserved_person_seconds\n");
+    let mut csv=String::from("simulation_time_s,completed_habitat_time_s,interval_s,temperature_k,total_pressure_pa,oxygen_partial_pressure_pa,co2_partial_pressure_pa,battery_j,oxygen_kg,oxygen_reserve_kg,potable_water_kg,wastewater_kg,brine_kg,food_dry_kg,food_water_kg,dry_waste_kg,captured_co2_kg,environment_available,temperature_domain_supported,horizontal_irradiance_w_m2,exterior_temperature_k,generated_w,requested_w,delivered_w,unserved_w,battery_losses_w,curtailed_w,served_cycle_fraction,metabolic_heat_w,heater_w,radiator_rejection_w,conduction_w,thermal_storage_w,mass_residual_kg,electric_residual_j,thermal_residual_j,total_unserved_j,total_unserved_person_seconds,hydrogen_kg,electrolysis_requested_w,electrolysis_delivered_w,electrolysis_oxygen_generated_kg,electrolysis_hydrogen_generated_kg,electrolysis_water_consumed_kg,electrolysis_electricity_j,electrolysis_reaction_enthalpy_j,electrolysis_waste_heat_j,total_reaction_enthalpy_j,electrolysis_constraints\n");
     for row in rows {
         let h = &row.habitat;
         let s = &h.state;
@@ -936,9 +1001,16 @@ pub fn export(
             csv.push(',');
             csv.push_str(&value.to_string());
         }
+        csv.push(',');csv.push_str(&s.hydrogen_kg.to_string());
+        let reaction_values = b.electrolysis.as_ref().map(|e|[
+            e.requested_w,e.delivered_w,e.oxygen_generated_kg,e.hydrogen_generated_kg,
+            e.water_consumed_kg,e.electricity_j,e.reaction_enthalpy_j,e.waste_heat_j]);
+        for i in 0..8 {csv.push(',');if let Some(v)=reaction_values {csv.push_str(&v[i].to_string());}}
+        csv.push(',');csv.push_str(&h.totals.reaction_enthalpy_j.to_string());
+        csv.push(',');if let Some(e)=&b.electrolysis {csv.push_str(&e.constraints.iter().map(|c|c.label()).collect::<Vec<_>>().join("; "));}
         csv.push('\n');
     }
-    let data=[("definition.json",serde_json::to_vec_pretty(&h.definition).map_err(|e|e.to_string())?),("report.json",serde_json::to_vec_pretty(&h.report()).map_err(|e|e.to_string())?),("samples.json",serde_json::to_vec_pretty(rows).map_err(|e|e.to_string())?),("samples.csv",csv.into_bytes()),("initial.cosmo",crate::save::to_json(initial,"Habitat study initial world").map_err(|e|e.to_string())?.into_bytes()),("final.cosmo",crate::save::to_json(final_world,"Habitat study final world").map_err(|e|e.to_string())?.into_bytes()),("manifest.json",serde_json::to_vec_pretty(&serde_json::json!({"format":"cosmogon-habitat-study","schema_version":1,"model":MODEL,"habitat_id":id,"sample_count":rows.len(),"initial_state_fingerprint":crate::research::state_fingerprint(initial)?,"final_state_fingerprint":crate::research::state_fingerprint(final_world)?,"fingerprint_scope":"FNV-1a state identity, not cryptographic integrity","app_version":env!("CARGO_PKG_VERSION"),"simulation_time_coordinate":"seconds since J2000, same coordinate as world","habitat_intervals":"fixed 60 s plus explicit edit-time remainders; samples may follow the last completed interval","source":SOURCE,"model_descriptor":crate::research::PhysicsModelRegistry::get("habitat"),"limits":h.report()["limits"]})).map_err(|e|e.to_string())?)];
+    let data=[("definition.json",serde_json::to_vec_pretty(&h.definition).map_err(|e|e.to_string())?),("report.json",serde_json::to_vec_pretty(&h.report()).map_err(|e|e.to_string())?),("samples.json",serde_json::to_vec_pretty(rows).map_err(|e|e.to_string())?),("samples.csv",csv.into_bytes()),("initial.cosmo",crate::save::to_json(initial,"Habitat study initial world").map_err(|e|e.to_string())?.into_bytes()),("final.cosmo",crate::save::to_json(final_world,"Habitat study final world").map_err(|e|e.to_string())?.into_bytes()),("manifest.json",serde_json::to_vec_pretty(&serde_json::json!({"format":"cosmogon-habitat-study","schema_version":1,"model":MODEL,"habitat_id":id,"sample_count":rows.len(),"initial_state_fingerprint":crate::research::state_fingerprint(initial)?,"final_state_fingerprint":crate::research::state_fingerprint(final_world)?,"fingerprint_scope":"FNV-1a state identity, not cryptographic integrity","app_version":env!("CARGO_PKG_VERSION"),"simulation_time_coordinate":"seconds since J2000, same coordinate as world","habitat_intervals":"fixed 60 s plus explicit edit-time remainders; samples may follow the last completed interval","source":SOURCE,"model_descriptor":crate::research::PhysicsModelRegistry::get("habitat"),"electrolysis_model_descriptor":h.uses_electrolysis().then(||crate::research::PhysicsModelRegistry::get("electrolysis")),"electrolysis_source":h.report()["electrolysis_source"],"limits":h.report()["limits"]})).map_err(|e|e.to_string())?)];
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }

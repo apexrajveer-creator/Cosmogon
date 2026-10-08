@@ -25,3 +25,5 @@ Nominal crew-cycle throughput is limited by available O2, food and water; unserv
 ## Excluded mechanisms and next work
 
 No greenhouse, hydroponics, electrolyzer, Sabatier, humidity dynamics, leaks, airlock/EVA, microbes, fire, radiation, terrain slope, structural design, maintenance, logistics or mission hardware reliability in this first slice. No biological/safety certification. Capacity assumptions are not flight hardware measurements. Site illumination omits terrain horizon, eclipses, secondary stars and variable atmospheric transmission. Built-in residual checks establish numerical bookkeeping, not real-world predictive accuracy. Add these mechanisms through researched connected builds; phase 9 stays partial.
+
+Connected builds: [controlled crop planning](GREENHOUSE_RESEARCH.md) adds source-supported forecasts; [finite water electrolysis](ELECTROLYSIS_RESEARCH.md) adds optional actual stock/power/thermal exchange. The exclusions above describe the first baseline slice. Physical greenhouse coupling and further reactions remain unfinished.

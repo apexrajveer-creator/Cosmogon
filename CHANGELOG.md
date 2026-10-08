@@ -2,6 +2,8 @@
 
 ## Unreleased — native exploration, research and habitat engineering
 
+- Add optional finite habitat water electrolysis with separated O₂/H₂ products, crew/power priority, reaction-enthalpy and waste-heat accounting, source/version pins, native controls and actual research exports. Legacy defaults and golden `0xf2c4140a45ae509b` remain unchanged. Equipment is assumed and uncalibrated; physical greenhouse coupling remains incomplete.
+
 - Add source-pinned controlled lettuce crop planning from NASA MEC equations and corrected low-light regimes. Shared native/headless calculations retain source snapshot, analytic cumulative growth/gas exchange, explicit assumed lighting demand, integer-age graphs, protected numeric/comparison exports and exact optional habitat context. Unlimited controlled inputs are exposed; no installation, inventory credit or closed-loop greenhouse claim. No Universe/golden change.
 
 - Add authoritative user-created geographic habitat experiments with finite mass stores, NASA BVAD Rev2 nominal crew exchanges, powered air/water processing, primary-star solar/external supply, battery losses and lumped heat budgets. Ordinary undoable edits, exact save/resume, design-alert entry/recovery, native controls/markers, model/source context and protected snapshot/trajectory exports share the engine. Optional state and monotonic identifiers are omitted from untouched worlds; the golden remains `0xf2c4140a45ae509b`. Phase 9 remains partial, with unquantified predictive uncertainty and no safety/medical certification.

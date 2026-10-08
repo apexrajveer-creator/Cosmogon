@@ -41,7 +41,7 @@ impl Default for HabitatUi {
         }
     }
 }
-fn number(ui: &mut egui::Ui, label: &str, value: &mut f64, min: f64, max: f64) {
+pub(super) fn number(ui: &mut egui::Ui, label: &str, value: &mut f64, min: f64, max: f64) {
     let speed = (value.abs() * 0.01).max(0.001);
     ui.horizontal(|ui| {
         ui.label(label);
@@ -54,6 +54,7 @@ fn number(ui: &mut egui::Ui, label: &str, value: &mut f64, min: f64, max: f64) {
     });
 }
 fn config(ui: &mut egui::Ui, c: &mut Config) {
+    egui::CollapsingHeader::new("Water electrolysis").default_open(c.electrolysis.is_some()).show(ui, |ui|super::habitat_oxygen::controls(ui,&mut c.electrolysis,true));
     egui::CollapsingHeader::new("Crew and cabin")
         .default_open(true)
         .show(ui, |ui| {
@@ -225,7 +226,7 @@ pub fn panel(
         if form.tab!=4 || !sim.universe.habitats.is_empty() {egui::ComboBox::from_id_salt("habitat-selection").selected_text(form.selected.and_then(|id|sim.universe.habitats.iter().find(|h|h.id==id)).map(|h|h.definition.name.as_str()).unwrap_or("No habitats in this world")).show_ui(ui,|ui| {
             for h in &sim.universe.habitats {ui.selectable_value(&mut form.selected,Some(h.id),format!("{} · #{}",h.definition.name,h.id));}
         });}
-        ui.horizontal_wrapped(|ui| {for (i,label) in ["Budgets","Controls","Build & import","Model & export","Crop planner"].iter().enumerate() {ui.selectable_value(&mut form.tab,i,*label);}});
+        ui.horizontal_wrapped(|ui| {for (i,label) in ["Budgets","Controls","Build & import","Model & export","Crop planner","Oxygen"].iter().enumerate() {ui.selectable_value(&mut form.tab,i,*label);}});
         if let Some(status)=&form.status {ui.colored_label(ACCENT,status);}
         if form.tab==4 {
             super::greenhouse::panel(ui,&mut form.crop,&sim.universe,form.selected);
@@ -264,10 +265,11 @@ pub fn panel(
                     ui.label("Residuals check bookkeeping; they do not establish real-world predictive accuracy.");
                 });
               }
-              1=>{
+              1|5=>{
                 if form.key!=Some((sim.generation,h.id)) || form.baseline.as_ref()!=Some(c) {form.key=Some((sim.generation,h.id));form.draft=c.clone();form.baseline=Some(c.clone());}
                 ui.label("Changes are staged until Apply. Stored mass/energy stay intact; reducing capacity below stored quantity is rejected.");
-                ui.add_enabled_ui(!sim.is_reference(),|ui|config(ui,&mut form.draft));
+                if form.tab==5 {super::habitat_oxygen::readings(ui,h);}
+                ui.add_enabled_ui(!sim.is_reference(),|ui| {if form.tab==5 {super::habitat_oxygen::controls(ui,&mut form.draft.electrolysis,false);} else {config(ui,&mut form.draft);}});
                 ui.horizontal(|ui| {
                     if ui.add_enabled(!sim.is_reference() && form.draft!=*c,egui::Button::new("Apply configuration")).clicked() {edit=Some(Edit::ConfigureHabitat {system:h.definition.body.system,id:h.id,config:Box::new(form.draft.clone())});}
                     if ui.button("Discard staged changes").clicked() {form.draft=c.clone();}
@@ -326,6 +328,7 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>) {
         Some("habitat-build") => 2,
         Some("habitat-model") => 3,
         Some("greenhouse") => 4,
+        Some("habitat-oxygen") => 5,
         _ => 0,
     };
     if let Some(path)=&args.greenhouse_definition {form.tab=4;form.crop.status=form.crop.import(std::path::Path::new(path)).err();}
