@@ -758,8 +758,8 @@ fn experiment(
     let validation = plan.as_ref().map_err(Clone::clone).and_then(|_| {
         habitat_id
             .filter(|id| world.habitats.iter().any(|h| h.id == *id))
-            .map(|_| ())
             .ok_or_else(|| "Select a live habitat".to_string())
+            .and_then(|id| plan.as_ref().map_err(Clone::clone)?.validate_world(world, id))
     });
     if let Err(e) = &validation {
         ui.colored_label(ACCENT, e);
@@ -893,4 +893,34 @@ mod tests {
         assert_eq!(study.comparison_path, "new/run-001");
         assert!(study.metadata().unwrap()["comparison"]["selected_pair"]["b_minus_a"] == 0.);
     }
+    #[test]
+    fn moisture_worker_opens_actual_comparison_and_preserves_view_on_invalid_branch() {
+        let mut world = Universe::new(cosmogon_sim::UniverseSettings {
+            scenario: cosmogon_sim::Scenario::SolarSystemLab,
+            ..Default::default()
+        });
+        let mut definition = cosmogon_sim::habitat::Definition::at(cosmogon_sim::BodyRef {system:0,body:3},0.0,0.0);
+        definition.config.moisture = Some(cosmogon_sim::moisture::Config::default());
+        world.apply_edit(cosmogon_sim::sandbox::Edit::CreateHabitat {definition:Box::new(definition)}).unwrap();
+        world.advance_to(world.time+86400.0,None,None);
+        let before = cosmogon_sim::research::state_fingerprint(&world).unwrap();
+        let root = std::env::temp_dir().join(format!("cosmogon-native-moisture-worker-{}",std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let plan = Plan::linear(Parameter::MoisturePowerW,0.0,500.0,2,3,3600.0).unwrap();
+        let result = run_sweep(world.clone(),0,plan,root.join("good").to_string_lossy().into_owned(),Some(2)).unwrap();
+        let mut study = Study {metric:Metric::Vapor,..Default::default()};
+        study.commit_sweep(result).unwrap();
+        let metadata = study.metadata().unwrap();
+        assert_eq!(metadata["sweep"]["parameter"],"moisture_power_w");
+        let pair = &metadata["comparison"]["selected_pair"];
+        assert!(pair["b_minus_a"].as_f64().unwrap() < 0.0);
+        assert_eq!(pair["a_value"].as_f64(),Some(study.recording.as_ref().unwrap().rows[2].habitat.state.water_vapor_kg));
+        let plan = Plan::linear(Parameter::MoistureCondensateCapacityKg,20.0,0.0,2,3,60.0).unwrap();
+        assert!(run_sweep(world.clone(),0,plan,root.join("invalid").to_string_lossy().into_owned(),None).is_err());
+        assert!(!root.join("invalid").exists());
+        assert_eq!(study.metadata(),Some(metadata));
+        assert_eq!(cosmogon_sim::research::state_fingerprint(&world).unwrap(),before);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
 }

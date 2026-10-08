@@ -490,8 +490,8 @@ pub fn explain(h: &Habitat) -> Diagnostics {
     ];
     let configuration_matches_current = d.configuration_matches_current;
     if h.uses_moisture() {
-        d.heat.push(term("crew_vapor_phase","Crew energy retained in vapor","W",phase.map(|p|-p.0/b.seconds),"-budget.moisture.crew_phase_energy_j / seconds"));
-        d.heat.push(term("condensation","Condensation reference heat released","W",phase.map(|p|p.1/b.seconds),"budget.moisture.condensation_heat_j / seconds; electricity already in bus"));
+        d.heat.insert(3,term("crew_vapor_phase","Crew energy retained in vapor","W",phase.map(|p|-p.0/b.seconds),"-budget.moisture.crew_phase_energy_j / seconds"));
+        d.heat.insert(4,term("condensation","Condensation reference heat released","W",phase.map(|p|p.1/b.seconds),"budget.moisture.condensation_heat_j / seconds; electricity already in bus"));
         if let Some(sum)=d.heat.iter_mut().find(|t|t.id=="sum") {sum.evidence="bus + losses + metabolic - electrolysis enthalpy + Sabatier heat - crew phase + condensation - radiator + conduction";}
         d.water.push(term("crew_vapor","Crew vapor transferred to cabin","kg",vapor,"budget.moisture.crew_vapor_kg; partition of 4.467 kg/day total water output"));
         d.water.push(term("condensate","Vapor collected as raw liquid","kg",moisture.map(|m|m.condensed_kg).or_else(||c.moisture.is_none().then_some(0.0)),"budget.moisture.condensed_kg; available for later recycling"));

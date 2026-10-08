@@ -56,6 +56,8 @@ The connected [controlled transpiration](docs/TRANSPIRATION_PLANNING.md) build a
 
 The connected [finite cabin moisture](docs/HABITAT_HUMIDITY.md) build adds optional vapor/isolated condensate, supported saturation/RH, explicit phase heat and allocated dehumidification power, later powered recycling, source pins and actual native/recorded diagnostics. [Research memo](docs/HUMIDITY_RESEARCH.md). Checks: 316 passed plus one existing ignored, 57 distinct offline/refusal/native cases, fourteen final inspected layouts and a 48-second packaged run; [verification](docs/HABITAT_HUMIDITY_VALIDATION.md). Untouched worlds/old saves and the golden remain unchanged. Physical greenhouse, leaks, ice/wall condensation and equipment calibration remain incomplete. Controlled moisture equipment studies follow; the master directive remains incomplete.
 
+The connected [controlled moisture studies](docs/MOISTURE_STUDIES.md) build adds six typed single-setting experiments with retained vapor/liquid inventories, shared native/CLI preflight and exact recorded phase/water comparisons. Completed interval timing and disable semantics are explicit; WHY phase drivers appear before aggregates. Checks: 320 passed plus one existing ignored, 36 distinct offline/refusal/native cases, eight inspected packaged layouts and a 48-second normal run; [verification](docs/MOISTURE_STUDIES_VALIDATION.md). No simulation law, save schema or golden change. Paired-setting studies follow; calibration, physical greenhouse and the master directive remain incomplete.
+
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
   [GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases) with macOS, Windows and Linux builds.

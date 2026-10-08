@@ -65,4 +65,6 @@ New work must meet the relevant definitions of done; partial implementations rem
 
 17. **Finite cabin humidity (built, partial phase 9):** optional finite vapor and isolated condensate, explicit phase heat/electricity, supported source-based saturation and downstream recycling. Physical greenhouse coupling, leaks, ice/wall condensation and equipment calibration remain incomplete.
 
-18. **Controlled moisture equipment studies (next, partial phase 9/16):** typed one-setting sweeps of airborne partition, humidity setpoint and finite collector assumptions from the same retained world, actual time-supported phase/water comparisons and protected source-pinned exports. No calibration, optimal humidity or global optimization claim.
+18. **Controlled moisture equipment studies (built, partial phase 9/16):** typed one-setting sweeps of airborne partition, humidity setpoint and finite collector assumptions from the same retained world, actual time-supported phase/water comparisons and protected source-pinned exports. No calibration, optimal humidity or global optimization claim.
+
+19. **Paired habitat experiments (next, partial phase 9/16):** two settings at two levels, all four exact common-state branches, actual conditional effects and interaction contrasts. Keep single-setting studies and make unavailable interval/source support explicit; no statistical-noise, global-optimization or field-calibration claim.

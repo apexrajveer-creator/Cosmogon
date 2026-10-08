@@ -23,7 +23,7 @@ pub fn controls(ui: &mut egui::Ui, equipment: &mut Option<moisture::Config>, exp
             super::habitat::number(ui,"Process electricity (MJ/kg)",&mut energy,0.000001,1000.0);
             if energy!=original {c.electricity_j_kg=energy*1e6;}
             super::habitat::number(ui,"Isolated condensate capacity (kg)",&mut c.condensate_capacity_kg,0.0,1e7);
-            ui.label("Default vapor fraction is inferred from nominal latent heat. Ratings/setpoint are assumptions. Disable retains all water; held liquid can still enter the powered recycler.");
+            ui.label("Default vapor fraction is inferred from nominal latent heat. Ratings/setpoint are assumptions. Disable restores future crew output to legacy liquid collection and retains held water. Zero power/rate keeps vapor emission active.");
         });
     }
 }
@@ -56,9 +56,10 @@ pub fn readings(ui: &mut egui::Ui, h: &Habitat) {
         );
     }
     if h.config.moisture.is_none() {
-        ui.label("Equipment disabled; vapor, condensate and phase energy retained.");
+        ui.label("Moisture mechanism disabled: future crew output uses legacy liquid collection. Held vapor, condensate and phase energy remain.");
     }
     if let Some(b) = &h.budget.moisture {
+        ui.label(format!("Last completed {:.3} s interval · end {:.3} s", h.budget.seconds, h.last_time));
         egui::Grid::new("moisture-readings")
             .striped(true)
             .show(ui, |ui| {

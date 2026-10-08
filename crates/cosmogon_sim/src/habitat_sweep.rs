@@ -20,9 +20,15 @@ pub enum Parameter {
     ElectrolysisRateKgS,
     SabatierPowerW,
     SabatierRateKgS,
+    MoistureAirborneFraction,
+    MoistureHumiditySetpoint,
+    MoisturePowerW,
+    MoistureRateKgS,
+    MoistureElectricityJKg,
+    MoistureCondensateCapacityKg,
 }
 impl Parameter {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 15] = [
         Self::FirmPowerW,
         Self::SolarAreaM2,
         Self::BatteryCapacityJ,
@@ -32,6 +38,12 @@ impl Parameter {
         Self::ElectrolysisRateKgS,
         Self::SabatierPowerW,
         Self::SabatierRateKgS,
+        Self::MoistureAirborneFraction,
+        Self::MoistureHumiditySetpoint,
+        Self::MoisturePowerW,
+        Self::MoistureRateKgS,
+        Self::MoistureElectricityJKg,
+        Self::MoistureCondensateCapacityKg,
     ];
     pub fn id(self) -> &'static str {
         match self {
@@ -44,6 +56,12 @@ impl Parameter {
             Self::ElectrolysisRateKgS => "electrolysis_rate_kg_s",
             Self::SabatierPowerW => "sabatier_power_w",
             Self::SabatierRateKgS => "sabatier_rate_kg_s",
+            Self::MoistureAirborneFraction => "moisture_airborne_fraction",
+            Self::MoistureHumiditySetpoint => "moisture_humidity_setpoint",
+            Self::MoisturePowerW => "moisture_power_w",
+            Self::MoistureRateKgS => "moisture_rate_kg_s",
+            Self::MoistureElectricityJKg => "moisture_electricity_j_kg",
+            Self::MoistureCondensateCapacityKg => "moisture_condensate_capacity_kg",
         }
     }
     pub fn parse(s: &str) -> Result<Self, String> {
@@ -63,16 +81,31 @@ impl Parameter {
             Self::ElectrolysisRateKgS => "Electrolysis oxygen rate",
             Self::SabatierPowerW => "CO₂ reduction equipment power",
             Self::SabatierRateKgS => "CO₂ reduction rate",
+            Self::MoistureAirborneFraction => "Crew airborne moisture fraction",
+            Self::MoistureHumiditySetpoint => "Relative humidity setpoint",
+            Self::MoisturePowerW => "Dehumidifier electric power",
+            Self::MoistureRateKgS => "Condensate collection rate",
+            Self::MoistureElectricityJKg => "Condensation process electricity",
+            Self::MoistureCondensateCapacityKg => {
+                "Isolated condensate capacity (fixed initial mass)"
+            }
         }
     }
     pub fn unit(self) -> &'static str {
         match self {
-            Self::FirmPowerW | Self::ElectrolysisPowerW | Self::SabatierPowerW => "W",
+            Self::FirmPowerW
+            | Self::ElectrolysisPowerW
+            | Self::SabatierPowerW
+            | Self::MoisturePowerW => "W",
             Self::SolarAreaM2 => "m²",
             Self::BatteryCapacityJ => "J",
-            Self::WaterRecoveryFraction => "fraction",
+            Self::WaterRecoveryFraction
+            | Self::MoistureAirborneFraction
+            | Self::MoistureHumiditySetpoint => "fraction",
             Self::TemperatureSetpointK => "K",
-            Self::ElectrolysisRateKgS | Self::SabatierRateKgS => "kg/s",
+            Self::ElectrolysisRateKgS | Self::SabatierRateKgS | Self::MoistureRateKgS => "kg/s",
+            Self::MoistureElectricityJKg => "J/kg",
+            Self::MoistureCondensateCapacityKg => "kg",
         }
     }
     pub fn set(self, c: &mut habitat::Config, value: f64) -> Result<(), String> {
@@ -108,6 +141,42 @@ impl Parameter {
                     .as_mut()
                     .ok_or("Enable CO₂ reduction before sweeping its assumptions")?
                     .co2_rate_kg_s = value
+            }
+            Self::MoistureAirborneFraction => {
+                c.moisture
+                    .as_mut()
+                    .ok_or("Enable finite cabin moisture before sweeping its assumptions")?
+                    .airborne_fraction = value
+            }
+            Self::MoistureHumiditySetpoint => {
+                c.moisture
+                    .as_mut()
+                    .ok_or("Enable finite cabin moisture before sweeping its assumptions")?
+                    .relative_humidity_setpoint = value
+            }
+            Self::MoisturePowerW => {
+                c.moisture
+                    .as_mut()
+                    .ok_or("Enable finite cabin moisture before sweeping its assumptions")?
+                    .power_limit_w = value
+            }
+            Self::MoistureRateKgS => {
+                c.moisture
+                    .as_mut()
+                    .ok_or("Enable finite cabin moisture before sweeping its assumptions")?
+                    .rate_kg_s = value
+            }
+            Self::MoistureElectricityJKg => {
+                c.moisture
+                    .as_mut()
+                    .ok_or("Enable finite cabin moisture before sweeping its assumptions")?
+                    .electricity_j_kg = value
+            }
+            Self::MoistureCondensateCapacityKg => {
+                c.moisture
+                    .as_mut()
+                    .ok_or("Enable finite cabin moisture before sweeping its assumptions")?
+                    .condensate_capacity_kg = value
             }
         }
         c.validate()
@@ -186,6 +255,10 @@ impl Plan {
     }
     pub fn read(path: &std::path::Path) -> Result<Self, String> {
         use std::io::Read;
+        let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+        if !metadata.is_file() || metadata.len() > 65536 {
+            return Err("Sweep plan must be a regular file within 64 KiB".into());
+        }
         let f = std::fs::File::open(path).map_err(|e| e.to_string())?;
         if !f.metadata().map_err(|e| e.to_string())?.is_file() {
             return Err("Sweep plan must be a regular file".into());
@@ -398,5 +471,166 @@ mod tests {
             .unwrap()
             .validate()
             .is_err());
+    }
+    fn moisture_world() -> Universe {
+        let mut u = world();
+        let mut c = u.habitats[0].config.clone();
+        c.moisture = Some(crate::moisture::Config::default());
+        c.firm_power_w = 10_000.0;
+        c.solar_area_m2 = 0.0;
+        c.conductance_w_k = 0.0;
+        c.heater_limit_w = 0.0;
+        c.radiator_area_m2 = 0.0;
+        c.radiator_pump_w = 0.0;
+        c.heat_capacity_j_k = 1e9;
+        u.apply_edit(Edit::ConfigureHabitat {
+            system: 0,
+            id: 0,
+            config: Box::new(c),
+        })
+        .unwrap();
+        u.advance_to(u.time + 86400.0, None, None);
+        assert!(u.habitats[0].state.water_vapor_kg > 0.0);
+        assert!(u.habitats[0].state.condensate_kg > 0.0);
+        u
+    }
+    #[test]
+    fn moisture_sweeps_retain_stocks_sources_and_exact_replay() {
+        let u = moisture_world();
+        let before = crate::research::state_fingerprint(&u).unwrap();
+        let root =
+            std::env::temp_dir().join(format!("cosmogon-moisture-sweeps-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for (parameter, a, b) in [
+            (Parameter::MoistureAirborneFraction, 0.0, 1.0),
+            (Parameter::MoistureHumiditySetpoint, 0.2, 0.8),
+            (Parameter::MoisturePowerW, 0.0, 500.0),
+            (Parameter::MoistureRateKgS, 0.0, 15.0 / 86400.0),
+            (Parameter::MoistureElectricityJKg, 1e6, 3e6),
+            (Parameter::MoistureCondensateCapacityKg, 1.0, 20.0),
+        ] {
+            let plan = Plan::linear(parameter, a, b, 2, 3, 3600.0).unwrap();
+            let folder = root.join(parameter.id());
+            let manifest = execute(&u, 0, &plan, &folder.join("a")).unwrap();
+            execute(&u, 0, &plan, &folder.join("b")).unwrap();
+            assert_eq!(
+                manifest["common_data_versions"]["cosmogon-cabin-moisture"],
+                crate::moisture::MODEL
+            );
+            for i in 0..2 {
+                let name = format!("run-{i:03}");
+                let recording = Recording::read(&folder.join("a").join(&name)).unwrap();
+                assert_eq!(recording.rows[0].habitat.state, u.habitats[0].state);
+                assert_eq!(recording.rows[0].habitat.totals, u.habitats[0].totals);
+                let mut expected = u.habitats[0].config.clone();
+                parameter.set(&mut expected, plan.values[i]).unwrap();
+                assert_eq!(recording.rows[0].habitat.config, expected);
+                for file in ["samples.json", "samples.csv", "report.json"] {
+                    assert_eq!(
+                        std::fs::read(folder.join("a").join(&name).join(file)).unwrap(),
+                        std::fs::read(folder.join("b").join(&name).join(file)).unwrap()
+                    );
+                }
+                let h = &recording.rows.last().unwrap().habitat;
+                let mb = h.budget.moisture.as_ref().unwrap();
+                assert!(
+                    (mb.electricity_j
+                        - mb.condensed_kg * expected.moisture.as_ref().unwrap().electricity_j_kg)
+                        .abs()
+                        < 1e-8
+                );
+                assert!(
+                    (h.state.water_vapor_kg - (h.totals.crew_vapor_kg - h.totals.condensed_kg))
+                        .abs()
+                        < 1e-8
+                );
+            }
+            if parameter == Parameter::MoisturePowerW || parameter == Parameter::MoistureRateKgS {
+                let a = Recording::read(&folder.join("a/run-000")).unwrap();
+                let b = Recording::read(&folder.join("a/run-001")).unwrap();
+                assert_eq!(
+                    a.rows.last().unwrap().habitat.totals.condensed_kg,
+                    u.habitats[0].totals.condensed_kg
+                );
+                assert!(
+                    b.rows.last().unwrap().habitat.totals.condensed_kg
+                        > u.habitats[0].totals.condensed_kg
+                );
+                let pairs = crate::habitat_comparison::pairs(
+                    &a,
+                    &b,
+                    Metric::Vapor,
+                    crate::habitat_comparison::Alignment::Elapsed,
+                );
+                assert_eq!(pairs[0].b_minus_a, Some(0.0));
+                assert!(pairs.last().unwrap().b_minus_a.unwrap() < 0.0);
+            }
+        }
+        assert_eq!(crate::research::state_fingerprint(&u).unwrap(), before);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn airborne_partition_changes_phase_and_sensible_heat_without_creating_water() {
+        let mut u = moisture_world();
+        let mut c = u.habitats[0].config.clone();
+        c.moisture.as_mut().unwrap().power_limit_w = 0.0;
+        u.apply_edit(Edit::ConfigureHabitat {
+            system: 0,
+            id: 0,
+            config: Box::new(c),
+        })
+        .unwrap();
+        let initial = u.habitats[0].state.clone();
+        let root = std::env::temp_dir().join(format!(
+            "cosmogon-moisture-phase-sweep-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        execute(
+            &u,
+            0,
+            &Plan::linear(Parameter::MoistureAirborneFraction, 0.0, 1.0, 2, 2, 3600.0).unwrap(),
+            &root,
+        )
+        .unwrap();
+        let a = Recording::read(&root.join("run-000")).unwrap();
+        let b = Recording::read(&root.join("run-001")).unwrap();
+        let ah = &a.rows[1].habitat;
+        let bh = &b.rows[1].habitat;
+        let vapor_delta = bh.state.water_vapor_kg - ah.state.water_vapor_kg;
+        let sensible_delta =
+            (ah.state.temperature_k - bh.state.temperature_k) * ah.config.heat_capacity_j_k;
+        assert!(vapor_delta > 0.0);
+        assert!((sensible_delta - vapor_delta * crate::moisture::REFERENCE_PHASE_J_KG).abs() < 0.1);
+        for h in [ah, bh] {
+            assert!((h.state.mass_kg() - initial.mass_kg()).abs() < 1e-8);
+            assert_eq!(
+                h.totals.metabolic_person_seconds,
+                ah.totals.metabolic_person_seconds
+            );
+            assert!(h.budget.mass_residual_kg.abs() < 1e-8);
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn moisture_branches_reject_disabled_invalid_or_discarded_inventory_before_output() {
+        let u = moisture_world();
+        let legacy = world();
+        let root =
+            std::env::temp_dir().join(format!("cosmogon-moisture-invalid-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for (p, a, b) in [
+            (Parameter::MoistureAirborneFraction, 0.0, 1.01),
+            (Parameter::MoistureHumiditySetpoint, 0.5, -0.1),
+            (Parameter::MoisturePowerW, 100.0, -1.0),
+            (Parameter::MoistureRateKgS, 0.0, -1.0),
+            (Parameter::MoistureElectricityJKg, 1e6, 0.0),
+            (Parameter::MoistureCondensateCapacityKg, 20.0, 0.0),
+        ] {
+            let plan = Plan::linear(p, a, b, 2, 3, 60.0).unwrap();
+            assert!(execute(&u, 0, &plan, &root).is_err());
+            assert!(execute(&legacy, 0, &plan, &root).is_err());
+            assert!(!root.exists());
+        }
     }
 }

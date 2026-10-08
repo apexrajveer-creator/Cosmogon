@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased — finite cabin moisture
+- Add six controlled moisture settings to shared native/CLI habitat experiments with exact common inventories, all-branch preflight and actual phase/water comparisons. Clarify completed moisture intervals/disable semantics and expose phase heat terms before WHY aggregates. No simulation law, save schema or golden change.
+
 
 Optional source-pinned finite vapor/isolated condensate, assumed crew moisture partition, NIST-supported RH, conservative dehumidifier bus allocation, explicit crew phase debit/condensation heat and later powered liquid recycling. Native Overview/Settings/Model views, ordinary undoable edits, exact retained model pins, shared WHY and protected 85-column studies/recording graphs. Legacy configurations and golden `0xf2c4140a45ae509b` remain unchanged. No wall/ice condensation, hardware calibration, purification quality or physical greenhouse exchange claim.
 
