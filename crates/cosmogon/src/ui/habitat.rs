@@ -21,6 +21,7 @@ pub struct HabitatUi {
     export_path: String,
     status: Option<String>,
     tab: usize,
+    pub crop: super::greenhouse::CropPlanner,
 }
 impl Default for HabitatUi {
     fn default() -> Self {
@@ -36,6 +37,7 @@ impl Default for HabitatUi {
             export_path: String::new(),
             status: None,
             tab: 0,
+            crop: Default::default(),
         }
     }
 }
@@ -213,17 +215,21 @@ pub fn panel(
     let mut export = None;
     let mut clock = None;
     let max_height = (ctx.available_rect().height() - 160.0).max(240.0);
-    egui::Window::new("Habitat engineering").open(&mut open).default_pos([345.0,82.0]).default_width(540.0).show(ctx,|ui| {
+    // The planner needs room for its axes and selected-day values on first opening.
+    // Keep the window resizable; the scroll area handles smaller screens.
+    egui::Window::new("Habitat engineering").open(&mut open).default_pos([345.0,82.0]).default_width(540.0).default_height(if form.tab==4 {540.0} else {480.0}).max_height(max_height).show(ctx,|ui| {
       egui::ScrollArea::vertical().max_height(max_height).show(ui,|ui| {
-        ui.label(egui::RichText::new("Experimental mass, power and heat budgets").strong());
-        ui.label(egui::RichText::new("NASA reference crew rates · user-assumed equipment · unvalidated field accuracy").small().color(ACCENT));
+        if form.tab!=4 {ui.label(egui::RichText::new("Experimental mass, power and heat budgets").strong());
+        ui.label(egui::RichText::new("NASA reference crew rates · user-assumed equipment · unvalidated field accuracy").small().color(ACCENT));}
         if sim.is_reference() {ui.colored_label(ACCENT,"Clone this reference world to a sandbox before building or configuring habitats.");}
-        egui::ComboBox::from_id_salt("habitat-selection").selected_text(form.selected.and_then(|id|sim.universe.habitats.iter().find(|h|h.id==id)).map(|h|h.definition.name.as_str()).unwrap_or("No habitats in this world")).show_ui(ui,|ui| {
+        if form.tab!=4 || !sim.universe.habitats.is_empty() {egui::ComboBox::from_id_salt("habitat-selection").selected_text(form.selected.and_then(|id|sim.universe.habitats.iter().find(|h|h.id==id)).map(|h|h.definition.name.as_str()).unwrap_or("No habitats in this world")).show_ui(ui,|ui| {
             for h in &sim.universe.habitats {ui.selectable_value(&mut form.selected,Some(h.id),format!("{} · #{}",h.definition.name,h.id));}
-        });
-        ui.horizontal(|ui| {for (i,label) in ["Budgets","Controls","Build & import","Model & export"].iter().enumerate() {ui.selectable_value(&mut form.tab,i,*label);}});
+        });}
+        ui.horizontal_wrapped(|ui| {for (i,label) in ["Budgets","Controls","Build & import","Model & export","Crop planner"].iter().enumerate() {ui.selectable_value(&mut form.tab,i,*label);}});
         if let Some(status)=&form.status {ui.colored_label(ACCENT,status);}
-        if form.tab==2 || sim.universe.habitats.is_empty() {
+        if form.tab==4 {
+            super::greenhouse::panel(ui,&mut form.crop,&sim.universe,form.selected);
+        } else if form.tab==2 || sim.universe.habitats.is_empty() {
             ui.label("Create a new experiment on the selected solid world. Initial stocks are finite; this does not construct a measured mission habitat.");
             let body=match sim.selected {Some(Target::Body(r))=>Some(r),_=>None};
             if let Some(r)=body {let b=sim.universe.body(r);ui.strong(format!("World: {}",b.name));
@@ -319,8 +325,10 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>) {
         Some("habitat-controls") => 1,
         Some("habitat-build") => 2,
         Some("habitat-model") => 3,
+        Some("greenhouse") => 4,
         _ => 0,
     };
+    if let Some(path)=&args.greenhouse_definition {form.tab=4;form.crop.status=form.crop.import(std::path::Path::new(path)).err();}
 }
 
 #[cfg(test)]
