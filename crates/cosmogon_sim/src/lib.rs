@@ -26,6 +26,7 @@ pub mod electrolysis;
 pub mod sabatier;
 pub mod habitability;
 pub mod habitat;
+pub mod habitat_recording;
 pub mod greenhouse;
 pub mod history;
 pub mod impact;

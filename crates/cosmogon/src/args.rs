@@ -34,6 +34,9 @@ pub struct Args {
     pub mars_terrain: Option<String>,
     pub terrain_section: Option<String>,
     pub habitat_definition: Option<String>,
+    pub habitat_recording: Option<String>,
+    pub habitat_metric: Option<String>,
+    pub habitat_sample: Option<usize>,
     pub greenhouse_definition: Option<String>,
     pub surface_altitude: f64,
     pub surface_snapshot: bool,
@@ -122,6 +125,9 @@ impl Args {
                 "--continue" => a.continue_latest = true,
                 "--capture-metadata" => a.capture_metadata = true,
                 "--free-camera" => a.free_camera = true,
+                "--habitat-recording" => a.habitat_recording=Some(val()),
+                "--habitat-metric" => a.habitat_metric=Some(val()),
+                "--habitat-sample" => {let v=val();a.habitat_sample=Some(v.parse().unwrap_or(usize::MAX));},
                 "--greenhouse-definition" => a.greenhouse_definition=Some(val()),
                 "--habitat-definition" => a.habitat_definition=Some(val()),
                 "--terrain-section" => a.terrain_section = Some(val()),
@@ -161,13 +167,18 @@ impl Args {
                 f => eprintln!("ignoring unknown argument {f}"),
             }
         }
-        if (a.greenhouse_definition.is_some() || a.habitat_definition.is_some() || a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
+        if (a.habitat_recording.is_some() || a.greenhouse_definition.is_some() || a.habitat_definition.is_some() || a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
             a.new = Some(Scenario::SolarSystemLab);
         }
         a
     }
 
     fn validate_surface(&self) -> Result<(), String> {
+        if (self.habitat_metric.is_some() || self.habitat_sample.is_some()) && self.habitat_recording.is_none() {return Err("--habitat-metric/--habitat-sample require --habitat-recording".into());}
+        if self.habitat_recording.is_some() && self.greenhouse_definition.is_some() {return Err("Choose a habitat recording or a crop planner definition for the launch pane".into());}
+        if let Some(metric)=&self.habitat_metric {cosmogon_sim::habitat_recording::Metric::parse(metric)?;}
+        if self.habitat_sample.is_some_and(|n|n>=1024) {return Err("--habitat-sample must be an index between 0 and 1023".into());}
+
         if self.mars_terrain.as_deref().is_some_and(|v|!matches!(v,"4"|"16")) {return Err("--mars-terrain requires 4 or 16 pixels per degree".into());}
         if let Some(id) = &self.surface_site {
             if cosmogon_sim::planet::landing::find(id).is_none() { return Err(format!("Unknown --surface-site {id}; choose perseverance, curiosity, insight or viking-1")); }
@@ -207,4 +218,10 @@ mod tests {
         assert!(b.new.is_none());
         assert_eq!(b.profile_frames, 3600);
     }
+    #[test]
+    fn habitat_recording_options_reject_ignored_metrics_and_invalid_indices() {
+        for v in [vec!["--habitat-metric","water"],vec!["--habitat-sample","1"],vec!["--habitat-recording","x","--habitat-metric","unknown"],vec!["--habitat-recording","x","--habitat-sample","nan"],vec!["--habitat-recording","x","--habitat-sample","1024"],vec!["--habitat-recording","x","--greenhouse-definition","y"]] {assert!(Args::parse_from(v.into_iter().map(String::from)).validate_surface().is_err());}
+        let a=Args::parse_from(["--habitat-recording","x","--habitat-metric","methane","--habitat-sample","24"].into_iter().map(String::from));assert!(a.validate_surface().is_ok());assert!(matches!(a.new,Some(Scenario::SolarSystemLab)));assert_eq!(a.habitat_sample,Some(24));
+    }
+
 }

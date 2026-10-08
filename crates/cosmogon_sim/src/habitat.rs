@@ -981,7 +981,8 @@ impl Universe {
 }
 
 /// Observer rows retain both the requested world time and the completed habitat interval.
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Sample {
     pub simulation_time_s: f64,
     pub habitat: Habitat,
@@ -997,30 +998,8 @@ pub fn sample(u: &Universe, id: u64) -> Result<Sample, String> {
             .clone(),
     })
 }
-/// The caller collects actual completed states; this function never advances or fabricates
-/// samples. Exclusive directory/file creation protects existing studies and saves.
-pub fn export(
-    initial: &Universe,
-    final_world: &Universe,
-    id: u64,
-    rows: &[Sample],
-    path: &std::path::Path,
-) -> Result<(), String> {
-    use std::io::Write;
-    if rows.is_empty() || rows.len() > 1024 {
-        return Err("Export requires 1–1024 observer samples".into());
-    }
-    let h = final_world
-        .habitats
-        .iter()
-        .find(|h| h.id == id)
-        .ok_or("No such habitat")?;
-    if rows
-        .iter()
-        .any(|r| r.habitat.id != id || !r.simulation_time_s.is_finite())
-    {
-        return Err("Observer samples must identify this habitat".into());
-    }
+/// Shared actual observation formatting for export and recorded consistency checks.
+pub(crate) fn samples_csv(rows: &[Sample]) -> String {
     let mut csv=String::from("simulation_time_s,completed_habitat_time_s,interval_s,temperature_k,total_pressure_pa,oxygen_partial_pressure_pa,co2_partial_pressure_pa,battery_j,oxygen_kg,oxygen_reserve_kg,potable_water_kg,wastewater_kg,brine_kg,food_dry_kg,food_water_kg,dry_waste_kg,captured_co2_kg,environment_available,temperature_domain_supported,horizontal_irradiance_w_m2,exterior_temperature_k,generated_w,requested_w,delivered_w,unserved_w,battery_losses_w,curtailed_w,served_cycle_fraction,metabolic_heat_w,heater_w,radiator_rejection_w,conduction_w,thermal_storage_w,mass_residual_kg,electric_residual_j,thermal_residual_j,total_unserved_j,total_unserved_person_seconds,hydrogen_kg,electrolysis_requested_w,electrolysis_delivered_w,electrolysis_oxygen_generated_kg,electrolysis_hydrogen_generated_kg,electrolysis_water_consumed_kg,electrolysis_electricity_j,electrolysis_reaction_enthalpy_j,electrolysis_waste_heat_j,total_reaction_enthalpy_j,electrolysis_constraints,methane_kg,sabatier_water_kg,sabatier_requested_w,sabatier_delivered_w,sabatier_co2_consumed_kg,sabatier_hydrogen_consumed_kg,sabatier_methane_generated_kg,sabatier_water_generated_kg,sabatier_electricity_j,sabatier_reaction_heat_j,sabatier_total_heat_j,sabatier_water_processed_kg,sabatier_water_recovered_kg,total_sabatier_co2_consumed_kg,total_sabatier_heat_j,total_sabatier_water_processed_kg,sabatier_constraints\n");
     for row in rows {
         let h = &row.habitat;
@@ -1100,6 +1079,33 @@ pub fn export(
         csv.push(',');if let Some(e)=&b.sabatier {csv.push_str(&e.constraints.iter().map(|c|c.label()).collect::<Vec<_>>().join("; "));}
         csv.push('\n');
     }
+    csv
+}
+/// The caller supplies actual completed states; no advancement or fabricated samples.
+/// Exclusive directory/file creation protects existing studies and saves.
+pub fn export(
+    initial: &Universe,
+    final_world: &Universe,
+    id: u64,
+    rows: &[Sample],
+    path: &std::path::Path,
+) -> Result<(), String> {
+    use std::io::Write;
+    if rows.is_empty() || rows.len() > 1024 {
+        return Err("Export requires 1–1024 observer samples".into());
+    }
+    let h = final_world
+        .habitats
+        .iter()
+        .find(|h| h.id == id)
+        .ok_or("No such habitat")?;
+    if rows
+        .iter()
+        .any(|r| r.habitat.id != id || !r.simulation_time_s.is_finite())
+    {
+        return Err("Observer samples must identify this habitat".into());
+    }
+    let csv=samples_csv(rows);
     let data=[("definition.json",serde_json::to_vec_pretty(&h.definition).map_err(|e|e.to_string())?),("report.json",serde_json::to_vec_pretty(&h.report()).map_err(|e|e.to_string())?),("samples.json",serde_json::to_vec_pretty(rows).map_err(|e|e.to_string())?),("samples.csv",csv.into_bytes()),("initial.cosmo",crate::save::to_json(initial,"Habitat study initial world").map_err(|e|e.to_string())?.into_bytes()),("final.cosmo",crate::save::to_json(final_world,"Habitat study final world").map_err(|e|e.to_string())?.into_bytes()),("manifest.json",serde_json::to_vec_pretty(&serde_json::json!({"format":"cosmogon-habitat-study","schema_version":1,"model":MODEL,"habitat_id":id,"sample_count":rows.len(),"initial_state_fingerprint":crate::research::state_fingerprint(initial)?,"final_state_fingerprint":crate::research::state_fingerprint(final_world)?,"fingerprint_scope":"FNV-1a state identity, not cryptographic integrity","app_version":env!("CARGO_PKG_VERSION"),"simulation_time_coordinate":"seconds since J2000, same coordinate as world","habitat_intervals":"fixed 60 s plus explicit edit-time remainders; samples may follow the last completed interval","source":SOURCE,"model_descriptor":crate::research::PhysicsModelRegistry::get("habitat"),"electrolysis_model_descriptor":h.uses_electrolysis().then(||crate::research::PhysicsModelRegistry::get("electrolysis")),"electrolysis_source":h.report()["electrolysis_source"],"sabatier_model_descriptor":h.uses_sabatier().then(||crate::research::PhysicsModelRegistry::get("sabatier")),"sabatier_source":h.report()["sabatier_source"],"limits":h.report()["limits"]})).map_err(|e|e.to_string())?)];
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;

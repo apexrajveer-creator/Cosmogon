@@ -2,6 +2,8 @@
 
 ## Unreleased — native exploration, research and habitat engineering
 
+- Reopen bounded habitat studies in native Recordings with actual metric curves, explicit unavailable gaps and selected rows. Shared CLI inspection checks source/endpoint/fingerprint/budget/report/CSV consistency; asynchronous transactional imports and photo metadata preserve recorded/live scope. No world or golden change.
+
 - Connect optional finite Sabatier CO₂ reduction, isolated methane/raw water, later powered recycling and reference reaction heat to habitat controls, saves and actual source-pinned exports. Ratings are assumptions; no closed-loop or hardware-validation claim. Existing optional electrolysis and golden world are unchanged.
 
 - Add optional finite habitat water electrolysis with separated O₂/H₂ products, crew/power priority, reaction-enthalpy and waste-heat accounting, source/version pins, native controls and actual research exports. Legacy defaults and golden `0xf2c4140a45ae509b` remain unchanged. Equipment is assumed and uncalibrated; physical greenhouse coupling remains incomplete.

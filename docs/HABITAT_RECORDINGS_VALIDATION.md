@@ -1,0 +1,13 @@
+# Habitat recording viewer verification
+
+Date: 2026-10-08. Parent finite CO₂ reduction checkpoint: `af5d5ee`.
+
+Release workspace tests pass: 264, plus one existing ignored. Six added fixtures cover valid snapshots/trajectories, legacy CSV prefixes, absent reaction observations, corrupt/future/oversized inputs, exact endpoint/definition/report/source consistency, transactional import selection and CLI/native option rejection. Shared CSV extraction preserves existing outputs; initial-state replay reproduces samples JSON/CSV and report byte for byte. No Universe or golden change (`0xf2c4140a45ae509b`).
+
+Release all-targets workspace clippy and Mac packaging succeed with baseline warnings and no new warnings in changed code. Twenty-six CLI cases check seven historic habitat/electrolysis/reduction bundles, a genuine one-observation snapshot, exact replay, corruption refusals and restored input recovery. Thirteen initial native commands include nine captures and four invalid requests refused before GPU startup. A final adjacent crop capture brings the distinct CLI/native case count to forty.
+
+Actual inspection caught clipped final time labels, indistinguishable small/constant axis labels and repeated zero-time ticks for snapshots. These were corrected, and all nine viewer scenes were captured again from the final build. Ten final layouts were inspected: water, methane, raw liquid, electrolysis, initial unavailable interval, absent reaction, disabled reaction, snapshot, a different live world and the crop planner. Sidecars match shared inspected summaries, exact stored rows and independently checked selected values. The crop forecast matches the previous checkpoint exactly. Nineteen PNGs are retained including the initial layouts; ten count as accepted final layouts. Manual pointer/keyboard and assistive-technology verification remain outstanding.
+
+The packaged app ran normally for 48.07 seconds, completing 900 profile frames after 120 warmup frames with ordinary pipelined rendering and no panic. Validation terminated this bounded run. Local ad-hoc signature and DMG checksum verify. No public release, push or notarization.
+
+Ignored `dist/habitat-recordings-validation/` retains commands, summaries, mutated invalid fixtures, snapshot/replay bundles, captures and sidecars, runners, test/clippy/package logs and the ordinary profile. Its manifest ties artifact hashes to the checkpoint. Original study folders remain protected. Import checks structural numerical consistency rather than independent trajectory replay, cryptographic authenticity or field accuracy. Broader comparisons, native trajectory acquisition, uncertainty propagation, physical greenhouse exchange and the master directive remain incomplete.

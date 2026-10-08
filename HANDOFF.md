@@ -40,6 +40,8 @@ The active [finite electrolysis](docs/HABITAT_ELECTROLYSIS.md) build connects bo
 
 The connected [CO₂ reduction](docs/HABITAT_SABATIER.md) build adds optional finite captured-gas/hydrogen consumption, methane/raw-liquid storage, downstream powered recycling and reference heat release. See [SABATIER_RESEARCH](docs/SABATIER_RESEARCH.md). Current checks: 258 passed plus one existing ignored, 40 CLI/native cases, eleven accepted inspected layouts and a 48-second packaged run; [HABITAT_SABATIER_VALIDATION](docs/HABITAT_SABATIER_VALIDATION.md). Phase 9 remains partial.
 
+The active [habitat recording viewer](docs/HABITAT_RECORDINGS.md) reopens validated source-pinned trajectories/snapshots, shows actual native metric graphs and selected rows independently of the live world, and shares bounded inspection with CLI `habitat-inspect`. [Design memo](docs/HABITAT_RECORDINGS_DESIGN.md). Checks: 264 passed plus one existing ignored, 40 distinct CLI/native cases, ten accepted inspected layouts and a 48-second packaged run; [verification](docs/HABITAT_RECORDINGS_VALIDATION.md). Full directive remains incomplete.
+
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
   [GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases) with macOS, Windows and Linux builds.

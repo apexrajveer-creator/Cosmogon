@@ -165,3 +165,5 @@ See [GREENHOUSE_PLANNING](docs/GREENHOUSE_PLANNING.md). CLI `greenhouse-definiti
 Optional habitat oxygen generation: see [HABITAT_ELECTROLYSIS](docs/HABITAT_ELECTROLYSIS.md). Native `--panel habitat-oxygen` shows actual reaction stocks/flows and staged equipment controls; imported definitions can explicitly enable `config.electrolysis`. Existing CLI habitat studies and native photos retain the same optional chemistry, source, power/thermal budget and model pin. Legacy defaults keep the reactor absent.
 
 Optional CO₂ reduction: `--panel habitat-water` opens actual reaction/storage/recycler results. See [HABITAT_SABATIER](docs/HABITAT_SABATIER.md) for typed definitions, source assumptions and finite-product limits.
+
+Habitat recordings: `cosmogon-cli habitat-inspect --recording STUDY_DIR`; native `--habitat-recording STUDY_DIR --habitat-metric water --habitat-sample 24 --panel habitat-recordings`. Graphs and photo metadata retain actual independent recorded rows; see [HABITAT_RECORDINGS](docs/HABITAT_RECORDINGS.md).

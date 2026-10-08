@@ -87,6 +87,7 @@ fn capture(mut commands: Commands, args: Res<Args>, mut frames: Local<u32>, mut 
     if (args.new.is_some() || args.load.is_some() || args.continue_latest) && *state.get() != AppState::Observing {
         return;
     }
+    if args.habitat_recording.is_some() && habitat.recording.pending() {return;}
     if args.research_recording.is_some() && !research.import_automatic_done { return; }
     if args.research_batch.is_some() && !batch.automatic_done { return; }
     *frames += 1;
@@ -121,6 +122,7 @@ fn photo_metadata(sim: &crate::sim::Sim, rig: &crate::camera::CameraRig, setting
         "coordinate_registration": cosmogon_sim::planet::landing::REGISTRATION,
         "terrain_study": study.metadata(),
         "greenhouse_planner": habitat.crop.metadata(),
+        "habitat_recording": habitat.recording.metadata(),
         "habitat_reports": sim.universe.habitats.iter().map(|h|h.report()).collect::<Vec<_>>(),
         "landing_registry": cosmogon_sim::planet::landing::VERSION,
         "camera_position_render_m": rig.eye().to_array(), "orientation_xyzw": rig.rotation.to_array(),

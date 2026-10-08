@@ -112,6 +112,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         };
         if a.cmd=="greenhouse" && !matches!(flag.as_str(),"--definition"|"--output"|"--initial"|"--habitat-id") {return Err(format!("{flag} is not a greenhouse planning option"));}
         if a.cmd=="greenhouse-definition" && flag!="--output" {return Err(format!("{flag} is not a greenhouse-definition option"));}
+        if a.cmd=="habitat-inspect" && flag!="--recording" {return Err(format!("{flag} is not a habitat inspection option"));}
         if a.cmd=="habitat" && !matches!(flag.as_str(),"--definition"|"--habitat-id"|"--initial"|"--output"|"--samples"|"--interval-days"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat study option"));}
         if a.cmd=="habitat-definition" && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat-definition option"));}
         match flag.as_str() {
@@ -171,6 +172,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     }
     if matches!(a.cmd.as_str(),"habitat"|"habitat-definition") && a.initial.is_some() && (explicit_scenario || explicit_seed) {return Err("Choose saved --initial world or new --scenario/--seed, not both".into());}
     if a.cmd=="greenhouse" && a.habitat_id.is_some() && a.initial.is_none() {return Err("Greenhouse habitat context requires --initial saved world".into());}
+    if a.cmd=="habitat-inspect" && a.recording.is_none() {return Err("habitat-inspect requires --recording STUDY_FOLDER".into());}
     if a.cmd=="habitat" {
         if a.definition.is_none() && a.initial.is_none() {return Err("habitat requires --definition FILE or --initial saved world".into());}
         if a.definition.is_some() && a.habitat_id.is_some() {return Err("Choose a new --definition or existing --habitat-id".into());}
@@ -208,6 +210,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     Ok(a)
 }
 fn help() {
+    eprintln!("cosmogon-cli habitat-inspect --recording STUDY_FOLDER   # validate and inspect recorded habitat observations");
     println!(
         r#"Cosmogon headless tools
   surface --target Mars          Sample authoritative MOLA height and source-cell coverage JSON
@@ -299,6 +302,12 @@ fn main() {
         "help" => help(),
         "greenhouse-definition" => {if let Err(e)=greenhouse_definition(&a) {eprintln!("Greenhouse definition failed: {e}");std::process::exit(1);}},
         "greenhouse" => {if let Err(e)=greenhouse(&a) {eprintln!("Greenhouse planning failed: {e}");std::process::exit(1);}},
+        "habitat-inspect" => {
+            match cosmogon_sim::habitat_recording::Recording::read(std::path::Path::new(a.recording.as_deref().expect("validated recording"))) {
+                Ok(r)=>println!("{}",serde_json::to_string_pretty(&r.summary).unwrap()),
+                Err(e)=>{eprintln!("Habitat inspection failed: {e}");std::process::exit(1);},
+            }
+        },
         "habitat-definition" => {if let Err(e)=habitat_definition(&a) {eprintln!("Habitat definition failed: {e}");std::process::exit(1);}},
         "habitat" => {if let Err(e)=habitat(&a) {eprintln!("Habitat study failed: {e}");std::process::exit(1);}},
         "section" => {if let Err(e)=section(&a) {eprintln!("Terrain section failed: {e}");std::process::exit(1);}},
@@ -744,4 +753,10 @@ mod argument_tests {
         assert_eq!(a.target,"Mars");assert_eq!(a.latitude,-4.59);assert_eq!(a.longitude,137.44);
         for values in [vec!["surface","--site","unknown"],vec!["surface","--site","curiosity","--target","Earth"],vec!["surface","--site","curiosity","--latitude","0"],vec!["run","--site","curiosity"]] {assert!(args(&values).is_err());}
     }
+    #[test]
+    fn habitat_inspection_requires_a_folder_and_rejects_ignored_options() {
+        for v in [vec!["habitat-inspect"],vec!["habitat-inspect","--recording","x","--samples","3"],vec!["habitat-inspect","--recording","x","--scenario","sol"],vec!["habitat-inspect","--output","x"]] {assert!(args(&v).is_err());}
+        assert_eq!(args(&["habitat-inspect","--recording","x"]).unwrap().recording.as_deref(),Some("x"));
+    }
+
 }
