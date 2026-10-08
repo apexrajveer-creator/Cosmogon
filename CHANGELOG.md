@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — finite cabin breach
+
+- Connect optional source-pinned outward open-orifice flow to finite O₂/N₂/CO₂/vapor, retained outside mass history, supported bounded integration and separate gas/structure/phase/enthalpy identities. Native controls, WHY, protected 110-column recordings and four controlled settings share ordinary edits/saves/paired replay. Main heat report explicitly distinguishes temperature-equivalent cooling from outflow enthalpy. Absent legacy states and golden `0xf2c4140a45ae509b` remain unchanged. Constant-property/minute split approximation; no seal/rarefied/inward flow, calibrated geometry or EVA claim.
+
 ## Unreleased — recorded graph navigation
 
 - Add actual-time viewport zoom/pan/selection, truthful positive/signed log display and protected reusable layouts to ordinary/comparison/paired habitat graphs. Preserve full raw observations, selected/final analyses, simulation laws, saves and golden `0xf2c4140a45ae509b`. Correct replay diagnostic comparison warnings and retain signed-zero differences.

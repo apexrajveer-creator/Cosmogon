@@ -26,9 +26,10 @@ pub enum Parameter {
     MoistureRateKgS,
     MoistureElectricityJKg,
     MoistureCondensateCapacityKg,
+    BreachAreaM2,BreachDischarge,BreachOutsidePressurePa,BreachGamma,
 }
 impl Parameter {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 19] = [
         Self::FirmPowerW,
         Self::SolarAreaM2,
         Self::BatteryCapacityJ,
@@ -43,10 +44,11 @@ impl Parameter {
         Self::MoisturePowerW,
         Self::MoistureRateKgS,
         Self::MoistureElectricityJKg,
-        Self::MoistureCondensateCapacityKg,
+        Self::MoistureCondensateCapacityKg,Self::BreachAreaM2,Self::BreachDischarge,Self::BreachOutsidePressurePa,Self::BreachGamma,
     ];
     pub fn id(self) -> &'static str {
         match self {
+            Self::BreachAreaM2=>"breach_area_m2",Self::BreachDischarge=>"breach_discharge",Self::BreachOutsidePressurePa=>"breach_outside_pressure_pa",Self::BreachGamma=>"breach_gamma",
             Self::FirmPowerW => "firm_power_w",
             Self::SolarAreaM2 => "solar_area_m2",
             Self::BatteryCapacityJ => "battery_capacity_j",
@@ -72,6 +74,7 @@ impl Parameter {
     }
     pub fn label(self) -> &'static str {
         match self {
+            Self::BreachAreaM2=>"Open breach throat area",Self::BreachDischarge=>"Assumed breach discharge coefficient",Self::BreachOutsidePressurePa=>"Assumed outside receiver pressure",Self::BreachGamma=>"Assumed gas heat-capacity ratio",
             Self::FirmPowerW => "External firm supply",
             Self::SolarAreaM2 => "Horizontal solar panel area",
             Self::BatteryCapacityJ => "Battery capacity (fixed initial energy)",
@@ -97,7 +100,8 @@ impl Parameter {
             | Self::ElectrolysisPowerW
             | Self::SabatierPowerW
             | Self::MoisturePowerW => "W",
-            Self::SolarAreaM2 => "m²",
+            Self::SolarAreaM2 | Self::BreachAreaM2 => "m²",
+            Self::BreachOutsidePressurePa=>"Pa",Self::BreachDischarge | Self::BreachGamma=>"dimensionless",
             Self::BatteryCapacityJ => "J",
             Self::WaterRecoveryFraction
             | Self::MoistureAirborneFraction
@@ -113,6 +117,7 @@ impl Parameter {
             return Err("Sweep values must be finite".into());
         }
         match self {
+            Self::BreachAreaM2|Self::BreachDischarge|Self::BreachOutsidePressurePa|Self::BreachGamma=>{let b=c.breach.as_mut().ok_or("Enable outward cabin breach before sweeping its assumptions")?;match self {Self::BreachAreaM2=>b.area_m2=value,Self::BreachDischarge=>b.discharge_coefficient=value,Self::BreachOutsidePressurePa=>b.outside_pressure_pa=value,Self::BreachGamma=>b.gamma=value,_=>unreachable!()}},
             Self::FirmPowerW => c.firm_power_w = value,
             Self::SolarAreaM2 => c.solar_area_m2 = value,
             Self::BatteryCapacityJ => c.battery_capacity_j = value,
@@ -383,8 +388,7 @@ pub fn execute(
         let folder = format!("run-{i:03}");
         habitat::export(&initial, &world, id, &rows, &path.join(&folder))?;
         let recording = Recording::read(&path.join(&folder))?;
-        let final_values = Metric::ALL
-            .into_iter()
+        let final_values = Metric::for_habitat(&rows.last().unwrap().habitat)
             .map(|m| {
                 (
                     m.id().to_string(),

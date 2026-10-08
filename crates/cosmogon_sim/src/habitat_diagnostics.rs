@@ -187,9 +187,10 @@ pub fn explain(h: &Habitat) -> Diagnostics {
     let days = c.crew as f64 * b.seconds / SECONDS_PER_DAY * b.served_cycle_fraction;
     let recovered = b.water_recovered_kg;
     let potable_net = e_water.map(|w| recovered - 3.217 * days - w);
-    let heat_sum = e_heat.zip(s_heat).zip(phase).map(|((e, s),(debit,credit))| {
+    let cooling=b.breach.as_ref().map(|e|e.lumped_cooling_j/b.seconds).or_else(||c.breach.is_none().then_some(0.0));
+    let heat_sum = e_heat.zip(s_heat).zip(phase).zip(cooling).map(|(((e, s),(debit,credit)),cooling)| {
         b.delivered_w + b.battery_losses_w + b.metabolic_heat_w - e + s - b.radiator_rejection_w
-            + b.conduction_w - debit/b.seconds + credit/b.seconds
+            + b.conduction_w - debit/b.seconds + credit/b.seconds - cooling
     });
     d.power = vec![
         term(
@@ -412,8 +413,8 @@ pub fn explain(h: &Habitat) -> Diagnostics {
             "cabin_oxygen_net",
             "Cabin O₂ net change",
             "kg",
-            Some(b.oxygen_makeup_kg - 0.895 * days),
-            "regulator makeup - reference crew oxygen consumption",
+            b.breach.as_ref().map(|e|b.oxygen_makeup_kg - 0.895 * days-e.escaped.oxygen_kg).or_else(||c.breach.is_none().then_some(b.oxygen_makeup_kg - 0.895 * days)),
+            if h.uses_breach(){"regulator makeup - reference crew oxygen consumption - escaped O2"}else{"regulator makeup - reference crew oxygen consumption"},
         ),
         term(
             "crew_co2",
@@ -433,8 +434,8 @@ pub fn explain(h: &Habitat) -> Diagnostics {
             "cabin_co2_net",
             "Cabin CO₂ net change",
             "kg",
-            Some(1.085 * days - b.co2_captured_kg),
-            "reference crew CO2 production - actual capture",
+            b.breach.as_ref().map(|e|1.085 * days-b.co2_captured_kg-e.escaped.co2_kg).or_else(||c.breach.is_none().then_some(1.085 * days - b.co2_captured_kg)),
+            if h.uses_breach(){"reference crew CO2 production - actual capture - escaped CO2"}else{"reference crew CO2 production - actual capture"},
         ),
         term(
             "stored_oxygen_net",
@@ -498,6 +499,17 @@ pub fn explain(h: &Habitat) -> Diagnostics {
         d.water.push(term("condensate_processed","Held condensate processed","kg",Some(b.condensate_processed_kg),"budget.condensate_processed_kg; after wastewater and raw reactor product"));
         d.water.push(term("condensate_recovered","Assumed condensate water recovery","kg",Some(b.condensate_recovered_kg),"budget.condensate_recovered_kg; not purification quality"));
     }
+    if h.uses_breach() {
+        d.heat.insert(3,term("breach_cooling","Breach temperature-equivalent cooling","W",cooling.map(|w|-w),"-budget.breach.lumped_cooling_j / seconds; not full outflow enthalpy"));
+        if let Some(sum)=d.heat.iter_mut().find(|t|t.id=="sum") {sum.evidence="bus + losses + metabolic - electrolysis + Sabatier - crew phase + condensation - radiator + conduction - breach equivalent cooling";}
+        if let Some(mass)=d.water.iter_mut().find(|t|t.id=="mass_residual") {mass.label="Accounted cabin + escaped mass residual";mass.evidence="budget.mass_residual_kg; cabin stores plus cumulative escaped gas, unavailable for cabin reuse";}
+        if let Some(e)=&b.breach {
+            for (id,label,value) in [("breach_oxygen","Cabin O2 escaped",e.escaped.oxygen_kg),("breach_nitrogen","Cabin N2 escaped",e.escaped.nitrogen_kg),("breach_co2","Cabin CO2 escaped",e.escaped.co2_kg),("breach_vapor","Cabin vapor escaped",e.escaped.vapor_kg)] {d.air_and_crew.push(term(id,label,"kg",Some(value),"budget.breach.escaped; resolved finite outward substep"));}
+            d.water.push(term("escaped_vapor","Water outside cabin as escaped vapor","kg",Some(e.escaped.vapor_kg),"budget.breach.escaped.vapor_kg; not available for recycling"));
+            for (id,label,value) in [("breach_enthalpy","Breach full outflow enthalpy",e.outflow_enthalpy_j),("breach_structure","Breach structure energy change",e.structure_energy_change_j),("breach_gas","Breach gas internal energy change",e.gas_energy_change_j),("breach_phase","Breach vapor phase energy change",e.phase_energy_change_j),("breach_energy_residual","Breach substep energy residual",e.energy_residual_j)] {d.heat.push(term(id,label,"J",Some(value),"Separate breach substep identity: structure + gas + phase + outflow = residual; not additive watts in main signed sum"));}
+            d.explanations.push(Explanation{id:"breach",text:format!("{}; resolved {:.6} of {:.6} seconds, {} integration steps. Outside pressure, gamma and discharge are assumptions. Main heat debit is temperature-equivalent; full gas/structure/phase/enthalpy identity is separate. Processes/thermal minute precedes breach flow, so fast coupled transients remain approximate.",e.status.label(),e.integrated_seconds,b.seconds,e.integration_steps),evidence:vec!["budget.breach","budget.configuration.breach"]});
+        }
+    }
     let mut note = |id, text: String, evidence: Vec<&'static str>| {
         d.explanations.push(Explanation { id, text, evidence })
     };
@@ -547,7 +559,7 @@ pub fn explain(h: &Habitat) -> Diagnostics {
 pub fn report(h: &Habitat, world_time_s: f64) -> Result<serde_json::Value, String> {
     h.validate(world_time_s)?;
     Ok(
-        serde_json::json!({"format":"cosmogon-habitat-diagnostic-report","schema_version":1,"world_time_s":world_time_s,"time_coordinate":"seconds since J2000; interval end can precede world time","diagnostics":explain(h),"habitat":h,"source":{"crew":SOURCE,"electrolysis":h.uses_electrolysis().then(crate::electrolysis::source),"sabatier":h.uses_sabatier().then(crate::sabatier::source),"moisture":h.uses_moisture().then(crate::moisture::source)}}),
+        serde_json::json!({"format":"cosmogon-habitat-diagnostic-report","schema_version":1,"world_time_s":world_time_s,"time_coordinate":"seconds since J2000; interval end can precede world time","diagnostics":explain(h),"habitat":h,"source":{"crew":SOURCE,"electrolysis":h.uses_electrolysis().then(crate::electrolysis::source),"sabatier":h.uses_sabatier().then(crate::sabatier::source),"moisture":h.uses_moisture().then(crate::moisture::source),"breach":h.uses_breach().then(crate::breach::source)}}),
     )
 }
 pub fn from_world(u: &Universe, id: u64) -> Result<serde_json::Value, String> {

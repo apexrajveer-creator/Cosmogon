@@ -197,3 +197,5 @@ Controlled moisture studies reuse the existing native/CLI habitat sweeps; [MOIST
 [HABITAT_REPLAY](docs/HABITAT_REPLAY.md) documents `cosmogon-cli habitat-verify`, native `--habitat-verify`, replay captures and protected report outputs.
 
 [RECORDED_GRAPHS](docs/RECORDED_GRAPHS.md) documents native `--habitat-graph FILE`, layout imports/exports/preferences and `--panel habitat-graph-layout` captures.
+
+[CABIN_BREACH](docs/CABIN_BREACH.md) documents optional `config.breach`, protected CLI studies, new metrics/settings and native `--panel habitat-breach|habitat-breach-settings|habitat-breach-model` captures.

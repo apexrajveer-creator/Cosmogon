@@ -128,3 +128,5 @@ Paired habitat [experiments](docs/PAIRED_HABITAT_EXPERIMENTS.md) compare all fou
 [Saved-design replay verification](docs/HABITAT_REPLAY.md) independently reconstructs every paired observation and reports exact differences while preserving the original data.
 
 [Recorded graph navigation](docs/RECORDED_GRAPHS.md) adds time windows, actual-point cursors, explicit scales and reusable layouts while keeping complete numerical exports unchanged.
+
+[Finite cabin breach](docs/CABIN_BREACH.md) models outward open-orifice gas loss with an outside mass ledger, explicit assumptions/thermal limits and actual saved studies.

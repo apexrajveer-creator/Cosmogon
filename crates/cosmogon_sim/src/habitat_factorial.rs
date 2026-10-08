@@ -66,7 +66,7 @@ pub fn report_at(plan: &Plan, recordings: &[Recording], index: usize) -> Result<
     }
     let reference = &recordings[0];
     let time = reference.rows[index].simulation_time_s;
-    let metrics = Metric::ALL.into_iter().map(|metric| {
+    let metrics = Metric::for_habitat(&reference.rows[index].habitat).map(|metric| {
         let mut supported = true;
         let responses = std::array::from_fn(|i| {
             let pair = habitat_comparison::pair_at(reference,&recordings[i],metric,Alignment::World,index).expect("validated complete rows");
@@ -196,8 +196,7 @@ impl Design {
     }
     pub fn trajectory_report(&self) -> Result<Value, String> {
         let plan = self.plan()?;
-        let metrics = Metric::ALL
-            .into_iter()
+        let metrics = Metric::for_habitat(&self.recordings[0].rows[0].habitat)
             .map(|m| {
                 Ok((
                     m.id().into(),
@@ -221,7 +220,7 @@ impl Design {
         let plan = self.plan()?;
         let mut csv=String::from("metric,unit,observation_index,simulation_time_s,y00,y10,y01,y11,a_at_b0,a_at_b1,b_at_a0,b_at_a1,average_a,average_b,difference_in_differences,standard_ab_effect,support00,support10,support01,support11,index00,index10,index01,index11,world_time00_s,world_time10_s,world_time01_s,world_time11_s,interval_end00_s,interval_end10_s,interval_end01_s,interval_end11_s,interval_seconds00,interval_seconds10,interval_seconds01,interval_seconds11,interval_config_matches00,interval_config_matches10,interval_config_matches01,interval_config_matches11\n");
         let cell = |v: Option<f64>| v.map(|x| format!("{x:.17e}")).unwrap_or_default();
-        for m in Metric::ALL {
+        for m in Metric::for_habitat(&self.recordings[0].rows[0].habitat) {
             for p in curve(&plan, &self.recordings, m)? {
                 let c = &p.contrasts;
                 let mut cells = vec![
@@ -271,7 +270,7 @@ impl Design {
         std::fs::create_dir(path).map_err(|e| {
             format!("Existing trajectory analyses are protected; choose a new folder: {e}")
         })?;
-        for (name,data) in [("trajectories.json",bytes),("contrasts.csv",csv.into_bytes()),("manifest.json",serde_json::to_vec_pretty(&json!({"format":"cosmogon-habitat-factorial-trajectory-export","schema_version":1,"complete":true,"observation_count":plan.samples,"metric_count":Metric::ALL.len(),"common_state_fingerprint":self.manifest["common_state_fingerprint"],"files":["trajectories.json","contrasts.csv"]})).map_err(|e|e.to_string())?)] {
+        for (name,data) in [("trajectories.json",bytes),("contrasts.csv",csv.into_bytes()),("manifest.json",serde_json::to_vec_pretty(&json!({"format":"cosmogon-habitat-factorial-trajectory-export","schema_version":1,"complete":true,"observation_count":plan.samples,"metric_count":Metric::for_habitat(&self.recordings[0].rows[0].habitat).count(),"common_state_fingerprint":self.manifest["common_state_fingerprint"],"files":["trajectories.json","contrasts.csv"]})).map_err(|e|e.to_string())?)] {
             let mut f=std::fs::OpenOptions::new().write(true).create_new(true).open(path.join(name)).map_err(|e|format!("Incomplete trajectory analysis: {e}"))?;
             f.write_all(&data).map_err(|e|format!("Incomplete trajectory analysis: {e}"))?;
         }
@@ -359,7 +358,7 @@ pub fn read(path: &Path) -> Result<Design, String> {
         {
             return Err("Design branch differs from its common-state ordinary edit".into());
         }
-        for metric in Metric::ALL {
+        for metric in Metric::for_habitat(&recording.rows.last().ok_or("Empty design branch")?.habitat) {
             if runs[i]["final_metrics"][metric.id()]
                 != json!({"unit":metric.unit(),"value":metric.value(recording.rows.last().ok_or("Empty design branch")?)})
             {
@@ -591,7 +590,7 @@ mod tests {
             d.manifest["common_state_fingerprint"]
         );
         assert_eq!(report["final_analysis"], d.analysis);
-        for metric in Metric::ALL {
+        for metric in Metric::for_habitat(&d.recordings[0].rows[0].habitat) {
             let points = &report["metrics"][metric.id()]["points"];
             assert_eq!(points.as_array().unwrap().len(), 3);
             assert_eq!(
@@ -606,7 +605,7 @@ mod tests {
             .iter()
             .any(|v| v == false));
         let csv = std::fs::read_to_string(root.join("a/contrasts.csv")).unwrap();
-        assert_eq!(csv.lines().count(), 1 + 3 * Metric::ALL.len());
+        assert_eq!(csv.lines().count(), 1 + 3 * Metric::for_habitat(&d.recordings[0].rows[0].habitat).count());
         assert!(csv.lines().all(|l| l.split(',').count() == 40));
         std::fs::remove_dir_all(root).unwrap();
     }

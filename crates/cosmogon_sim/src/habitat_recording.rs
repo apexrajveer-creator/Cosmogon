@@ -87,11 +87,11 @@ impl Recording {
         {
             return Err("Study time range exceeds the 30-day reader horizon".into());
         }
-        let mass = first.habitat.state.mass_kg();
+        let mass = first.habitat.state.accounted_mass_kg();
         let mut previous = None;
         let mut uses_electrolysis = false;
         let mut uses_sabatier = false;
-        let mut uses_moisture=false;
+        let mut uses_moisture=false;let mut uses_breach=false;
         for row in &rows {
             if !row.simulation_time_s.is_finite()
                 || row.simulation_time_s < initial.time
@@ -107,12 +107,12 @@ impl Recording {
                 );
             }
             row.habitat.validate(row.simulation_time_s)?;
-            if (row.habitat.state.mass_kg() - mass).abs() > 1e-8 * mass.max(1.0) {
+            if (row.habitat.state.accounted_mass_kg() - mass).abs() > 1e-8 * mass.max(1.0) {
                 return Err("Recorded closed habitat mass disagrees with initial inventory".into());
             }
             uses_electrolysis |= row.habitat.uses_electrolysis();
             uses_sabatier |= row.habitat.uses_sabatier();
-            uses_moisture |= row.habitat.uses_moisture();
+            uses_moisture |= row.habitat.uses_moisture();uses_breach |= row.habitat.uses_breach();
         }
         for (used, key, descriptor, expected) in [
             (
@@ -128,11 +128,12 @@ impl Recording {
                 crate::sabatier::source(),
             ),
             (uses_moisture,"moisture_source","moisture_model_descriptor",crate::moisture::source()),
+            (uses_breach,"breach_source","breach_model_descriptor",crate::breach::source()),
         ] {
             if used
                 && (m[key] != expected
                     || m[descriptor]["id"]
-                        != if key == "moisture_source" {"moisture"} else if key == "sabatier_source" {
+                        != if key == "breach_source" {"breach"} else if key == "moisture_source" {"moisture"} else if key == "sabatier_source" {
                             "sabatier"
                         } else {
                             "electrolysis"
@@ -163,7 +164,7 @@ impl Recording {
                 ));
             }
         }
-        for key in ["electrolysis_source", "sabatier_source", "moisture_source"] {
+        for key in ["electrolysis_source", "sabatier_source", "moisture_source", "breach_source"] {
             if report[key] != expected[key] {
                 return Err("Recorded report reaction source disagrees with final habitat".into());
             }
@@ -186,7 +187,7 @@ impl Recording {
             .ok_or("Missing CSV header")?
             .split(',')
             .collect::<Vec<_>>();
-        if !matches!(header.len(), 38 | 49 | 66 | 85) {
+        if !matches!(header.len(), 38 | 49 | 66 | 85 | 110) {
             return Err("Unsupported habitat CSV columns".into());
         }
         for (a, e) in a.iter().zip(&e) {
@@ -196,7 +197,8 @@ impl Recording {
                 return Err("CSV values disagree with JSON observations".into());
             }
         }
-        let summary = serde_json::json!({"format":"cosmogon-habitat-recording-inspection","schema_version":1,"model":habitat::MODEL,"habitat_id":id,"name":definition.name,"body":definition.body,"latitude_deg":definition.latitude_deg,"longitude_east_deg":definition.longitude_east_deg,"sample_count":count,"initial_time_s":initial.time,"final_time_s":final_world.time,"duration_s":final_world.time-initial.time,"initial_state_fingerprint":initial_fp,"final_state_fingerprint":final_fp,"initial_dataset_versions":save::data_versions(&initial),"final_dataset_versions":save::data_versions(&final_world),"electrolysis_source":m["electrolysis_source"],"sabatier_source":m["sabatier_source"],"moisture_source":m["moisture_source"],"checks":"Bounded formats, sources/models, row budgets/identity/mass/time, exact endpoint worlds/fingerprints, original definition, report and CSV/JSON consistency","validation_scope":"Structural numerical consistency; no independent trajectory replay, cryptographic authenticity, predictive confidence or field calibration","metrics":Metric::ALL.iter().map(|v|serde_json::json!({"id":v.id(),"label":v.label(),"unit":v.unit()})).collect::<Vec<_>>()});
+        let mut summary = serde_json::json!({"format":"cosmogon-habitat-recording-inspection","schema_version":1,"model":habitat::MODEL,"habitat_id":id,"name":definition.name,"body":definition.body,"latitude_deg":definition.latitude_deg,"longitude_east_deg":definition.longitude_east_deg,"sample_count":count,"initial_time_s":initial.time,"final_time_s":final_world.time,"duration_s":final_world.time-initial.time,"initial_state_fingerprint":initial_fp,"final_state_fingerprint":final_fp,"initial_dataset_versions":save::data_versions(&initial),"final_dataset_versions":save::data_versions(&final_world),"electrolysis_source":m["electrolysis_source"],"sabatier_source":m["sabatier_source"],"moisture_source":m["moisture_source"],"checks":"Bounded formats, sources/models, row budgets/identity/mass/time, exact endpoint worlds/fingerprints, original definition, report and CSV/JSON consistency","validation_scope":"Structural numerical consistency; no independent trajectory replay, cryptographic authenticity, predictive confidence or field calibration","metrics":Metric::for_habitat(&first.habitat).map(|v|serde_json::json!({"id":v.id(),"label":v.label(),"unit":v.unit()})).collect::<Vec<_>>()});
+        if uses_breach {summary["breach_source"]=m["breach_source"].clone();}
         Ok(Self { rows, summary })
     }
 }
@@ -219,9 +221,10 @@ pub enum Metric {
     SabatierWater,
     SabatierHeat,
     Vapor,Condensate,Humidity,CondensationHeat,
+    TotalPressure,EscapedGas,BreachLoss,BreachCooling,
 }
 impl Metric {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 22] = [
         Self::Water,
         Self::OxygenReserve,
         Self::Hydrogen,
@@ -235,10 +238,13 @@ impl Metric {
         Self::UnservedPower,
         Self::ElectrolysisOxygen,
         Self::SabatierWater,
-        Self::SabatierHeat,Self::Vapor,Self::Condensate,Self::Humidity,Self::CondensationHeat,
+        Self::SabatierHeat,Self::Vapor,Self::Condensate,Self::Humidity,Self::CondensationHeat,Self::TotalPressure,Self::EscapedGas,Self::BreachLoss,Self::BreachCooling,
     ];
+    /// Additive breach metrics do not rewrite older design analyses/summary identities.
+    pub fn for_habitat(h:&habitat::Habitat)->impl Iterator<Item=Self> {let used=h.uses_breach();Self::ALL.into_iter().filter(move |m| used || !matches!(m,Self::TotalPressure|Self::EscapedGas|Self::BreachLoss|Self::BreachCooling))}
     pub fn id(self) -> &'static str {
         match self {
+            Self::TotalPressure=>"total_pressure",Self::EscapedGas=>"escaped_gas",Self::BreachLoss=>"breach_loss",Self::BreachCooling=>"breach_cooling",
             Self::Water => "water",
             Self::OxygenReserve => "oxygen_reserve",
             Self::Hydrogen => "hydrogen",
@@ -264,6 +270,7 @@ impl Metric {
     }
     pub fn label(self) -> &'static str {
         match self {
+            Self::TotalPressure=>"Total cabin pressure",Self::EscapedGas=>"Cumulative escaped cabin gas",Self::BreachLoss=>"Supported interval gas escape",Self::BreachCooling=>"Supported interval equivalent cooling",
             Self::Water => "Water stock",
             Self::OxygenReserve => "Oxygen reserve",
             Self::Hydrogen => "Isolated hydrogen",
@@ -284,22 +291,26 @@ impl Metric {
     pub fn unit(self) -> &'static str {
         match self {
             Self::Temperature => "K",
-            Self::OxygenPressure | Self::Co2Pressure => "Pa",
+            Self::OxygenPressure | Self::Co2Pressure | Self::TotalPressure => "Pa",
             Self::Battery => "kWh",
             Self::DeliveredPower | Self::UnservedPower => "W",
-            Self::SabatierHeat | Self::CondensationHeat => "kJ",
+            Self::SabatierHeat | Self::CondensationHeat | Self::BreachCooling => "kJ",
             Self::Humidity=>"%",
             _ => "kg",
         }
     }
     pub fn is_interval(self) -> bool {
-        matches!(self,Self::DeliveredPower | Self::UnservedPower | Self::ElectrolysisOxygen | Self::SabatierWater | Self::SabatierHeat | Self::CondensationHeat)
+        matches!(self,Self::DeliveredPower | Self::UnservedPower | Self::ElectrolysisOxygen | Self::SabatierWater | Self::SabatierHeat | Self::CondensationHeat | Self::BreachLoss | Self::BreachCooling)
     }
     pub fn value(self, row: &Sample) -> Option<f64> {
         let h = &row.habitat;
         let s = &h.state;
         let b = &h.budget;
         Some(match self {
+            Self::TotalPressure=>s.pressure_pa(&h.config),
+            Self::EscapedGas=>{if !h.uses_breach(){return None;}s.escaped_gas.unwrap_or_default().mass_kg()},
+            Self::BreachLoss|Self::BreachCooling=>{let e=b.breach.as_ref()?;if !e.status.supported(){return None;}
+                if self==Self::BreachLoss{e.escaped.mass_kg()}else{e.lumped_cooling_j/1000.0}},
             Self::Water => s.potable_water_kg,
             Self::Vapor=>{if !h.uses_moisture(){return None;}s.water_vapor_kg},
             Self::Condensate=>{if !h.uses_moisture(){return None;}s.condensate_kg},

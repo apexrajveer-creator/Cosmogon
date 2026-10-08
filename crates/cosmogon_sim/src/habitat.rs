@@ -65,6 +65,8 @@ pub struct Config {
     pub sabatier: Option<crate::sabatier::Config>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub moisture: Option<crate::moisture::Config>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub breach: Option<crate::breach::Config>,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -103,6 +105,7 @@ impl Default for Config {
             electrolysis: None,
             sabatier: None,
             moisture: None,
+            breach: None,
         }
     }
 }
@@ -187,6 +190,7 @@ impl Config {
         if let Some(c) = &self.electrolysis {c.validate()?;}
         if let Some(c) = &self.sabatier {c.validate()?;}
         if let Some(c) = &self.moisture {c.validate()?;}
+        if let Some(c) = &self.breach {c.validate()?;}
         Ok(())
     }
 }
@@ -322,6 +326,9 @@ pub struct State {
     pub water_vapor_kg: f64,
     #[serde(default, skip_serializing_if = "zero")]
     pub condensate_kg: f64,
+    /// Cumulative gas outside the cabin, never available to cabin consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub escaped_gas: Option<crate::breach::Gas>,
     pub battery_j: f64,
 }
 impl State {
@@ -342,6 +349,8 @@ impl State {
             + self.sabatier_water_kg
             + self.water_vapor_kg + self.condensate_kg
     }
+    pub fn accounted_mass_kg(&self)->f64 {self.mass_kg()+self.escaped_gas.map(|g|g.mass_kg()).unwrap_or(0.0)}
+    pub fn cabin_gas(&self)->crate::breach::Gas {crate::breach::Gas {oxygen_kg:self.oxygen_kg,nitrogen_kg:self.nitrogen_kg,co2_kg:self.co2_kg,vapor_kg:self.water_vapor_kg}}
     pub fn oxygen_pa(&self, c: &Config) -> f64 {
         self.oxygen_kg / O2 * R * self.temperature_k / c.volume_m3
     }
@@ -380,6 +389,8 @@ pub struct Totals {
     pub crew_vapor_kg: f64,
     #[serde(default, skip_serializing_if = "zero")]
     pub condensed_kg: f64,
+    #[serde(default, skip_serializing_if = "zero")]
+    pub breach_enthalpy_j: f64,
 }
 /// Last completed interval; instantaneous estimates are not silently mixed with these.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -415,6 +426,8 @@ pub struct Budget {
     pub sabatier: Option<crate::sabatier::Budget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub moisture: Option<crate::moisture::Budget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub breach: Option<crate::breach::Budget>,
     #[serde(default, skip_serializing_if = "zero")]
     pub condensate_processed_kg: f64,
     #[serde(default, skip_serializing_if = "zero")]
@@ -466,7 +479,7 @@ impl Habitat {
             hydrogen_kg: 0.0,
             methane_kg: 0.0,
             sabatier_water_kg: 0.0,
-            water_vapor_kg:0.0,condensate_kg:0.0,
+            water_vapor_kg:0.0,condensate_kg:0.0,escaped_gas:None,
             battery_j: i.battery_j,
         };
         Ok(Self {
@@ -515,6 +528,11 @@ impl Habitat {
         ] {
             bounds(value, 0.0, 1.0e12, "Stored habitat quantity")?;
         }
+        if let Some(g)=s.escaped_gas {
+            g.validate()?;
+            let original=Self::new(self.id,self.definition.clone(),self.last_time)?.state.mass_kg();
+            if (s.accounted_mass_kg()-original).abs()>1e-8*original.max(1.0) {return Err("Accounted cabin + escaped mass disagrees with original finite inventory".into());}
+        }
         let t = &self.totals;
         for value in [
             t.generated_j,
@@ -527,7 +545,7 @@ impl Habitat {
             t.reaction_enthalpy_j,
             t.sabatier_co2_consumed_kg,
             t.sabatier_heat_j,
-            t.sabatier_water_processed_kg, t.condensate_processed_kg,t.crew_vapor_kg,t.condensed_kg,
+            t.sabatier_water_processed_kg, t.condensate_processed_kg,t.crew_vapor_kg,t.condensed_kg,t.breach_enthalpy_j,
         ] {
             bounds(value, 0.0, 1.0e300, "Cumulative habitat budget")?;
         }
@@ -557,7 +575,19 @@ impl Habitat {
             if (expected-b.crew_vapor_kg).abs()>1e-8*expected.max(1.0) {return Err("Moisture crew partition disagrees with retained interval".into());}
             if b.delivered_w>self.budget.delivered_w+1e-6 {return Err("Moisture interval exceeds bus budget".into());}
         }
-        for (actual,expected) in [(s.water_vapor_kg,t.crew_vapor_kg-t.condensed_kg),(s.condensate_kg,t.condensed_kg-t.condensate_processed_kg)] {
+        if let Some(b)=&self.budget.breach {
+            let cabin=self.budget.configuration.as_ref().ok_or("Breach interval lacks cabin configuration")?;
+            let c=cabin.breach.as_ref().ok_or("Breach interval lacks breach configuration")?;
+            b.validate(c,self.budget.seconds,cabin.volume_m3,cabin.heat_capacity_j_k)?;
+            let escaped=s.escaped_gas.ok_or("Breach interval lacks cumulative escaped ledger")?;
+            for (total,interval) in [(escaped.oxygen_kg,b.escaped.oxygen_kg),(escaped.nitrogen_kg,b.escaped.nitrogen_kg),(escaped.co2_kg,b.escaped.co2_kg),(escaped.vapor_kg,b.escaped.vapor_kg),(t.breach_enthalpy_j,b.outflow_enthalpy_j)] {if total+1e-8*total.max(1.0)<interval {return Err("Breach cumulative history below completed transfer".into());}}
+
+            for (now,start,out) in [(s.oxygen_kg,b.initial_gas.oxygen_kg,b.escaped.oxygen_kg),(s.nitrogen_kg,b.initial_gas.nitrogen_kg,b.escaped.nitrogen_kg),(s.co2_kg,b.initial_gas.co2_kg,b.escaped.co2_kg),(s.water_vapor_kg,b.initial_gas.vapor_kg,b.escaped.vapor_kg)] {
+                if (now-start+out).abs()>1e-8*start.max(1.0) {return Err("Breach final cabin stocks disagree with retained transfer".into());}
+            }
+            if s.temperature_k!=b.final_temperature_k {return Err("Breach final temperature disagrees with cabin".into());}
+        }
+        for (actual,expected) in [(s.water_vapor_kg,t.crew_vapor_kg-t.condensed_kg-s.escaped_gas.map(|g|g.vapor_kg).unwrap_or(0.0)),(s.condensate_kg,t.condensed_kg-t.condensate_processed_kg)] {
             if (actual-expected).abs()>1e-8*actual.abs().max(expected.abs()).max(t.crew_vapor_kg).max(1.0) {return Err("Moisture stores disagree with cumulative transfer history".into());}
         }
         bounds(self.budget.condensate_processed_kg,0.0,self.budget.water_processed_kg,"Condensate processed")?;
@@ -653,6 +683,7 @@ impl Habitat {
         if let Some(m)=&c.moisture {if m.condensate_capacity_kg<self.state.condensate_kg {return Err("New condensate capacity is below held liquid; no water discarded".into());}}
         Ok(())
     }
+    pub fn uses_breach(&self)->bool {self.config.breach.is_some() || self.definition.config.breach.is_some() || self.budget.breach.is_some() || self.state.escaped_gas.is_some() || self.totals.breach_enthalpy_j>0.0}
     pub fn uses_moisture(&self)->bool {self.config.moisture.is_some() || self.definition.config.moisture.is_some() || self.budget.moisture.is_some() || self.totals.crew_vapor_kg>0.0 || self.state.water_vapor_kg>0.0 || self.state.condensate_kg>0.0}
     pub fn uses_sabatier(&self) -> bool {
         self.config.sabatier.is_some() || self.definition.config.sabatier.is_some() || self.budget.sabatier.is_some()
@@ -696,7 +727,7 @@ impl Habitat {
         }
         let c = &self.config;
         let s = &mut self.state;
-        let old_mass = s.mass_kg();
+        let old_mass = s.accounted_mass_kg();
         let old_battery = s.battery_j;
         let old_temperature = s.temperature_k;
         let generated = c.firm_power_w
@@ -871,6 +902,18 @@ impl Habitat {
         s.temperature_k = old_temperature
             + (exterior - old_temperature) * x * phi
             + net * dt / c.heat_capacity_j_k * phi;
+        // The existing thermal/process minute precedes the bounded finite breach substep.
+        let breach=c.breach.as_ref().map(|e|crate::breach::integrate(e,s.cabin_gas(),s.temperature_k,c.volume_m3,c.heat_capacity_j_k,dt));
+        let cooling=breach.as_ref().map(|b|b.lumped_cooling_j).unwrap_or(0.0);
+        if let Some(b)=&breach {
+            s.oxygen_kg=(s.oxygen_kg-b.escaped.oxygen_kg).max(0.0);
+            s.nitrogen_kg=(s.nitrogen_kg-b.escaped.nitrogen_kg).max(0.0);
+            s.co2_kg=(s.co2_kg-b.escaped.co2_kg).max(0.0);
+            s.water_vapor_kg=(s.water_vapor_kg-b.escaped.vapor_kg).max(0.0);
+            s.escaped_gas.get_or_insert_with(Default::default).add(b.escaped);
+            s.temperature_k=b.final_temperature_k;
+            self.totals.breach_enthalpy_j+=b.outflow_enthalpy_j;
+        }
         let storage = c.heat_capacity_j_k * (s.temperature_k - old_temperature) / dt;
         let conduction = c.conductance_w_k * (exterior - old_temperature) * phi - net * (1.0 - phi);
         let electrical_residual =
@@ -898,11 +941,12 @@ impl Habitat {
             radiator_rejection_w: rejection,
             conduction_w: conduction,
             thermal_storage_w: storage,
-            mass_residual_kg: s.mass_kg() - old_mass,
+            mass_residual_kg: s.accounted_mass_kg() - old_mass,
             electric_residual_j: electrical_residual,
-            thermal_residual_j: (storage - net - conduction) * dt,
+            thermal_residual_j: (storage - net - conduction) * dt + cooling,
             electrolysis: reactor,
             sabatier: reduction,
+            breach,
             moisture,condensate_processed_kg:condensate_processed,condensate_recovered_kg:condensate_recovered,
             sabatier_water_processed_kg: product_processed,
             sabatier_water_recovered_kg: product_recovered,
@@ -943,7 +987,7 @@ impl Habitat {
         bits
     }
     pub fn report(&self) -> serde_json::Value {
-        serde_json::json!({"format":"cosmogon-habitat-report","schema_version":1,"habitat":self,"diagnostics":crate::habitat_diagnostics::explain(self),"oxygen_partial_pressure_pa":self.state.oxygen_pa(&self.config),"co2_partial_pressure_pa":self.state.co2_pa(&self.config),"total_pressure_pa":self.state.pressure_pa(&self.config),"data_states":{"crew_rates":"Published nominal reference model (NASA BVAD), not individual measurements","equipment_and_initial_stocks":"User-assumed design inputs","current_stores_and_budgets":"Modelled","exterior_temperature":"Global reduced climate model; local measured weather unavailable","horizontal_irradiance":"Derived from primary-star state and approximate body frame"},"electrolysis_source":self.uses_electrolysis().then(crate::electrolysis::source),"sabatier_source":self.uses_sabatier().then(crate::sabatier::source),"moisture_source":self.uses_moisture().then(crate::moisture::source),"moisture_observation":self.uses_moisture().then(||serde_json::json!({"vapor_pressure_pa":self.state.vapor_pressure_pa(&self.config),"relative_humidity":self.state.relative_humidity(&self.config),"reference_phase_energy_j":self.state.phase_energy_j(),"supersaturated":self.state.relative_humidity(&self.config).map(|v|v>1.0)})),"uncertainty":null,"uncertainty_scope":"Input and predictive model uncertainty are not quantified","source":{"url":SOURCE,"version":"NASA BVAD Rev2 February 2022, Table 3-31","equipment":"User-assumed capacities, powers, efficiencies and alert thresholds"},"limits":"Reduced nominal demand and lumped thermal model, not validated mission hardware, local weather, purification quality, medical response or safety certification. Optional reduced humidity budget; no greenhouse exchange, wall/ice condensation, leaks, maintenance, radiation or resupply."})
+        serde_json::json!({"format":"cosmogon-habitat-report","schema_version":1,"habitat":self,"diagnostics":crate::habitat_diagnostics::explain(self),"oxygen_partial_pressure_pa":self.state.oxygen_pa(&self.config),"co2_partial_pressure_pa":self.state.co2_pa(&self.config),"total_pressure_pa":self.state.pressure_pa(&self.config),"data_states":{"crew_rates":"Published nominal reference model (NASA BVAD), not individual measurements","equipment_and_initial_stocks":"User-assumed design inputs","current_stores_and_budgets":"Modelled","exterior_temperature":"Global reduced climate model; local measured weather unavailable","horizontal_irradiance":"Derived from primary-star state and approximate body frame"},"electrolysis_source":self.uses_electrolysis().then(crate::electrolysis::source),"sabatier_source":self.uses_sabatier().then(crate::sabatier::source),"moisture_source":self.uses_moisture().then(crate::moisture::source),"breach_source":self.uses_breach().then(crate::breach::source),"moisture_observation":self.uses_moisture().then(||serde_json::json!({"vapor_pressure_pa":self.state.vapor_pressure_pa(&self.config),"relative_humidity":self.state.relative_humidity(&self.config),"reference_phase_energy_j":self.state.phase_energy_j(),"supersaturated":self.state.relative_humidity(&self.config).map(|v|v>1.0)})),"uncertainty":null,"uncertainty_scope":"Input and predictive model uncertainty are not quantified","source":{"url":SOURCE,"version":"NASA BVAD Rev2 February 2022, Table 3-31","equipment":"User-assumed capacities, powers, efficiencies and alert thresholds"},"limits":"Reduced nominal demand and lumped thermal model, not validated mission hardware, local weather, purification quality, medical response or safety certification. Optional reduced humidity budget; no greenhouse exchange, wall/ice condensation, seal/inward/rarefied leakage, EVA, maintenance, radiation or resupply."})
     }
 }
 pub const ALERTS: [&str; 7] = [
@@ -1061,7 +1105,7 @@ pub fn sample(u: &Universe, id: u64) -> Result<Sample, String> {
 }
 /// Shared actual observation formatting for export and recorded consistency checks.
 pub(crate) fn samples_csv(rows: &[Sample]) -> String {
-    let mut csv=String::from("simulation_time_s,completed_habitat_time_s,interval_s,temperature_k,total_pressure_pa,oxygen_partial_pressure_pa,co2_partial_pressure_pa,battery_j,oxygen_kg,oxygen_reserve_kg,potable_water_kg,wastewater_kg,brine_kg,food_dry_kg,food_water_kg,dry_waste_kg,captured_co2_kg,environment_available,temperature_domain_supported,horizontal_irradiance_w_m2,exterior_temperature_k,generated_w,requested_w,delivered_w,unserved_w,battery_losses_w,curtailed_w,served_cycle_fraction,metabolic_heat_w,heater_w,radiator_rejection_w,conduction_w,thermal_storage_w,mass_residual_kg,electric_residual_j,thermal_residual_j,total_unserved_j,total_unserved_person_seconds,hydrogen_kg,electrolysis_requested_w,electrolysis_delivered_w,electrolysis_oxygen_generated_kg,electrolysis_hydrogen_generated_kg,electrolysis_water_consumed_kg,electrolysis_electricity_j,electrolysis_reaction_enthalpy_j,electrolysis_waste_heat_j,total_reaction_enthalpy_j,electrolysis_constraints,methane_kg,sabatier_water_kg,sabatier_requested_w,sabatier_delivered_w,sabatier_co2_consumed_kg,sabatier_hydrogen_consumed_kg,sabatier_methane_generated_kg,sabatier_water_generated_kg,sabatier_electricity_j,sabatier_reaction_heat_j,sabatier_total_heat_j,sabatier_water_processed_kg,sabatier_water_recovered_kg,total_sabatier_co2_consumed_kg,total_sabatier_heat_j,total_sabatier_water_processed_kg,sabatier_constraints,water_vapor_kg,condensate_kg,vapor_pressure_pa,relative_humidity,saturation_pressure_pa,reference_phase_energy_j,moisture_requested_w,moisture_delivered_w,crew_vapor_kg,crew_phase_energy_j,condensed_kg,condensation_heat_j,moisture_electricity_j,moisture_constraints,condensate_processed_kg,condensate_recovered_kg,total_crew_vapor_kg,total_condensed_kg,total_condensate_processed_kg\n");
+    let mut csv=String::from("simulation_time_s,completed_habitat_time_s,interval_s,temperature_k,total_pressure_pa,oxygen_partial_pressure_pa,co2_partial_pressure_pa,battery_j,oxygen_kg,oxygen_reserve_kg,potable_water_kg,wastewater_kg,brine_kg,food_dry_kg,food_water_kg,dry_waste_kg,captured_co2_kg,environment_available,temperature_domain_supported,horizontal_irradiance_w_m2,exterior_temperature_k,generated_w,requested_w,delivered_w,unserved_w,battery_losses_w,curtailed_w,served_cycle_fraction,metabolic_heat_w,heater_w,radiator_rejection_w,conduction_w,thermal_storage_w,mass_residual_kg,electric_residual_j,thermal_residual_j,total_unserved_j,total_unserved_person_seconds,hydrogen_kg,electrolysis_requested_w,electrolysis_delivered_w,electrolysis_oxygen_generated_kg,electrolysis_hydrogen_generated_kg,electrolysis_water_consumed_kg,electrolysis_electricity_j,electrolysis_reaction_enthalpy_j,electrolysis_waste_heat_j,total_reaction_enthalpy_j,electrolysis_constraints,methane_kg,sabatier_water_kg,sabatier_requested_w,sabatier_delivered_w,sabatier_co2_consumed_kg,sabatier_hydrogen_consumed_kg,sabatier_methane_generated_kg,sabatier_water_generated_kg,sabatier_electricity_j,sabatier_reaction_heat_j,sabatier_total_heat_j,sabatier_water_processed_kg,sabatier_water_recovered_kg,total_sabatier_co2_consumed_kg,total_sabatier_heat_j,total_sabatier_water_processed_kg,sabatier_constraints,water_vapor_kg,condensate_kg,vapor_pressure_pa,relative_humidity,saturation_pressure_pa,reference_phase_energy_j,moisture_requested_w,moisture_delivered_w,crew_vapor_kg,crew_phase_energy_j,condensed_kg,condensation_heat_j,moisture_electricity_j,moisture_constraints,condensate_processed_kg,condensate_recovered_kg,total_crew_vapor_kg,total_condensed_kg,total_condensate_processed_kg,escaped_oxygen_kg,escaped_nitrogen_kg,escaped_co2_kg,escaped_vapor_kg,accounted_mass_kg,breach_initial_pressure_pa,breach_final_pressure_pa,breach_initial_temperature_k,breach_final_temperature_k,breach_initial_rate_kg_s,breach_final_rate_kg_s,breach_integrated_seconds,breach_steps,breach_oxygen_kg,breach_nitrogen_kg,breach_co2_kg,breach_vapor_kg,breach_lumped_cooling_j,breach_structure_energy_change_j,breach_gas_energy_change_j,breach_phase_energy_change_j,breach_outflow_enthalpy_j,breach_energy_residual_j,breach_status,total_breach_enthalpy_j\n");
     for row in rows {
         let h = &row.habitat;
         let s = &h.state;
@@ -1143,6 +1187,12 @@ pub(crate) fn samples_csv(rows: &[Sample]) -> String {
         for i in 0..7 {csv.push(',');if let Some(v)=mv {csv.push_str(&v[i].to_string());}}
         csv.push(',');if let Some(m)=&b.moisture {csv.push_str(&m.constraints.join("; "));}
         for v in [b.condensate_processed_kg,b.condensate_recovered_kg,h.totals.crew_vapor_kg,h.totals.condensed_kg,h.totals.condensate_processed_kg] {csv.push(',');csv.push_str(&v.to_string());}
+        let escaped=s.escaped_gas.unwrap_or_default();
+        for v in [escaped.oxygen_kg,escaped.nitrogen_kg,escaped.co2_kg,escaped.vapor_kg,s.accounted_mass_kg()] {csv.push(',');csv.push_str(&v.to_string());}
+        let bv=b.breach.as_ref().map(|e|[e.initial_pressure_pa,e.final_pressure_pa,e.initial_temperature_k,e.final_temperature_k,e.initial_rate_kg_s,e.final_rate_kg_s,e.integrated_seconds,e.integration_steps as f64,e.escaped.oxygen_kg,e.escaped.nitrogen_kg,e.escaped.co2_kg,e.escaped.vapor_kg,e.lumped_cooling_j,e.structure_energy_change_j,e.gas_energy_change_j,e.phase_energy_change_j,e.outflow_enthalpy_j,e.energy_residual_j]);
+        for i in 0..18 {csv.push(',');if let Some(v)=bv {csv.push_str(&v[i].to_string());}}
+        csv.push(',');if let Some(e)=&b.breach {csv.push_str(e.status.label());}
+        csv.push(',');csv.push_str(&h.totals.breach_enthalpy_j.to_string());
         csv.push('\n');
     }
     csv
@@ -1172,7 +1222,7 @@ pub fn export(
         return Err("Observer samples must identify this habitat".into());
     }
     let csv=samples_csv(rows);
-    let data=[("definition.json",serde_json::to_vec_pretty(&h.definition).map_err(|e|e.to_string())?),("report.json",serde_json::to_vec_pretty(&h.report()).map_err(|e|e.to_string())?),("samples.json",serde_json::to_vec_pretty(rows).map_err(|e|e.to_string())?),("samples.csv",csv.into_bytes()),("initial.cosmo",crate::save::to_json(initial,"Habitat study initial world").map_err(|e|e.to_string())?.into_bytes()),("final.cosmo",crate::save::to_json(final_world,"Habitat study final world").map_err(|e|e.to_string())?.into_bytes()),("manifest.json",serde_json::to_vec_pretty(&serde_json::json!({"format":"cosmogon-habitat-study","schema_version":1,"model":MODEL,"habitat_id":id,"sample_count":rows.len(),"initial_state_fingerprint":crate::research::state_fingerprint(initial)?,"final_state_fingerprint":crate::research::state_fingerprint(final_world)?,"fingerprint_scope":"FNV-1a state identity, not cryptographic integrity","app_version":env!("CARGO_PKG_VERSION"),"simulation_time_coordinate":"seconds since J2000, same coordinate as world","habitat_intervals":"fixed 60 s plus explicit edit-time remainders; samples may follow the last completed interval","source":SOURCE,"model_descriptor":crate::research::PhysicsModelRegistry::get("habitat"),"electrolysis_model_descriptor":h.uses_electrolysis().then(||crate::research::PhysicsModelRegistry::get("electrolysis")),"electrolysis_source":h.report()["electrolysis_source"],"sabatier_model_descriptor":h.uses_sabatier().then(||crate::research::PhysicsModelRegistry::get("sabatier")),"sabatier_source":h.report()["sabatier_source"],"moisture_source":h.uses_moisture().then(crate::moisture::source),"moisture_model_descriptor":h.uses_moisture().then(||crate::research::PhysicsModelRegistry::get("moisture")),"limits":h.report()["limits"]})).map_err(|e|e.to_string())?)];
+    let data=[("definition.json",serde_json::to_vec_pretty(&h.definition).map_err(|e|e.to_string())?),("report.json",serde_json::to_vec_pretty(&h.report()).map_err(|e|e.to_string())?),("samples.json",serde_json::to_vec_pretty(rows).map_err(|e|e.to_string())?),("samples.csv",csv.into_bytes()),("initial.cosmo",crate::save::to_json(initial,"Habitat study initial world").map_err(|e|e.to_string())?.into_bytes()),("final.cosmo",crate::save::to_json(final_world,"Habitat study final world").map_err(|e|e.to_string())?.into_bytes()),("manifest.json",serde_json::to_vec_pretty(&serde_json::json!({"format":"cosmogon-habitat-study","schema_version":1,"model":MODEL,"habitat_id":id,"sample_count":rows.len(),"initial_state_fingerprint":crate::research::state_fingerprint(initial)?,"final_state_fingerprint":crate::research::state_fingerprint(final_world)?,"fingerprint_scope":"FNV-1a state identity, not cryptographic integrity","app_version":env!("CARGO_PKG_VERSION"),"simulation_time_coordinate":"seconds since J2000, same coordinate as world","habitat_intervals":"fixed 60 s plus explicit edit-time remainders; samples may follow the last completed interval","source":SOURCE,"model_descriptor":crate::research::PhysicsModelRegistry::get("habitat"),"electrolysis_model_descriptor":h.uses_electrolysis().then(||crate::research::PhysicsModelRegistry::get("electrolysis")),"electrolysis_source":h.report()["electrolysis_source"],"sabatier_model_descriptor":h.uses_sabatier().then(||crate::research::PhysicsModelRegistry::get("sabatier")),"sabatier_source":h.report()["sabatier_source"],"breach_source":h.uses_breach().then(crate::breach::source),"breach_model_descriptor":h.uses_breach().then(||crate::research::PhysicsModelRegistry::get("breach")),"moisture_source":h.uses_moisture().then(crate::moisture::source),"moisture_model_descriptor":h.uses_moisture().then(||crate::research::PhysicsModelRegistry::get("moisture")),"limits":h.report()["limits"]})).map_err(|e|e.to_string())?)];
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
