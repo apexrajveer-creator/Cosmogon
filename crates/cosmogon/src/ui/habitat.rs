@@ -376,7 +376,7 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
         Some("habitat-oxygen") => 5,
         Some("habitat-water") => 6,
         Some("habitat-humidity"|"habitat-humidity-settings"|"habitat-humidity-model")=>9,
-        Some("habitat-paired"|"habitat-paired-table"|"habitat-paired-files"|"habitat-paired-replay"|"habitat-recordings"|"habitat-experiments"|"habitat-recording-why"|"habitat-recording-why-water"|"habitat-recording-why-heat"|"habitat-recording-why-air"|"habitat-recording-why-evidence") => 7,
+        Some("habitat-paired"|"habitat-paired-table"|"habitat-paired-files"|"habitat-paired-replay"|"habitat-graph-layout"|"habitat-recordings"|"habitat-experiments"|"habitat-recording-why"|"habitat-recording-why-water"|"habitat-recording-why-heat"|"habitat-recording-why-air"|"habitat-recording-why-evidence") => 7,
         _ => 0,
     };
     form.moisture_pane=match args.panel.as_deref(){Some("habitat-humidity-settings")=>1,Some("habitat-humidity-model")=>2,_=>0};
@@ -386,17 +386,22 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
     form.recording.why_mode=args.panel.as_deref().is_some_and(|p|p.starts_with("habitat-recording-why"));
     form.recording.why.section=match args.panel.as_deref(){Some("habitat-recording-why-water")=>1,Some("habitat-recording-why-heat")=>2,Some("habitat-recording-why-air")=>3,Some("habitat-recording-why-evidence")=>4,_=>0};
     form.recording.experiment_mode=args.panel.as_deref()==Some("habitat-experiments");
-    if let Some(path)=&args.habitat_recording {form.tab=7;form.recording.metric=args.habitat_metric.as_deref().and_then(|v|cosmogon_sim::habitat_recording::Metric::parse(v).ok()).unwrap_or_default();form.recording.start(path.clone(),args.habitat_sample);}
+    form.recording.graph.load_preferences();
+    if let Some(path)=&args.habitat_graph {match super::habitat_graph::Layout::read(std::path::Path::new(path)){Ok(d)=>form.recording.graph.layout=d,Err(e)=>form.recording.graph.status=Some(e)}}
+    form.recording.apply_graph_layout();
+    form.recording.graph_mode=args.panel.as_deref()==Some("habitat-graph-layout");
+    if let Some(path)=&args.habitat_recording {form.tab=7;form.recording.metric=args.habitat_metric.as_deref().and_then(|v|cosmogon_sim::habitat_recording::Metric::parse(v).ok()).unwrap_or(form.recording.metric);form.recording.start(path.clone(),args.habitat_sample);}
     form.recording.factorial_mode=args.panel.as_deref().is_some_and(|p|p.starts_with("habitat-paired"));
     form.recording.paired_pane=match args.panel.as_deref() {Some("habitat-paired-table")=>1,Some("habitat-paired-files")=>2,Some("habitat-paired-replay")=>3,_=>0};
     form.recording.replay.launch=args.habitat_verify;
-    form.recording.effect=args.habitat_effect.as_deref().and_then(|s|cosmogon_sim::habitat_factorial::Effect::parse(s).ok()).unwrap_or_default();
+    form.recording.effect=args.habitat_effect.as_deref().and_then(|s|cosmogon_sim::habitat_factorial::Effect::parse(s).ok()).unwrap_or(form.recording.effect);
     if let Some(path)=&args.habitat_compare {form.recording.start_comparison(path.clone());}
     if let Some(a)=&args.habitat_alignment {form.recording.alignment=cosmogon_sim::habitat_comparison::Alignment::parse(a).unwrap_or_default();}
     if let Some(path)=&args.habitat_sweep {
-        form.tab=7;form.recording.metric=args.habitat_metric.as_deref().and_then(|v|cosmogon_sim::habitat_recording::Metric::parse(v).ok()).unwrap_or_default();
+        form.tab=7;form.recording.metric=args.habitat_metric.as_deref().and_then(|v|cosmogon_sim::habitat_recording::Metric::parse(v).ok()).unwrap_or(form.recording.metric);
         match cosmogon_sim::habitat_sweep::Plan::read(std::path::Path::new(path)) {Ok(plan)=>form.recording.launch=Some(super::habitat_recordings::Launch {plan,id:args.habitat_study_id,output:args.habitat_study_output.clone().unwrap_or_default(),sample:args.habitat_sample,initial_path:args.load.clone()}),Err(e)=>form.recording.status=Some(e)}
     }
+    form.recording.sync_graph_layout();
     if let Some(path)=&args.greenhouse_definition {form.tab=4;if let Err(e)=form.crop.import(std::path::Path::new(path)) {error!("Cannot open greenhouse definition at startup: {e}");form.crop.status=Some(e);exit.write(bevy::app::AppExit::error());}}
 }
 

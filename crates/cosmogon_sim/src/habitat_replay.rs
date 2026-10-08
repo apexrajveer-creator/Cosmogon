@@ -32,8 +32,28 @@ fn preview(value: &Value) -> Value {
         _ => value.clone(),
     }
 }
+// serde_json numeric equality merges signed zeros. Retain canonical number kinds/bits
+// without allocating complete object strings repeatedly while finding diagnostics.
+fn same_json(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(a), Value::Number(b)) => {
+            a == b
+                && a.is_f64() == b.is_f64()
+                && (!a.is_f64() || a.as_f64().unwrap().to_bits() == b.as_f64().unwrap().to_bits())
+        }
+        (Value::Array(a), Value::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same_json(a, b))
+        }
+        (Value::Object(a), Value::Object(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .all(|(key, v)| b.get(key).is_some_and(|other| same_json(v, other)))
+        }
+        _ => a == b,
+    }
+}
 fn differences(recorded: &Value, actual: &Value, path: &str, out: &mut Vec<Value>) {
-    if recorded.to_string() == actual.to_string() || out.len() >= 8 {
+    if out.len() >= 8 || same_json(recorded, actual) {
         return;
     }
     match (recorded, actual) {
@@ -233,6 +253,26 @@ mod tests {
             values: [0.2, 1.0],
         });
         habitat_sweep::execute(&world, 0, &p, root).unwrap();
+    }
+    #[test]
+    fn diagnostic_comparison_distinguishes_signed_zero_without_changing_equal_values() {
+        let a = json!({"flow":-0.0,"unchanged":[1.25,4,true]});
+        let b = json!({"flow":0.0,"unchanged":[1.25,4,true]});
+        assert_eq!(a, b);
+        assert!(!same_json(&a, &b));
+        assert!(same_json(&a, &a));
+        let mut fields = Vec::new();
+        differences(&a, &b, "sample", &mut fields);
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0]["path"], "sample.flow");
+        assert_eq!(
+            fields[0]["recorded"].as_f64().unwrap().to_bits(),
+            (-0_f64).to_bits()
+        );
+        assert_eq!(
+            fields[0]["recomputed"].as_f64().unwrap().to_bits(),
+            0_f64.to_bits()
+        );
     }
     #[test]
     fn exact_replay_checks_every_row_endpoint_and_protects_source_and_report() {

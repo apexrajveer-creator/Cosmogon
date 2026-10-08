@@ -62,6 +62,7 @@ fn main() -> bevy::app::AppExit {
             .map_err(|e|e.to_string()).and_then(|u|habitat_audio::export(&u,args.habitat_audio.expect("validated audio id"),std::path::Path::new(output)));
         return match result {Ok(())=>{println!("Saved habitat sound preview to {output}");AppExit::Success},Err(e)=>{eprintln!("Cannot export habitat sound: {e}");AppExit::error()}};
     }
+    if let Some(path)=&args.habitat_graph {if let Err(e)=ui::habitat_graph::Layout::read(std::path::Path::new(path)){eprintln!("Cannot open recorded graph layout: {e}");return AppExit::error();}}
     if args.habitat_effect.is_some() || args.habitat_verify {
         let paired=if let Some(path)=&args.habitat_recording {cosmogon_sim::habitat_factorial::read(std::path::Path::new(path)).map(|_|())}
         else if let Some(path)=&args.habitat_sweep {cosmogon_sim::habitat_sweep::Plan::read(std::path::Path::new(path)).and_then(|p|if p.secondary.is_some(){Ok(())}else{Err("Paired effect/replay selection requires a paired plan".into())})}

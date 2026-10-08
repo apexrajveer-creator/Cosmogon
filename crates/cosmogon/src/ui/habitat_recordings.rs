@@ -105,6 +105,8 @@ pub struct Study {
     pub why_mode: bool,
     pub why: super::habitat_why::View,
     pub replay: super::habitat_replay::View,
+    pub graph:super::habitat_graph::View,
+    pub graph_mode:bool,
     pub alignment: Alignment,
     comparison_path: String,
     comparison_output: String,
@@ -123,6 +125,21 @@ pub struct Study {
     requested_sample: Option<usize>,
 }
 impl Study {
+    pub fn apply_graph_layout(&mut self) {
+        self.metric=Metric::parse(&self.graph.layout.metric).expect("validated layout metric");
+        self.effect=Effect::parse(&self.graph.layout.effect).expect("validated layout effect");
+        self.alignment=Alignment::parse(&self.graph.layout.alignment).expect("validated layout alignment");
+        self.paired_curve=None;
+    }
+    pub fn sync_graph_layout(&mut self) {
+        self.graph.layout.metric=self.metric.id().into();self.graph.layout.effect=self.effect.id().into();self.graph.layout.alignment=match self.alignment {Alignment::Elapsed=>"elapsed",Alignment::World=>"world"}.into();
+    }
+    fn graph_metadata(&self)->serde_json::Value {
+        let Some(r)=&self.recording else{return serde_json::Value::Null;};
+        let series=if self.factorial_mode {self.paired.as_ref().and_then(|d|d.curve(self.metric).ok()).map(|p|paired_series(&p,self.effect,self.alignment)).unwrap_or_default()}else{ordinary_series(r,self.comparison.as_ref(),self.alignment,self.metric)};
+        let mut layout=self.graph.layout.clone();layout.metric=self.metric.id().into();layout.effect=self.effect.id().into();layout.alignment=match self.alignment{Alignment::Elapsed=>"elapsed",Alignment::World=>"world"}.into();
+        self.graph.metadata(&series,self.selected,&layout)
+    }
     pub fn start(&mut self, path: String, sample: Option<usize>) {
         let location = std::path::PathBuf::from(&path);
         if location.join("plan.json").exists() {
@@ -219,7 +236,7 @@ impl Study {
         self.recording = Some(result.a);
         self.comparison = Some(result.b);
         self.selected = index;
-        self.factorial_mode &= result.manifest["factorial_analysis"].is_object();
+        self.factorial_mode = (self.factorial_mode || self.graph_mode) && result.manifest["factorial_analysis"].is_object();
         self.paired_curve=curve.map(|points|(self.metric,points));
         self.replay.reset();
         self.paired_source=if result.paired.is_some() {result.path.clone()}else{String::new()};
@@ -308,7 +325,7 @@ impl Study {
         let r = self.recording.as_ref()?;
         let row = &r.rows[self.selected.min(r.rows.len() - 1)];
         Some(
-            serde_json::json!({"summary":r.summary,"metric":self.metric.id(),"unit":self.metric.unit(),"selected_observation":self.selected,"selected_row":row,"why":self.why_mode.then(||self.why.metadata(&row.habitat,row.simulation_time_s,"recorded_completed_interval")),"selected_value":self.metric.value(row),"comparison":self.comparison.as_ref().map(|b| {let pairs=habitat_comparison::pairs(r,b,self.metric,self.alignment);let pair=&pairs[self.selected.min(pairs.len()-1)];serde_json::json!({"summary":b.summary,"alignment":self.alignment,"selected_pair":pair,"selected_row":pair.b_index.map(|j|&b.rows[j]),"report":habitat_comparison::report(r,b,self.metric,self.alignment)})}),"sweep":self.sweep_manifest,"paired_results_visible":self.factorial_mode,"replay":self.replay.metadata(),"paired_source":self.paired.as_ref().map(|_|&self.paired_source),"paired_selected_analysis":self.paired.as_ref().and_then(|d|d.report_at(self.selected).ok()),"paired_curve":self.paired_curve.as_ref().filter(|(m,_)|*m==self.metric).map(|(_,points)|serde_json::json!({"metric":self.metric.id(),"effect":self.effect.id(),"point_count":points.len(),"available_count":points.iter().filter(|p|self.effect.value(&p.contrasts).is_some()).count(),"selected_point":points.get(self.selected),"pane":self.paired_pane})),"scope":"Independent recorded view at capture request, possibly hidden; no live-world or camera change"}),
+            serde_json::json!({"summary":r.summary,"metric":self.metric.id(),"unit":self.metric.unit(),"selected_observation":self.selected,"selected_row":row,"why":self.why_mode.then(||self.why.metadata(&row.habitat,row.simulation_time_s,"recorded_completed_interval")),"selected_value":self.metric.value(row),"comparison":self.comparison.as_ref().map(|b| {let pairs=habitat_comparison::pairs(r,b,self.metric,self.alignment);let pair=&pairs[self.selected.min(pairs.len()-1)];serde_json::json!({"summary":b.summary,"alignment":self.alignment,"selected_pair":pair,"selected_row":pair.b_index.map(|j|&b.rows[j]),"report":habitat_comparison::report(r,b,self.metric,self.alignment)})}),"sweep":self.sweep_manifest,"paired_results_visible":self.factorial_mode,"graph_view":self.graph_metadata(),"graph_layout_visible":self.graph_mode,"replay":self.replay.metadata(),"paired_source":self.paired.as_ref().map(|_|&self.paired_source),"paired_selected_analysis":self.paired.as_ref().and_then(|d|d.report_at(self.selected).ok()),"paired_curve":self.paired_curve.as_ref().filter(|(m,_)|*m==self.metric).map(|(_,points)|serde_json::json!({"metric":self.metric.id(),"effect":self.effect.id(),"point_count":points.len(),"available_count":points.iter().filter(|p|self.effect.value(&p.contrasts).is_some()).count(),"selected_point":points.get(self.selected),"pane":self.paired_pane})),"scope":"Independent recorded view at capture request, possibly hidden; no live-world or camera change"}),
         )
     }
 }
@@ -323,182 +340,12 @@ fn value_text(value: Option<f64>) -> String {
         })
         .unwrap_or_else(|| "unavailable".into())
 }
-fn graph(
-    ui: &mut egui::Ui,
-    r: &Recording,
-    b: Option<&Recording>,
-    alignment: Alignment,
-    metric: Metric,
-    selected: &mut usize,
-) {
-    ui.label(format!(
-        "{} ({}) vs {}",
-        metric.label(),
-        metric.unit(),
-        if alignment == Alignment::Elapsed {
-            "elapsed terrestrial hours"
-        } else {
-            "world seconds (J2000)"
-        }
-    ));
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 120.0),
-        egui::Sense::click_and_drag(),
-    );
-    let plot = egui::Rect::from_min_max(
-        rect.min + egui::vec2(64.0, 8.0),
-        rect.max - egui::vec2(12.0, 26.0),
-    );
-    if plot.width() < 1.0 || plot.height() < 1.0 {
-        return;
-    }
-    let painter = ui.painter_at(rect);
-    painter.rect_filled(plot, 4.0, egui::Color32::from_rgb(11, 15, 24));
-    let values = r
-        .rows
-        .iter()
-        .chain(b.into_iter().flat_map(|b| b.rows.iter()))
-        .filter_map(|row| metric.value(row))
-        .collect::<Vec<_>>();
-    if values.is_empty() {
-        painter.text(
-            plot.center(),
-            egui::Align2::CENTER_CENTER,
-            "No active interval observations for this metric",
-            egui::FontId::proportional(12.0),
-            MUTED,
-        );
-        return;
-    }
-    let low = values.iter().copied().fold(f64::INFINITY, f64::min);
-    let high = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    let span = (high - low).max(high.abs() * 0.01).max(1e-9);
-    let lo = (low - span * 0.05).max(0.0);
-    let range = (high + span * 0.05 - lo).max(1e-12);
-    let first = r.rows[0].simulation_time_s;
-    let b_first = b.map(|b| b.rows[0].simulation_time_s).unwrap_or(first);
-    let start = alignment.coordinate(first, first).min(
-        b.map(|_| alignment.coordinate(b_first, b_first))
-            .unwrap_or(alignment.coordinate(first, first)),
-    );
-    let end = alignment
-        .coordinate(r.rows.last().unwrap().simulation_time_s, first)
-        .max(
-            b.map(|b| alignment.coordinate(b.rows.last().unwrap().simulation_time_s, b_first))
-                .unwrap_or(start),
-        );
-    let duration = end - start;
-    let x = |row: &cosmogon_sim::habitat::Sample, origin: f64| {
-        plot.left()
-            + plot.width()
-                * ((alignment.coordinate(row.simulation_time_s, origin) - start)
-                    / duration.max(1.0)) as f32
-    };
-    let at = |row: &cosmogon_sim::habitat::Sample, v: f64, origin: f64| {
-        egui::pos2(
-            x(row, origin),
-            plot.bottom() - plot.height() * ((v - lo) / range) as f32,
-        )
-    };
-    for n in 0..=3 {
-        let y = plot.bottom() - plot.height() * n as f32 / 3.0;
-        painter.line_segment(
-            [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
-            egui::Stroke::new(1.0_f32, egui::Color32::from_gray(40)),
-        );
-        painter.text(
-            egui::pos2(plot.left() - 4.0, y),
-            egui::Align2::RIGHT_CENTER,
-            {
-                let v = lo + range * n as f64 / 3.0;
-                if range < 0.01 || v.abs() >= 1e5 {
-                    format!("{v:.4e}")
-                } else {
-                    format!("{v:.4}")
-                }
-            },
-            egui::FontId::proportional(10.0),
-            MUTED,
-        );
-    }
-    for n in 0..=3 {
-        if duration == 0.0 && n > 0 {
-            continue;
-        }
-        let x = plot.left() + plot.width() * n as f32 / 3.0;
-        painter.text(
-            egui::pos2(x, plot.bottom() + 6.0),
-            if n == 3 {
-                egui::Align2::RIGHT_TOP
-            } else {
-                egui::Align2::CENTER_TOP
-            },
-            if alignment == Alignment::Elapsed {
-                format!("{:.2}", (start + duration * n as f64 / 3.0) / 3600.0)
-            } else {
-                format!("{:.9e}", start + duration * n as f64 / 3.0)
-            },
-            egui::FontId::proportional(10.0),
-            MUTED,
-        );
-    }
-    for (series, origin, color, partner) in std::iter::once((r, first, ACCENT, false)).chain(
-        b.into_iter()
-            .map(|b| (b, b_first, egui::Color32::from_rgb(91, 196, 230), true)),
-    ) {
-        let mut previous = None;
-        for row in &series.rows {
-            if let Some(v) = metric.value(row) {
-                let p = at(row, v, origin);
-                if let Some(old) = previous {
-                    painter.line_segment([old, p], egui::Stroke::new(1.7_f32, color));
-                }
-                if partner {
-                    painter.rect_filled(
-                        egui::Rect::from_center_size(p, egui::vec2(4., 4.)),
-                        0.,
-                        color,
-                    );
-                } else {
-                    painter.circle_filled(p, 2., color);
-                }
-                previous = Some(p);
-            } else {
-                previous = None;
-            }
-        }
-    }
-    if response.clicked() || response.dragged() {
-        if let Some(p) = response.interact_pointer_pos() {
-            let target =
-                ((p.x - plot.left()) / plot.width()).clamp(0.0, 1.0) as f64 * duration + start;
-            *selected = r
-                .rows
-                .iter()
-                .enumerate()
-                .min_by(|(_, a), (_, b)| {
-                    (alignment.coordinate(a.simulation_time_s, first) - target)
-                        .abs()
-                        .total_cmp(
-                            &(alignment.coordinate(b.simulation_time_s, first) - target).abs(),
-                        )
-                })
-                .map(|(i, _)| i)
-                .unwrap_or(0);
-        }
-    }
-    let row = &r.rows[(*selected).min(r.rows.len() - 1)];
-    let cursor = x(row, first);
-    painter.line_segment(
-        [
-            egui::pos2(cursor, plot.top()),
-            egui::pos2(cursor, plot.bottom()),
-        ],
-        egui::Stroke::new(1.0_f32, MUTED),
-    );
-    if let Some(v) = metric.value(row) {
-        painter.circle_filled(at(row, v, first), 4.0, egui::Color32::WHITE);
-    }
+fn ordinary_series(r:&Recording,b:Option<&Recording>,alignment:Alignment,metric:Metric)->Vec<Vec<super::habitat_graph::Datum>> {
+    std::iter::once(r).chain(b).map(|s|s.rows.iter().enumerate().map(|(index,row)|super::habitat_graph::Datum {index,coordinate_s:alignment.coordinate(row.simulation_time_s,s.rows[0].simulation_time_s),value:metric.value(row)}).collect()).collect()
+}
+fn paired_series(points:&[Point],effect:Effect,alignment:Alignment)->Vec<Vec<super::habitat_graph::Datum>> {
+    let first=points.first().map(|p|p.simulation_time_s).unwrap_or(0.);
+    vec![points.iter().map(|p|super::habitat_graph::Datum {index:p.observation_index,coordinate_s:alignment.coordinate(p.simulation_time_s,first),value:effect.value(&p.contrasts)}).collect()]
 }
 pub fn panel(
     ui: &mut egui::Ui,
@@ -516,10 +363,22 @@ pub fn panel(
         ui.selectable_value(&mut study.experiment_mode, true, "Run experiment");
     });
     ui.horizontal_wrapped(|ui| {
-        if ui.selectable_label(!study.why_mode && !study.factorial_mode,"Curves & comparison").clicked() {study.why_mode=false;study.factorial_mode=false;}
-        if ui.selectable_label(study.why_mode && !study.factorial_mode,"WHY selected interval").clicked() {study.why_mode=true;study.factorial_mode=false;}
-        if study.sweep_manifest.as_ref().is_some_and(|m|m["factorial_analysis"].is_object()) && ui.selectable_label(study.factorial_mode,"Paired results").clicked() {study.factorial_mode=true;study.why_mode=false;}
+        if ui.selectable_label(!study.why_mode && !study.factorial_mode && !study.graph_mode,"Curves & comparison").clicked() {study.why_mode=false;study.factorial_mode=false;study.graph_mode=false;}
+        if ui.selectable_label(study.why_mode && !study.factorial_mode && !study.graph_mode,"WHY selected interval").clicked() {study.why_mode=true;study.factorial_mode=false;study.graph_mode=false;}
+        if study.sweep_manifest.as_ref().is_some_and(|m|m["factorial_analysis"].is_object()) && ui.selectable_label(study.factorial_mode && !study.graph_mode,"Paired results").clicked() {study.factorial_mode=true;study.why_mode=false;study.graph_mode=false;}
+        if !study.experiment_mode && study.recording.is_some() && ui.selectable_label(study.graph_mode,"Graph layout").clicked(){study.graph_mode=true;}
     });
+    study.sync_graph_layout();
+    if study.graph_mode && !study.experiment_mode {
+        ui.horizontal_wrapped(|ui|{
+            egui::ComboBox::from_id_salt("layout-metric").selected_text(study.metric.label()).show_ui(ui,|ui|{for metric in Metric::ALL {ui.selectable_value(&mut study.metric,metric,metric.label());}});
+            if study.paired.is_some(){egui::ComboBox::from_id_salt("layout-effect").selected_text(study.effect.label()).show_ui(ui,|ui|{for effect in Effect::ALL {ui.selectable_value(&mut study.effect,effect,effect.label());}});}
+            ui.selectable_value(&mut study.alignment,Alignment::Elapsed,"Elapsed time");ui.selectable_value(&mut study.alignment,Alignment::World,"World time");
+        });
+        study.sync_graph_layout();if study.graph.settings(ui){study.apply_graph_layout();}
+        if ui.button("Return to graph").clicked(){study.graph_mode=false;study.paired_pane=0;study.why_mode=false;}
+        return;
+    }
     if study.factorial_mode && !study.experiment_mode {ui.scope(|ui|{ui.spacing_mut().item_spacing.y=3.0;paired_results(ui,study);});return;}
 
     if study.why_mode && !study.experiment_mode {
@@ -574,14 +433,11 @@ pub fn panel(
                 ui.selectable_value(&mut study.alignment, Alignment::World, "World time");
             });
         }
-        graph(
-            ui,
-            r,
-            study.comparison.as_ref(),
-            study.alignment,
-            study.metric,
-            &mut study.selected,
-        );
+        let data=ordinary_series(r,study.comparison.as_ref(),study.alignment,study.metric);
+        study.graph.layout.metric=study.metric.id().into();
+        study.graph.layout.alignment=match study.alignment{Alignment::Elapsed=>"elapsed",Alignment::World=>"world"}.into();
+        ui.label(format!("{} ({}) vs {}",study.metric.label(),study.metric.unit(),if study.alignment==Alignment::Elapsed{"elapsed time"}else{"world time since J2000"}));
+        study.graph.show(ui,&data,&mut study.selected,study.metric.unit(),120.,true);
         ui.add(
             egui::Slider::new(&mut study.selected, 0..=r.rows.len() - 1).text("Observation index"),
         );
@@ -740,42 +596,12 @@ pub fn panel(
         {
             study.comparison = None;
             study.sweep_manifest = None;
-            study.paired=None;study.paired_curve=None;study.factorial_mode=false;
+            study.paired=None;study.paired_curve=None;study.replay.reset();study.factorial_mode=false;
         }
     });
     if let Some(status) = &study.status {
         ui.colored_label(ACCENT, status);
     }
-}
-fn paired_graph(ui:&mut egui::Ui,points:&[Point],effect:Effect,selected:&mut usize) {
-    ui.label(egui::RichText::new("Stored points vs elapsed terrestrial hours · click selects an observation").small().color(MUTED));
-    let (rect,response)=ui.allocate_exact_size(egui::vec2(ui.available_width(),135.0),egui::Sense::click_and_drag());
-    let plot=egui::Rect::from_min_max(rect.min+egui::vec2(65.,8.),rect.max-egui::vec2(12.,24.));
-    if points.is_empty() || plot.width()<1. || plot.height()<1. {return;}
-    let painter=ui.painter_at(rect);painter.rect_filled(plot,4.,egui::Color32::from_rgb(11,15,24));
-    let values=points.iter().filter_map(|p|effect.value(&p.contrasts)).collect::<Vec<_>>();
-    let first=points[0].simulation_time_s;let duration=(points.last().unwrap().simulation_time_s-first).max(1.);
-    let x=|p:&Point|plot.left()+plot.width()*((p.simulation_time_s-first)/duration) as f32;
-    let low=values.iter().copied().fold(0.,f64::min);let high=values.iter().copied().fold(0.,f64::max);
-    let span=(high-low).max(high.abs()*0.01).max(1e-9);let lo=low-span*0.05;let range=high+span*0.05-lo;
-    let at=|p:&Point,v:f64|egui::pos2(x(p),plot.bottom()-plot.height()*((v-lo)/range) as f32);
-    for n in 0..=3 {
-        let y=plot.bottom()-plot.height()*n as f32/3.;
-        painter.line_segment([egui::pos2(plot.left(),y),egui::pos2(plot.right(),y)],egui::Stroke::new(1.0_f32,egui::Color32::from_gray(40)));
-        let v=lo+range*n as f64/3.;
-        if !values.is_empty() {painter.text(egui::pos2(plot.left()-4.,y),egui::Align2::RIGHT_CENTER,if range<0.01 || v.abs()>=1e5 {format!("{v:.3e}")}else{format!("{v:.3}")},egui::FontId::proportional(10.),MUTED);}
-        if points.len()>1 || n==0 {painter.text(egui::pos2(plot.left()+plot.width()*n as f32/3.,plot.bottom()+5.),if n==3 {egui::Align2::RIGHT_TOP}else{egui::Align2::CENTER_TOP},format!("{:.2}",duration*n as f64/3./3600.),egui::FontId::proportional(10.),MUTED);}
-    }
-    // Discrete marks only: connecting samples would imply an unobserved response between them.
-    for p in points {if let Some(v)=effect.value(&p.contrasts) {painter.circle_filled(at(p,v),2.5,ACCENT);}}
-    if values.is_empty() {painter.text(plot.center(),egui::Align2::CENTER_CENTER,"No supported contrasts for this metric",egui::FontId::proportional(12.),MUTED);}
-    if response.clicked() || response.dragged() {if let Some(p)=response.interact_pointer_pos() {
-        let target=first+((p.x-plot.left())/plot.width()).clamp(0.,1.) as f64*duration;
-        *selected=points.iter().enumerate().min_by(|(_,a),(_,b)|(a.simulation_time_s-target).abs().total_cmp(&(b.simulation_time_s-target).abs())).map(|(i,_)|i).unwrap_or(0);
-    }}
-    let p=&points[(*selected).min(points.len()-1)];let cursor=x(p);
-    painter.line_segment([egui::pos2(cursor,plot.top()),egui::pos2(cursor,plot.bottom())],egui::Stroke::new(1.0_f32,MUTED));
-    if let Some(v)=effect.value(&p.contrasts) {painter.circle_filled(at(p,v),4.,egui::Color32::WHITE);}
 }
 fn paired_results(ui:&mut egui::Ui,study:&mut Study) {
     if let Some(status)=&study.status {if study.task.is_some() || study.sweep_task.is_some() || study.comparison_task.is_some() || study.paired_export.is_some() || status.contains("failed:") || status.contains("Could not") {ui.colored_label(ACCENT,status);}}
@@ -807,14 +633,18 @@ fn paired_results(ui:&mut egui::Ui,study:&mut Study) {
         ui.label(format!("Original four recordings and final factorial.json: {}",study.paired_source));
         if let Some(status)=&study.status {ui.colored_label(ACCENT,status);}return;
     }
-    egui::ComboBox::from_id_salt("paired-response-metric").selected_text(study.metric.label()).show_ui(ui,|ui| {for metric in Metric::ALL {ui.selectable_value(&mut study.metric,metric,metric.label());}});
+    ui.horizontal_wrapped(|ui| {
+        egui::ComboBox::from_id_salt("paired-response-metric").selected_text(study.metric.label()).show_ui(ui,|ui| {for metric in Metric::ALL {ui.selectable_value(&mut study.metric,metric,metric.label());}});
+        if study.paired_pane==0 {egui::ComboBox::from_id_salt("paired-effect").selected_text(study.effect.label()).show_ui(ui,|ui|{for e in Effect::ALL {ui.selectable_value(&mut study.effect,e,e.label());}});}
+    });
     if study.paired_curve.as_ref().is_none_or(|(m,_)|*m!=study.metric) {
         match design.curve(study.metric) {Ok(points)=>study.paired_curve=Some((study.metric,points)),Err(e)=>{ui.colored_label(ACCENT,e);return;}}
     }
     let points=&study.paired_curve.as_ref().expect("prepared curve").1;
     if study.paired_pane==0 {
-        egui::ComboBox::from_id_salt("paired-effect").selected_text(study.effect.label()).show_ui(ui,|ui|{for e in Effect::ALL {ui.selectable_value(&mut study.effect,e,e.label());}});
-        paired_graph(ui,points,study.effect,&mut study.selected);
+        study.graph.layout.metric=study.metric.id().into();study.graph.layout.effect=study.effect.id().into();
+        let data=paired_series(points,study.effect,study.alignment);
+        study.graph.show(ui,&data,&mut study.selected,study.metric.unit(),if study.graph.layout.scale==super::habitat_graph::Scale::Linear {135.}else{115.},false);
     }
     ui.add(egui::Slider::new(&mut study.selected,0..=points.len()-1).text("Observation index"));
     let point=&points[study.selected];let c=&point.contrasts;
@@ -1101,7 +931,8 @@ mod tests {
         study.selected=1;let earlier=study.metadata().unwrap()["paired_selected_analysis"].clone();assert_eq!(earlier["observation_index"],1);assert_ne!(earlier,selected);
         assert_eq!(study.paired_curve.as_ref().unwrap().1.len(),3);
         let checked_source=study.paired_source.clone();let view_path=study.path.clone();study.path="different-unopened-folder".into();assert_eq!(study.paired_source,checked_source);study.path=view_path;
-        study.selected=2;
+        study.selected=2;study.graph.layout.window=[0.2,0.8];study.graph.layout.scale=super::super::habitat_graph::Scale::SignedLog;
+        let view=study.graph_metadata();assert_eq!(view["layout"]["metric"],"vapor");assert_eq!(view["plot"]["displayed"][0].as_array().unwrap().len(),1);assert_eq!(view["plot"]["displayed"][0][0]["index"],1);assert_eq!(view["selected_observation_visible"],false);assert_eq!(study.metadata().unwrap()["paired_selected_analysis"],selected);
         let before=study.metadata();assert!(before.as_ref().unwrap()["paired_results_visible"].as_bool().unwrap());assert_eq!(before.as_ref().unwrap()["sweep"]["runs"].as_array().unwrap().len(),4);
         let reopened=open_design(root.clone(),root.to_string_lossy().into_owned(),Some(2)).unwrap();study.commit_sweep(reopened).unwrap();assert_eq!(study.metadata(),before);
         assert!(check_input(&root,Some(3)).is_err());

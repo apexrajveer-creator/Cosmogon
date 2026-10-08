@@ -126,3 +126,5 @@ Paired habitat [experiments](docs/PAIRED_HABITAT_EXPERIMENTS.md) compare all fou
 [Paired trajectory analysis](docs/PAIRED_TRAJECTORIES.md) shows recorded conditional/interaction effects over time and exports every supported observation with source identity.
 
 [Saved-design replay verification](docs/HABITAT_REPLAY.md) independently reconstructs every paired observation and reports exact differences while preserving the original data.
+
+[Recorded graph navigation](docs/RECORDED_GRAPHS.md) adds time windows, actual-point cursors, explicit scales and reusable layouts while keeping complete numerical exports unchanged.

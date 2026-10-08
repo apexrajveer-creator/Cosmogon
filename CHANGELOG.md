@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — recorded graph navigation
+
+- Add actual-time viewport zoom/pan/selection, truthful positive/signed log display and protected reusable layouts to ordinary/comparison/paired habitat graphs. Preserve full raw observations, selected/final analyses, simulation laws, saves and golden `0xf2c4140a45ae509b`. Correct replay diagnostic comparison warnings and retain signed-zero differences.
+
 ## Unreleased — saved habitat analysis
 
 - Add selectable stored-time paired response tables/effect curves and protected complete numeric exports, plus explicit independent whole-design replay verification. Reconstruct all four branches, compare every complete typed observation and endpoint/source identity, retain bounded differences, native progress/cancellation and protected reports. Preserve original recordings/final analyses, simulation laws, saves and golden `0xf2c4140a45ae509b`; no empirical calibration claim.
