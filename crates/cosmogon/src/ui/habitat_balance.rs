@@ -141,13 +141,14 @@ impl View {
             "World span {:.3} s · completed state span {:.3} s",
             r.world_span_s, r.completed_span_s
         ));
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             for (i, label) in [
                 "Stocks",
                 "Electricity",
                 "Temperature",
                 "Counters",
                 "Evidence & export",
+                "Heat ledger",
             ]
             .iter()
             .enumerate()
@@ -165,7 +166,7 @@ impl View {
                     r.mass["accounted_change_kg"]
                 ));
                 ui.label("Escaped gas is outside the cabin and cannot be reused.");
-                quantities(ui, &r.stocks);
+                quantities(ui, &r.stocks, 270.);
                 ui.label(format!(
                     "Component-sum residual {} kg",
                     r.mass["component_sum_residual_kg"]
@@ -232,11 +233,57 @@ impl View {
                             ui.end_row();
                         }
                     });
-                ui.label("Endpoint reference storage changes. No full-span thermal closure is available from sparse minute budgets.");
+                ui.label(if r.heat.is_some() {"Endpoint reference storage; Heat ledger explains actual accumulated modeled paths."} else {"Endpoint reference storage only. Sparse minute budgets cannot reconstruct full-span heat."});
             }
             3 => {
                 ui.label("Actual accumulated model counters. Served/unserved person-seconds describe nominal demand, not health, nutrition or survival.");
-                quantities(ui, &r.cumulative_counters);
+                quantities(ui, &r.cumulative_counters, 270.);
+            }
+            5 => {
+                if let Some(h) = &r.heat {
+                    ui.label(format!("Executed {:.3} s · excluded environment {:.3} s · excluded start temperature {:.3} s",h.executed_seconds,h.environment_missing_seconds,h.start_temperature_unsupported_seconds));
+                    ui.label(format!(
+                        "Complete model coverage: {} · actual capacity transitions: {}",
+                        h.complete_model_coverage, h.capacity_transitions
+                    ));
+                    ui.label("Signed joules: positive enters the cabin. Storage sums each interval C × ΔT.");
+                    let q = h
+                        .terms
+                        .iter()
+                        .map(|t| cosmogon_sim::habitat_balance::Quantity {
+                            id: t.id,
+                            label: t.label,
+                            unit: "J",
+                            initial: t.initial_j,
+                            final_value: t.final_j,
+                            change: t.change_j,
+                            scope: "Actual executed interval counters",
+                        })
+                        .collect::<Vec<_>>();
+                    ui.monospace(format!(
+                        "Heat − storage residual: {:.9e} J",
+                        h.heat_minus_storage_residual_j
+                    ))
+                    .on_hover_text(format!("{:.17e} J", h.heat_minus_storage_residual_j));
+                    ui.monospace(format!(
+                        "Stored interval residual Δ: {:.9e} J",
+                        h.accumulated_interval_residual_change_j
+                    ))
+                    .on_hover_text(format!(
+                        "{:.17e} J · {}",
+                        h.accumulated_interval_residual_change_j, h.residual_convention
+                    ));
+                    quantities(ui, &q, 130.);
+                    ui.label(egui::RichText::new("Heater is already in bus heat. Breach cooling differs from full escaped-gas enthalpy. Capacity edits do not represent physical heat transfer.").small().color(MUTED));
+                } else {
+                    ui.colored_label(
+                        ACCENT,
+                        r.heat_unavailable
+                            .as_deref()
+                            .unwrap_or("No cumulative heat ledger in this retained range"),
+                    );
+                    ui.label("Older recordings preserve their original evidence. Latest minute watts cannot supply the missing heat history.");
+                }
             }
             _ => {
                 ui.label(format!(
@@ -268,16 +315,16 @@ impl View {
                 if let Some(s) = &self.status {
                     ui.colored_label(ACCENT, s);
                 }
-                ui.label(egui::RichText::new("report.json retains exact endpoint samples, original source summaries and paired method context; stocks.csv and counters.csv keep original units and numbers. Existing folders protected.").small().color(MUTED));
+                ui.label(egui::RichText::new("report.json retains exact endpoint samples, original source summaries and paired method context; stocks.csv, counters.csv and optional heat.csv keep original units and numbers. Existing folders protected.").small().color(MUTED));
             }
         }
         ui.label(egui::RichText::new("Model bookkeeping; no measured-hardware calibration, reconstructed history or predictive uncertainty.").small().color(MUTED));
         false
     }
 }
-fn quantities(ui: &mut egui::Ui, rows: &[cosmogon_sim::habitat_balance::Quantity]) {
+fn quantities(ui: &mut egui::Ui, rows: &[cosmogon_sim::habitat_balance::Quantity], height: f32) {
     egui::ScrollArea::vertical()
-        .max_height(270.)
+        .max_height(height)
         .show(ui, |ui| {
             egui::Grid::new("balance-quantities")
                 .striped(true)
@@ -289,7 +336,7 @@ fn quantities(ui: &mut egui::Ui, rows: &[cosmogon_sim::habitat_balance::Quantity
                     for q in rows {
                         ui.add_sized(
                             [170., 18.],
-                            egui::Label::new(format!("{} ({})", q.label, q.unit)).truncate(),
+                            egui::Label::new(format!("[{}] {}", q.unit, q.label)).truncate(),
                         )
                         .on_hover_text(format!("{} ({}) · {}", q.label, q.unit, q.scope));
                         for v in [q.initial, q.final_value, q.change] {

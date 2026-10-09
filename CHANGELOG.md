@@ -1,3 +1,7 @@
+## Unreleased — cumulative cabin heat accounting
+
+- Retain passive signed heat-path/storage counters for every actual executed habitat interval, excluded coverage and capacity transitions. New definitions explicitly enable model-pinned accounting; absent legacy definitions preserve identical physics/state/replay. Native/CLI recorded Heat ledger and optional protected heat CSV expose exact span differences/residuals. Existing temperature solver and untouched-universe golden `0xf2c4140a45ae509b` stay unchanged; enabled habitat state fingerprints deliberately change. No backfilled history or hardware calibration.
+
 ## Unreleased — recorded cabin balances
 
 - Add shared native/CLI exact endpoint stocks, cumulative model counters, mass/electrical identities and temperature references, all four independent paired branches and protected source-context JSON/CSV. Preserve original inputs, simulation laws/saves and golden `0xf2c4140a45ae509b`; never extrapolate sparse minute budgets into heat history.

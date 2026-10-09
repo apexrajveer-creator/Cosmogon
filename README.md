@@ -138,3 +138,5 @@ Controlled [cabin geometry/thermal studies](docs/THERMAL_STUDIES.md) compare fix
 [Recorded research figures](docs/RECORDED_FIGURES.md) export vector charts together with exact original values, support/scale omissions, source observations, paired methods and reusable display layouts.
 
 Recorded cabin balances preserve actual endpoint stocks, cumulative electricity and reference temperature changes in shared native/CLI views and protected evidence: [guide](docs/RECORDED_BALANCES.md).
+
+New habitat definitions retain actual interval heat counters for recorded span explanations; legacy history remains unavailable. [Cabin heat accounting](docs/CABIN_HEAT_ACCOUNTING.md).

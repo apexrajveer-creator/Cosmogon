@@ -297,6 +297,10 @@ pub fn panel(
                 egui::CollapsingHeader::new("Interval flows and numerical residuals").show(ui,|ui| {
                     ui.label(format!("O₂ makeup {:.6} kg · CO₂ captured {:.6} kg · water processed/recovered {:.6}/{:.6} kg",b.oxygen_makeup_kg,b.co2_captured_kg,b.water_processed_kg,b.water_recovered_kg));
                     ui.label(format!("Heat: crew {:.1} W · heater {:.1} W (included in bus load) · radiator −{:.1} W · envelope {:+.1} W · storage {:+.1} W",b.metabolic_heat_w,b.heater_w,b.radiator_rejection_w,b.conduction_w,b.thermal_storage_w));
+                    ui.collapsing("Accumulated heat accounting",|ui| {
+                        if let Some(l)=&h.heat {ui.label(format!("From world time {} s · executed {:.3} s",l.origin_time_s,l.executed_seconds));ui.label(format!("Excluded: environment {:.3} s · starting temperature {:.3} s",l.environment_missing_seconds,l.start_temperature_unsupported_seconds));ui.label("Actual interval heat counters are retained in saves/recordings. Open Cabin balances → Heat ledger for a recorded span.");}
+                        else {ui.label("Legacy habitat: no accumulated heat history. Existing minute budgets remain available in WHY.");}
+                    });
                     ui.label(format!("Mass residual {:.3e} kg · electric residual {:.3e} J · thermal residual {:.3e} J",b.mass_residual_kg,b.electric_residual_j,b.thermal_residual_j));
                     ui.label(format!("Brine {:.3} kg · dry waste {:.3} kg · supplied reference cycle {:.2}%",s.brine_kg,s.dry_waste_kg,100.0*b.served_cycle_fraction));
                     ui.label("Residuals check bookkeeping; they do not establish real-world predictive accuracy.");
@@ -395,7 +399,7 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
         Some("habitat-water") => 6,
         Some("habitat-breach"|"habitat-breach-settings"|"habitat-breach-model")=>10,
         Some("habitat-humidity"|"habitat-humidity-settings"|"habitat-humidity-model")=>9,
-        Some("habitat-recording-balance"|"habitat-recording-balance-electricity"|"habitat-recording-balance-temperature"|"habitat-recording-balance-counters"|"habitat-recording-balance-files"|"habitat-figure"|"habitat-paired"|"habitat-paired-table"|"habitat-paired-files"|"habitat-paired-replay"|"habitat-graph-layout"|"habitat-recordings"|"habitat-recording-pressure"|"habitat-recording-pressure-change"|"habitat-recording-pressure-breach"|"habitat-recording-pressure-files"|"habitat-experiments"|"habitat-recording-why"|"habitat-recording-why-water"|"habitat-recording-why-heat"|"habitat-recording-why-air"|"habitat-recording-why-evidence") => 7,
+        Some("habitat-recording-balance-heat"|"habitat-recording-balance"|"habitat-recording-balance-electricity"|"habitat-recording-balance-temperature"|"habitat-recording-balance-counters"|"habitat-recording-balance-files"|"habitat-figure"|"habitat-paired"|"habitat-paired-table"|"habitat-paired-files"|"habitat-paired-replay"|"habitat-graph-layout"|"habitat-recordings"|"habitat-recording-pressure"|"habitat-recording-pressure-change"|"habitat-recording-pressure-breach"|"habitat-recording-pressure-files"|"habitat-experiments"|"habitat-recording-why"|"habitat-recording-why-water"|"habitat-recording-why-heat"|"habitat-recording-why-air"|"habitat-recording-why-evidence") => 7,
         _ => 0,
     };
     form.breach_pane=match args.panel.as_deref(){Some("habitat-breach-settings")=>1,Some("habitat-breach-model")=>2,_=>0};
@@ -405,7 +409,7 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
     form.why.section=match args.panel.as_deref(){Some("habitat-why-water")=>1,Some("habitat-why-heat")=>2,Some("habitat-why-air")=>3,Some("habitat-why-evidence")=>4,_=>0};
     form.recording.balance_mode=args.panel.as_deref().is_some_and(|p|p.starts_with("habitat-recording-balance")) || args.habitat_balance_output.is_some() || args.habitat_balance_from.is_some();
     form.recording.balance.from=args.habitat_balance_from.unwrap_or(0);form.recording.balance.to=args.habitat_sample;
-    form.recording.balance.pane=match args.panel.as_deref(){Some("habitat-recording-balance-electricity")=>1,Some("habitat-recording-balance-temperature")=>2,Some("habitat-recording-balance-counters")=>3,Some("habitat-recording-balance-files")=>4,_=>0};
+    form.recording.balance.pane=match args.panel.as_deref(){Some("habitat-recording-balance-electricity")=>1,Some("habitat-recording-balance-temperature")=>2,Some("habitat-recording-balance-counters")=>3,Some("habitat-recording-balance-files")=>4,Some("habitat-recording-balance-heat")=>5,_=>0};
     if let Some(output)=&args.habitat_balance_output {form.recording.balance.output=output.clone();form.recording.balance.launch=true;}
     form.recording.figure_mode=args.panel.as_deref()==Some("habitat-figure") || args.habitat_figure_output.is_some();
     if let Some(output)=&args.habitat_figure_output {form.recording.figure.output=output.clone();form.recording.figure.launch=true;}

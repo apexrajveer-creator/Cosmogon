@@ -124,6 +124,7 @@ pub fn data_versions(u: &Universe) -> std::collections::BTreeMap<String, String>
     if u.habitats.iter().any(crate::habitat::Habitat::uses_electrolysis) {m.insert("cosmogon-water-electrolysis".into(),crate::electrolysis::MODEL.into());}
     if u.habitats.iter().any(crate::habitat::Habitat::uses_moisture) {m.insert("cosmogon-cabin-moisture".into(),crate::moisture::MODEL.into());}
     if u.habitats.iter().any(crate::habitat::Habitat::uses_sabatier) {m.insert("cosmogon-sabatier".into(),crate::sabatier::MODEL.into());}
+    if u.habitats.iter().any(|h|h.heat.is_some()) {m.insert("cosmogon-cabin-heat-accounting".into(),crate::habitat_heat::MODEL.into());}
     if u.habitats.iter().any(crate::habitat::Habitat::uses_breach) {m.insert("cosmogon-cabin-breach".into(),crate::breach::MODEL.into());}
     m
 }
@@ -164,6 +165,7 @@ pub fn from_json(s: &str) -> Result<Universe, SaveError> {
     }
     if (expected.contains_key("cosmogon-cabin-breach") || terrain_versions.get("cosmogon-cabin-breach").is_some())
         && terrain_versions.get("cosmogon-cabin-breach").and_then(Value::as_str)!=Some(crate::breach::MODEL) {return Err(SaveError::Model("Missing or mismatched cabin breach version".into()));}
+    if (expected.contains_key("cosmogon-cabin-heat-accounting") || terrain_versions.get("cosmogon-cabin-heat-accounting").is_some()) && terrain_versions.get("cosmogon-cabin-heat-accounting").and_then(Value::as_str)!=Some(crate::habitat_heat::MODEL) {return Err(SaveError::Model("Missing or mismatched cabin heat accounting version".into()));}
     if !u.habitats.is_empty() {
         if terrain_versions.get("cosmogon-habitat-budgets").and_then(Value::as_str)!=Some(crate::habitat::MODEL) {return Err(SaveError::Model("Missing or mismatched model version".into()));}
         if u.habitats.len()>64 {return Err(SaveError::Model("More than 64 habitats".into()));}

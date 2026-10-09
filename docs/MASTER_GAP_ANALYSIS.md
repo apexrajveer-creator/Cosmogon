@@ -85,8 +85,10 @@ New work must meet the relevant definitions of done; partial implementations rem
 
 27. **Recorded habitat balances (built, partial phase 9/16):** exact endpoint stocks and retained cumulative electrical/crew counters, mass and electrical closure, all four independent paired branches, protected shared native/CLI exports. Do not integrate sparse sampled minute budgets into a complete history.
 
-28. **Cumulative cabin heat accounting (next, partial phase 9/16):** retain actual signed heat transfers on every completed modeled interval, explicit coverage/legacy availability and shared native/CLI span explanations. Preserve existing thermal physics and expose residuals; never reconstruct a complete ledger from sparse minute samples.
+28. **Cumulative cabin heat accounting (built, partial phase 9/16):** retain actual signed heat transfers on every completed modeled interval, explicit coverage/legacy availability and shared native/CLI span explanations. Preserve existing thermal physics and expose residuals; never reconstruct a complete ledger from sparse minute samples.
 
 ## Owner graphics goal supplement (2026-10-09)
 
 [Detailed graphics requirement](GRAPHICS_GOAL_SUPPLEMENT.md) is part of the continuing product goal. Preserve the original master document and add this requirement through the existing rendering/planet/civilization phases. Every visitable cosmic body needs rich animated close-up detail in Cosmogon's style; procedural activity is permitted, with honest data provenance. **Queued: cabin/research builds continue first**, as explicitly directed by the owner.
+
+29. **Selected cumulative heat trajectories (next, partial phase 9/16):** actual retained signed heat/storage curves, explicit execution coverage/origins, supported four-branch contrasts and protected shared native/CLI research figures. Preserve immutable existing metric catalogs and final analyses.

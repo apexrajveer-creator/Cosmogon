@@ -147,6 +147,9 @@ impl Recording {
                 return Err("Recording declares an unused reaction source".into());
             }
         }
+        if definition.record_heat {
+            if m["heat_accounting_source"]!=crate::habitat_heat::source() || m["heat_accounting_model_descriptor"]!=serde_json::to_value(crate::research::PhysicsModelRegistry::get("habitat-heat")).map_err(|e|e.to_string())? {return Err("Missing or mismatched recorded heat accounting source/model".into());}
+        } else if !m["heat_accounting_source"].is_null() || !m["heat_accounting_model_descriptor"].is_null() {return Err("Recording declares unused heat accounting".into());}
         let report = json(&path.join("report.json"), 2 * 1024 * 1024)?;
         let expected = last.habitat.report();
         for key in [
@@ -164,7 +167,7 @@ impl Recording {
                 ));
             }
         }
-        for key in ["electrolysis_source", "sabatier_source", "moisture_source", "breach_source"] {
+        for key in ["electrolysis_source", "sabatier_source", "moisture_source", "breach_source", "heat_accounting"] {
             if report[key] != expected[key] {
                 return Err("Recorded report reaction source disagrees with final habitat".into());
             }
@@ -198,6 +201,7 @@ impl Recording {
             }
         }
         let mut summary = serde_json::json!({"format":"cosmogon-habitat-recording-inspection","schema_version":1,"model":habitat::MODEL,"habitat_id":id,"name":definition.name,"body":definition.body,"latitude_deg":definition.latitude_deg,"longitude_east_deg":definition.longitude_east_deg,"sample_count":count,"initial_time_s":initial.time,"final_time_s":final_world.time,"duration_s":final_world.time-initial.time,"initial_state_fingerprint":initial_fp,"final_state_fingerprint":final_fp,"initial_dataset_versions":save::data_versions(&initial),"final_dataset_versions":save::data_versions(&final_world),"electrolysis_source":m["electrolysis_source"],"sabatier_source":m["sabatier_source"],"moisture_source":m["moisture_source"],"checks":"Bounded formats, sources/models, row budgets/identity/mass/time, exact endpoint worlds/fingerprints, original definition, report and CSV/JSON consistency","validation_scope":"Structural numerical consistency; no independent trajectory replay, cryptographic authenticity, predictive confidence or field calibration","metrics":Metric::for_habitat(&first.habitat).map(|v|serde_json::json!({"id":v.id(),"label":v.label(),"unit":v.unit()})).collect::<Vec<_>>()});
+        if definition.record_heat {summary["heat_accounting_source"]=m["heat_accounting_source"].clone();}
         if uses_breach {summary["breach_source"]=m["breach_source"].clone();}
         Ok(Self { rows, summary })
     }

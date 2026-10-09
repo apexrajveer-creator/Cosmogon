@@ -167,6 +167,10 @@ pub struct Report {
     pub electricity: Value,
     pub retained_support: Value,
     pub thermal: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heat: Option<crate::habitat_heat::Span>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heat_unavailable: Option<String>,
     pub limits: &'static str,
 }
 pub fn explain(r: &Recording, from: usize, to: usize) -> Result<Report, String> {
@@ -269,6 +273,11 @@ pub fn explain(r: &Recording, from: usize, to: usize) -> Result<Report, String> 
         .sum::<f64>();
     let accounted_change =
         b.habitat.state.accounted_mass_kg() - a.habitat.state.accounted_mass_kg();
+    let heat = crate::habitat_heat::span(&r.rows[from..=to]);
+    let (heat, heat_unavailable) = match heat {
+        Ok(v) => (Some(v), None),
+        Err(e) => (None, Some(e)),
+    };
     Ok(Report {
         format: "cosmogon-habitat-recorded-balance",
         schema_version: 1,
@@ -285,6 +294,8 @@ pub fn explain(r: &Recording, from: usize, to: usize) -> Result<Report, String> 
         retained_support: json!({"observations_checked":to-from+1,"uncompleted_budget_count":r.rows[from..=to].iter().filter(|s|s.habitat.budget.seconds<=0.).count(),"configurations_equal":same_config,"counter_sequence_monotone":monotone,"sampled_environment_unavailable_count":r.rows[from..=to].iter().filter(|s|s.habitat.budget.seconds>0. && !s.habitat.budget.environment_available).count(),"sampled_temperature_unsupported_count":r.rows[from..=to].iter().filter(|s|s.habitat.budget.seconds>0. && !s.habitat.budget.temperature_domain_supported).count(),"coverage":"Support checks describe stored observations only, not every intermediate step"}),
         thermal: json!({"initial_temperature_k":a.habitat.state.temperature_k,"final_temperature_k":b.habitat.state.temperature_k,"temperature_change_k":temperature_change,"retained_heat_capacity_constant":capacity_constant,"initial_capacity_j_k":a.habitat.config.heat_capacity_j_k,"final_capacity_j_k":b.habitat.config.heat_capacity_j_k,"sensible_change_j":capacity_constant.then_some(a.habitat.config.heat_capacity_j_k*temperature_change),"initial_phase_reference_j":a.habitat.state.phase_energy_j(),"final_phase_reference_j":b.habitat.state.phase_energy_j(),"phase_reference_change_j":b.habitat.state.phase_energy_j()-a.habitat.state.phase_energy_j(),"formula":"C × (final T - initial T), only for constant retained C; phase reference change = vapor change × model reference latent enthalpy","scope":"Endpoint reference storage changes, not absolute thermodynamic energy or a full-span heat closure. Sparse sampled minute heat terms do not supply a complete cumulative ledger"}),
         cumulative_counters,
+        heat,
+        heat_unavailable,
         limits: LIMITS,
     })
 }
@@ -374,6 +385,20 @@ impl Bundle {
                 return Err("Invalid balance quantities or observation range".into());
             }
         }
+        for r in &self.reports {
+            if let Some(h) = &r.heat {
+                if h.terms.len() != 11
+                    || h.terms.iter().any(|t| {
+                        !t.initial_j.is_finite()
+                            || !t.final_j.is_finite()
+                            || !t.change_j.is_finite()
+                    })
+                    || !h.heat_minus_storage_residual_j.is_finite()
+                {
+                    return Err("Invalid heat ledger export quantities".into());
+                }
+            }
+        }
         let bytes = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
         if bytes.len() > 64 * 1024 * 1024 {
             return Err("Balance bundle exceeds 64 MiB".into());
@@ -394,7 +419,27 @@ impl Bundle {
                 }
             }
         }
-        let manifest = json!({"format":"cosmogon-habitat-balance-export","schema_version":1,"complete":true,"mode":self.mode,"branches":self.reports.len(),"files":["report.json","stocks.csv","counters.csv"],"limits":LIMITS});
+        let mut heat_csv = String::from("branch,id,unit,initial,final,change,scope\n");
+        let has_heat = self.reports.iter().any(|r| r.heat.is_some());
+        for (i, r) in self.reports.iter().enumerate() {
+            if let Some(h) = &r.heat {
+                for t in &h.terms {
+                    let _ = writeln!(
+                        heat_csv,
+                        "{i},{},J,{:.17e},{:.17e},{:.17e},actual_executed_interval_counters",
+                        t.id, t.initial_j, t.final_j, t.change_j
+                    );
+                }
+            }
+        }
+        let mut manifest = json!({"format":"cosmogon-habitat-balance-export","schema_version":1,"complete":true,"mode":self.mode,"branches":self.reports.len(),"files":["report.json","stocks.csv","counters.csv"],"limits":LIMITS});
+        if has_heat {
+            manifest["files"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!("heat.csv"));
+            manifest["heat_accounting_source"] = crate::habitat_heat::source();
+        }
         if path.as_os_str().is_empty() {
             return Err("Choose a nonempty new balance folder".into());
         }
@@ -405,12 +450,16 @@ impl Bundle {
         std::fs::create_dir(path).map_err(|e| {
             format!("Existing balance reports are protected; choose a new folder: {e}")
         })?;
-        for (name, data) in [
+        let mut files = vec![
             ("report.json", bytes),
             ("stocks.csv", stocks_csv.into_bytes()),
             ("counters.csv", counters_csv.into_bytes()),
-            ("manifest.json", manifest_bytes),
-        ] {
+        ];
+        if has_heat {
+            files.push(("heat.csv", heat_csv.into_bytes()));
+        }
+        files.push(("manifest.json", manifest_bytes));
+        for (name, data) in files {
             let mut f = std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
