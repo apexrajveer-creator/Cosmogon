@@ -122,6 +122,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if a.cmd=="greenhouse-definition" && flag!="--output" {return Err(format!("{flag} is not a greenhouse-definition option"));}
         if a.cmd=="habitat-diagnose" && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
         if a.cmd=="habitat-verify" && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a habitat replay verification option"));}
+        if a.cmd=="habitat-figure" && !matches!(flag.as_str(),"--recording"|"--reference"|"--definition"|"--output") {return Err(format!("{flag} is not a recorded figure option"));}
         if a.cmd=="habitat-pressure" && !matches!(flag.as_str(),"--recording"|"--observation"|"--reference-index"|"--output") {return Err(format!("{flag} is not a recorded pressure option"));}
         if a.cmd=="habitat-inspect" && !matches!(flag.as_str(),"--recording"|"--observation"|"--output") {return Err(format!("{flag} is not a habitat inspection option"));}
         if a.cmd=="habitat" && !matches!(flag.as_str(),"--definition"|"--habitat-id"|"--initial"|"--output"|"--samples"|"--interval-days"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat study option"));}
@@ -202,6 +203,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     if a.cmd=="habitat-diagnose" && (a.initial.is_none() || a.habitat_id.is_none()) {return Err("habitat-diagnose requires --initial SAVE and explicit --habitat-id ID".into());}
     if a.cmd=="habitat-verify" && a.recording.is_none() {return Err("habitat-verify requires --recording COMPLETE_PAIRED_FOLDER".into());}
     if a.cmd=="habitat-pressure" && (a.recording.is_none() || a.observation.is_none()) {return Err("habitat-pressure requires --recording ORDINARY_BRANCH_FOLDER and --observation INDEX".into());}
+    if a.cmd=="habitat-figure" && (a.recording.is_none() || a.definition.is_none() || a.output.is_none()) {return Err("habitat-figure requires --recording FOLDER --definition GRAPH_LAYOUT --output NEW_DIR".into());}
     if a.cmd=="habitat-inspect" && a.recording.is_none() {return Err("habitat-inspect requires --recording STUDY_FOLDER".into());}
     if a.cmd=="habitat" {
         if a.definition.is_none() && a.initial.is_none() {return Err("habitat requires --definition FILE or --initial saved world".into());}
@@ -240,6 +242,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     Ok(a)
 }
 fn help() {
+    eprintln!("cosmogon-cli habitat-figure --recording FOLDER --definition GRAPH_LAYOUT --output NEW_DIR [--reference ORDINARY_B]");
     eprintln!("cosmogon-cli habitat-sweep --initial SAVE --output NEW_DIR --parameter firm_power_w --from 0 --to 4000 --runs 3 [--samples 25 --interval-days 0.041666666666666664]\n  or --definition SWEEP_PLAN; optional --habitat-id ID\ncosmogon-cli habitat-compare --recording A --reference B [--measure water --alignment elapsed|world --output NEW_DIR]");
     eprintln!("cosmogon-cli habitat-diagnose --initial SAVE --habitat-id ID [--output NEW_DIR]   # explain completed power/water/heat");
     eprintln!("cosmogon-cli habitat-verify --recording COMPLETE_PAIRED_FOLDER [--output NEW_REPORT_DIR]   # recompute every actual row and endpoint");
@@ -343,6 +346,12 @@ fn main() {
         "habitat-inspect" => {
             let inspected=habitat_inspect(&a);
             match inspected {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).unwrap()),Err(e)=>{eprintln!("Habitat inspection failed: {e}");std::process::exit(1);}}
+        },
+        "habitat-figure" => {
+            let result=(|| {let layout=cosmogon_sim::habitat_graph::Layout::read(std::path::Path::new(a.definition.as_deref().expect("validated layout")))?;
+                let figure=cosmogon_sim::habitat_figure::Figure::read(std::path::Path::new(a.recording.as_deref().expect("validated recording")),a.reference.as_deref().map(std::path::Path::new),&layout)?;
+                figure.export(std::path::Path::new(a.output.as_deref().expect("validated output")))})();
+            match result {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).unwrap()),Err(e)=>{eprintln!("Recorded figure failed: {e}");std::process::exit(1);}}
         },
         "habitat-sweep" => {if let Err(e)=habitat_sweep(&a) {eprintln!("Habitat sweep failed: {e}");std::process::exit(1);}},
         "habitat-compare" => {if let Err(e)=habitat_compare(&a) {eprintln!("Habitat comparison failed: {e}");std::process::exit(1);}},
@@ -796,6 +805,11 @@ mod argument_tests {
     use super::*;
     fn args(values: &[&str]) -> Result<Args, String> {
         parse_args(values.iter().map(|s| s.to_string()))
+    }
+    #[test]
+    fn figures_require_exact_layout_recording_and_new_output_and_refuse_ignored_flags() {
+        for v in [vec!["habitat-figure"],vec!["habitat-figure","--recording","x","--output","o"],vec!["habitat-figure","--recording","x","--definition","d"],vec!["habitat-figure","--recording","x","--definition","d","--output","o","--samples","3"],vec!["habitat-figure","--recording","x","--definition","d","--output","o","--measure","water"]] {assert!(args(&v).is_err());}
+        let a=args(&["habitat-figure","--recording","x","--definition","d","--output","o","--reference","b"]).unwrap();assert_eq!(a.reference.as_deref(),Some("b"));
     }
     #[test]
     fn diagnosis_requires_exact_saved_context_and_refuses_ignored_options() {

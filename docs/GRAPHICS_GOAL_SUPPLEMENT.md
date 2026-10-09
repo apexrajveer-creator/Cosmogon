@@ -1,0 +1,11 @@
+# Owner graphics goal supplement — 2026-10-09
+
+This requirement extends the active development goal and the rendering, planetary exploration and civilization phases of the master directive. The owner explicitly asked to keep the systematic cabin/research build sequence first and defer graphics implementation.
+
+Every cosmic body the user can visit should eventually support exceptionally detailed close-up rendering in Cosmogon's own style, comparable in richness to the supplied stellar reference. Apply this across stars, planets, moons, small bodies, rings, atmospheres and other visitable environments. Detail should remain coherent from distant navigation to close inspection and surface exploration.
+
+Activity must visibly change during play. It can be simulated/procedural and need not reproduce present-day observations. Stars should show appropriate surface and atmospheric activity; applicable worlds should show terrain, mountains, water, clouds, hurricanes and other weather, volcanism, earthquakes and their visible consequences, buildings and civilizations. Avoid applying Earth-specific features to worlds that do not support them. Existing physical/environment/civilization state should drive presentation where implemented, while designed animation stays explicitly distinguishable from simulated physical events and observed data.
+
+Use the attached Sun image as a visual richness reference, not a literal scene template, scientific map or new claim about the Sun. Preserve the product's visual identity, readable research views, deterministic simulation boundaries and real-versus-procedural provenance. Stream or scale detail by viewing distance, visibility and hardware budgets; retain stable transitions and responsive wide-scale travel. Verification requires real app captures and measured performance at multiple scales, with no claim that all bodies meet this target until demonstrated.
+
+Status: **recorded and queued; no graphics implementation in this checkpoint**. Continue recorded research figures and cabin inventory/energy balances first. The full target spans multiple integrated builds and remains incomplete until the visitable body families and applicable activity are covered.

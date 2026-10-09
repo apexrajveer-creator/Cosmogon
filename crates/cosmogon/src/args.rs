@@ -37,6 +37,7 @@ pub struct Args {
     pub habitat_audio: Option<u64>,
     pub habitat_audio_export: Option<String>,
     pub habitat_recording: Option<String>,
+    pub habitat_figure_output: Option<String>,
     pub habitat_compare: Option<String>,
     pub habitat_alignment: Option<String>,
     pub habitat_sweep: Option<String>,
@@ -148,6 +149,7 @@ impl Args {
                 "--habitat-audio" => {let v=val();a.habitat_audio=Some(v.parse().unwrap_or(u64::MAX));},
                 "--habitat-audio-export" => a.habitat_audio_export=Some(val()),
                 "--habitat-alignment" => a.habitat_alignment=Some(val()),
+                "--habitat-figure-output" => a.habitat_figure_output=Some(val()),
                 "--habitat-sweep" => a.habitat_sweep=Some(val()),
                 "--habitat-study-output" => a.habitat_study_output=Some(val()),
                 "--habitat-study-id" => {let v=val();a.habitat_study_id=Some(v.parse().unwrap_or(u64::MAX));},
@@ -225,6 +227,9 @@ impl Args {
         if self.habitat_compare.is_some() && self.habitat_recording.is_none() {return Err("--habitat-compare requires --habitat-recording A".into());}
         if self.habitat_alignment.is_some() && self.habitat_compare.is_none() && self.habitat_sweep.is_none() {return Err("--habitat-alignment requires a comparison or sweep".into());}
         if let Some(a)=&self.habitat_alignment {cosmogon_sim::habitat_comparison::Alignment::parse(a)?;}
+        if let Some(output)=&self.habitat_figure_output {
+            if output.trim().is_empty() || self.habitat_recording.is_none() && self.habitat_sweep.is_none() {return Err("--habitat-figure-output requires a recording/sweep and a nonempty new folder".into());}
+        }
         if self.habitat_study_id==Some(u64::MAX) {return Err("Invalid --habitat-study-id".into());}
         if self.habitat_sweep.is_some() {
             if self.load.is_none() || self.habitat_study_output.is_none() {return Err("--habitat-sweep requires --load SAVE and --habitat-study-output NEW_DIR".into());}
@@ -250,6 +255,11 @@ impl Args {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn figure_launch_requires_recorded_context_and_nonempty_new_folder() {
+        for v in [vec!["--habitat-figure-output"],vec!["--habitat-figure-output","new"],vec!["--habitat-recording","x","--habitat-figure-output"," "]] {assert!(Args::parse_from(v.into_iter().map(String::from)).validate_surface().is_err());}
+        let a=Args::parse_from(["--habitat-recording","x","--habitat-graph","g","--habitat-figure-output","new"].into_iter().map(String::from));assert!(a.validate_surface().is_ok());assert_eq!(a.habitat_figure_output.as_deref(),Some("new"));
+    }
     #[test]
     fn pressure_reference_requires_recording_and_bounded_index() {
         for v in [vec!["--habitat-pressure-reference"],vec!["--habitat-pressure-reference","0"],vec!["--habitat-recording","x","--habitat-pressure-reference","nan"],vec!["--habitat-recording","x","--habitat-pressure-reference","1024"]] {assert!(Args::parse_from(v.into_iter().map(String::from)).validate_surface().is_err());}

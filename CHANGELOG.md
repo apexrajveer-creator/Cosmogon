@@ -1,3 +1,7 @@
+## Unreleased — recorded research figures
+
+- Add shared native/CLI protected vector figures with original full-precision numbers, complete typed observations/source identity, paired method context and reusable strict graph layouts. Actual samples, unavailable gaps and positive-log omissions remain explicit; resolve small-signal bounds/ticks and capture native export inputs at request time. No smoothing, invented uncertainty, simulation law/save/dependency change; golden `0xf2c4140a45ae509b` remains unchanged.
+
 ## Unreleased — controlled cabin geometry and thermal studies
 
 - Add four typed volume/capacity/conductance/radiator studies, illustrative editable levels, fixed-inventory method/source notes, plan-dependent total-pressure catalogs, protected paired trajectories and exact independent replay. Reopened designs restore their actual typed controls with a fresh output field; staged inputs remain separate from completed evidence. Preserve legacy analyses, simulation laws/saves and golden `0xf2c4140a45ae509b`. No physical-expansion, equal-initial-energy or equipment-calibration claim.

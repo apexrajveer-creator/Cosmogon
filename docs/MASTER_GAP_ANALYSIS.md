@@ -81,4 +81,10 @@ New work must meet the relevant definitions of done; partial implementations rem
 
 25. **Controlled geometry and thermal studies (built, partial phase 9/16):** typed cabin volume, effective heat capacity, envelope conductance and radiator area assumptions from the same actual initial stores/temperature, plan-dependent pressure comparisons and exact independent replay. Distinguish counterfactual geometry/capacity from physical expansion or equal initial energy; no equipment calibration or automatic scaling.
 
-26. **Recorded research figures (next, partial phase 16):** protected vector diagrams backed by exact original numbers, support/scale omissions, display definitions, full retained observations/source identity and paired method context. Share native/CLI plotting without smoothing or invented uncertainty. Improve small-signal range/tick clarity while preserving raw results.
+26. **Recorded research figures (built, partial phase 16):** protected vector diagrams backed by exact original numbers, support/scale omissions, display definitions, full retained observations/source identity and paired method context. Share native/CLI plotting without smoothing or invented uncertainty. Improve small-signal range/tick clarity while preserving raw results.
+
+27. **Recorded habitat balances (next, partial phase 9/16):** exact endpoint stocks and retained cumulative electrical/crew counters, mass and electrical closure, all four independent paired branches, protected shared native/CLI exports. Do not integrate sparse sampled minute budgets into a complete history.
+
+## Owner graphics goal supplement (2026-10-09)
+
+[Detailed graphics requirement](GRAPHICS_GOAL_SUPPLEMENT.md) is part of the continuing product goal. Preserve the original master document and add this requirement through the existing rendering/planet/civilization phases. Every visitable cosmic body needs rich animated close-up detail in Cosmogon's style; procedural activity is permitted, with honest data provenance. **Queued: cabin/research builds continue first**, as explicitly directed by the owner.

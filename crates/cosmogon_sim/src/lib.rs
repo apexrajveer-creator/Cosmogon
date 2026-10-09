@@ -31,6 +31,8 @@ pub mod habitat;
 pub mod habitat_diagnostics;
 pub mod habitat_recording;
 pub mod habitat_pressure;
+pub mod habitat_graph;
+pub mod habitat_figure;
 pub mod habitat_comparison;
 pub mod habitat_sweep;
 pub mod habitat_factorial;

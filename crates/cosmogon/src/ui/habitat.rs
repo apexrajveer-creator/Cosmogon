@@ -395,7 +395,7 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
         Some("habitat-water") => 6,
         Some("habitat-breach"|"habitat-breach-settings"|"habitat-breach-model")=>10,
         Some("habitat-humidity"|"habitat-humidity-settings"|"habitat-humidity-model")=>9,
-        Some("habitat-paired"|"habitat-paired-table"|"habitat-paired-files"|"habitat-paired-replay"|"habitat-graph-layout"|"habitat-recordings"|"habitat-recording-pressure"|"habitat-recording-pressure-change"|"habitat-recording-pressure-breach"|"habitat-recording-pressure-files"|"habitat-experiments"|"habitat-recording-why"|"habitat-recording-why-water"|"habitat-recording-why-heat"|"habitat-recording-why-air"|"habitat-recording-why-evidence") => 7,
+        Some("habitat-figure"|"habitat-paired"|"habitat-paired-table"|"habitat-paired-files"|"habitat-paired-replay"|"habitat-graph-layout"|"habitat-recordings"|"habitat-recording-pressure"|"habitat-recording-pressure-change"|"habitat-recording-pressure-breach"|"habitat-recording-pressure-files"|"habitat-experiments"|"habitat-recording-why"|"habitat-recording-why-water"|"habitat-recording-why-heat"|"habitat-recording-why-air"|"habitat-recording-why-evidence") => 7,
         _ => 0,
     };
     form.breach_pane=match args.panel.as_deref(){Some("habitat-breach-settings")=>1,Some("habitat-breach-model")=>2,_=>0};
@@ -403,6 +403,8 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
     form.crop.pane=match args.panel.as_deref() {Some("greenhouse-inputs")=>1,Some("greenhouse-compare")=>2,Some("greenhouse-model")=>3,Some("greenhouse-files")=>4,_=>0};
     form.crop.graph=match args.panel.as_deref() {Some("greenhouse-water")=>3,Some("greenhouse-daily-water")=>4,_=>0};
     form.why.section=match args.panel.as_deref(){Some("habitat-why-water")=>1,Some("habitat-why-heat")=>2,Some("habitat-why-air")=>3,Some("habitat-why-evidence")=>4,_=>0};
+    form.recording.figure_mode=args.panel.as_deref()==Some("habitat-figure") || args.habitat_figure_output.is_some();
+    if let Some(output)=&args.habitat_figure_output {form.recording.figure.output=output.clone();form.recording.figure.launch=true;}
     form.recording.pressure_mode=args.panel.as_deref().is_some_and(|p|p.starts_with("habitat-recording-pressure"));
     form.recording.pressure.pane=match args.panel.as_deref(){Some("habitat-recording-pressure-change")=>1,Some("habitat-recording-pressure-breach")=>2,Some("habitat-recording-pressure-files")=>3,_=>0};
     if let Some(index)=args.habitat_pressure_reference {form.recording.pressure.reference=super::habitat_pressure::Reference::Chosen;form.recording.pressure.index=index;}
@@ -415,7 +417,7 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
     form.recording.apply_graph_layout();
     form.recording.graph_mode=args.panel.as_deref()==Some("habitat-graph-layout");
     if let Some(path)=&args.habitat_recording {form.tab=7;form.recording.metric=args.habitat_metric.as_deref().and_then(|v|cosmogon_sim::habitat_recording::Metric::parse(v).ok()).unwrap_or(form.recording.metric);form.recording.start(path.clone(),args.habitat_sample);}
-    form.recording.factorial_mode=args.panel.as_deref().is_some_and(|p|p.starts_with("habitat-paired"));
+    form.recording.factorial_mode=args.panel.as_deref().is_some_and(|p|p.starts_with("habitat-paired")) || form.recording.figure_mode && args.habitat_recording.as_ref().is_some_and(|p|std::path::Path::new(p).join("plan.json").exists());
     form.recording.paired_pane=match args.panel.as_deref() {Some("habitat-paired-table")=>1,Some("habitat-paired-files")=>2,Some("habitat-paired-replay")=>3,_=>0};
     form.recording.replay.launch=args.habitat_verify;
     form.recording.effect=args.habitat_effect.as_deref().and_then(|s|cosmogon_sim::habitat_factorial::Effect::parse(s).ok()).unwrap_or(form.recording.effect);
@@ -423,7 +425,7 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
     if let Some(a)=&args.habitat_alignment {form.recording.alignment=cosmogon_sim::habitat_comparison::Alignment::parse(a).unwrap_or_default();}
     if let Some(path)=&args.habitat_sweep {
         form.tab=7;form.recording.metric=args.habitat_metric.as_deref().and_then(|v|cosmogon_sim::habitat_recording::Metric::parse(v).ok()).unwrap_or(form.recording.metric);
-        match cosmogon_sim::habitat_sweep::Plan::read(std::path::Path::new(path)) {Ok(plan)=>form.recording.launch=Some(super::habitat_recordings::Launch {plan,id:args.habitat_study_id,output:args.habitat_study_output.clone().unwrap_or_default(),sample:args.habitat_sample,initial_path:args.load.clone()}),Err(e)=>form.recording.status=Some(e)}
+        match cosmogon_sim::habitat_sweep::Plan::read(std::path::Path::new(path)) {Ok(plan)=>{if form.recording.figure_mode {form.recording.factorial_mode=plan.secondary.is_some();} form.recording.launch=Some(super::habitat_recordings::Launch {plan,id:args.habitat_study_id,output:args.habitat_study_output.clone().unwrap_or_default(),sample:args.habitat_sample,initial_path:args.load.clone()});},Err(e)=>form.recording.status=Some(e)}
     }
     form.recording.sync_graph_layout();
     if let Some(path)=&args.greenhouse_definition {form.tab=4;if let Err(e)=form.crop.import(std::path::Path::new(path)) {error!("Cannot open greenhouse definition at startup: {e}");form.crop.status=Some(e);exit.write(bevy::app::AppExit::error());}}

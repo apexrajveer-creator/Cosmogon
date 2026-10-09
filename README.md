@@ -134,3 +134,5 @@ Paired habitat [experiments](docs/PAIRED_HABITAT_EXPERIMENTS.md) compare all fou
 [Recorded pressure explanations](docs/RECORDED_PRESSURE.md) expose actual gas components and signed inventory, temperature and volume accounting, with exact retained inputs and protected evidence exports.
 
 Controlled [cabin geometry/thermal studies](docs/THERMAL_STUDIES.md) compare fixed-inventory volume, effective heat capacity, envelope conductance and radiator assumptions through the same protected recordings, four-corner contrasts and independent replay.
+
+[Recorded research figures](docs/RECORDED_FIGURES.md) export vector charts together with exact original values, support/scale omissions, source observations, paired methods and reusable display layouts.

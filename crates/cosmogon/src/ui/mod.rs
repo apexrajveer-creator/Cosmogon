@@ -21,6 +21,7 @@ mod habitat_why;
 pub(crate) mod habitat_recordings;
 pub(crate) mod habitat_pressure;
 mod habitat_replay;
+mod habitat_figure;
 pub(crate) mod habitat_graph;
 mod greenhouse;
 pub use habitat::HabitatUi;
@@ -264,7 +265,7 @@ fn init_ui_state(mut ui: ResMut<UiState>, args: Res<crate::args::Args>) {
         Some("create") => ui.create_open = true,
         Some("physics") => ui.physics_open = true,
         Some("surface") => ui.body_tab = BodyTab::Surface,
-        Some("habitat" | "habitat-controls" | "habitat-build" | "habitat-model" | "habitat-oxygen" | "habitat-water" | "habitat-humidity" | "habitat-humidity-settings" | "habitat-humidity-model" | "habitat-breach" | "habitat-breach-settings" | "habitat-breach-model" | "habitat-paired" | "habitat-paired-table" | "habitat-paired-files" | "habitat-paired-replay"|"habitat-graph-layout" | "habitat-recordings" | "habitat-recording-pressure" | "habitat-recording-pressure-change" | "habitat-recording-pressure-breach" | "habitat-recording-pressure-files" | "habitat-recording-why" | "habitat-recording-why-water" | "habitat-recording-why-heat" | "habitat-recording-why-air" | "habitat-recording-why-evidence" | "habitat-experiments" | "habitat-why" | "habitat-why-water" | "habitat-why-heat" | "habitat-why-air" | "habitat-why-evidence" | "greenhouse" | "greenhouse-water" | "greenhouse-daily-water" | "greenhouse-inputs" | "greenhouse-compare" | "greenhouse-model" | "greenhouse-files") => ui.habitat_open = true,
+        Some("habitat-figure" | "habitat" | "habitat-controls" | "habitat-build" | "habitat-model" | "habitat-oxygen" | "habitat-water" | "habitat-humidity" | "habitat-humidity-settings" | "habitat-humidity-model" | "habitat-breach" | "habitat-breach-settings" | "habitat-breach-model" | "habitat-paired" | "habitat-paired-table" | "habitat-paired-files" | "habitat-paired-replay"|"habitat-graph-layout" | "habitat-recordings" | "habitat-recording-pressure" | "habitat-recording-pressure-change" | "habitat-recording-pressure-breach" | "habitat-recording-pressure-files" | "habitat-recording-why" | "habitat-recording-why-water" | "habitat-recording-why-heat" | "habitat-recording-why-air" | "habitat-recording-why-evidence" | "habitat-experiments" | "habitat-why" | "habitat-why-water" | "habitat-why-heat" | "habitat-why-air" | "habitat-why-evidence" | "greenhouse" | "greenhouse-water" | "greenhouse-daily-water" | "greenhouse-inputs" | "greenhouse-compare" | "greenhouse-model" | "greenhouse-files") => ui.habitat_open = true,
         Some("section" | "section-map") => ui.surface_study_open = true,
         Some("alerts") => ui.alerts_open = true,
         Some("sound"|"habitat-sound"|"habitat-sound-export") => { ui.alerts_open = true; ui.alerts_tab = 1; }

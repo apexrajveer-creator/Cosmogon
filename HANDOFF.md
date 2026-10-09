@@ -72,6 +72,10 @@ The connected [recorded pressure explanations](docs/RECORDED_PRESSURE.md) build 
 
 The connected [controlled geometry/thermal studies](docs/THERMAL_STUDIES.md) build adds four typed settings, fixed-inventory method/source notes, plan-dependent total-pressure catalogs, protected trajectories and actual restored native controls. Checks: 362 passed plus one existing ignored, 53 distinct cases, fifteen inspected final packaged layouts and a 48-second normal run; [verification](docs/THERMAL_STUDIES_VALIDATION.md). Legacy analyses, simulation laws/saves and the golden remain unchanged. Different volume/capacity assumptions do not simulate expansion or equal initial energy. Research figure exports follow; calibration, physical greenhouse and the full directive remain incomplete.
 
+The connected [recorded research figures](docs/RECORDED_FIGURES.md) build adds shared native/CLI protected SVG, original CSV values, exact inputs/source context and retained display layouts, with support-aware lines and precise small-signal ticks. Checks: 371 passed plus one existing ignored, 47 distinct cases, fifteen inspected final vector renders, fifteen inspected final packaged layouts and a 48-second normal run; [verification](docs/RECORDED_FIGURES_VALIDATION.md). Simulation laws/saves and golden stay unchanged. Recorded inventory/electrical balances follow; calibration, physical greenhouse and the directive remain incomplete.
+
+The owner's [graphics goal supplement](docs/GRAPHICS_GOAL_SUPPLEMENT.md), added 2026-10-09, requires very detailed animated close-up presentation for every visitable cosmic body, including applicable natural activity, terrain, water, weather, buildings and civilizations in our style. It is queued within the continuing directive; continue cabin research first. It does not require present-day observation accuracy and does not authorize presenting procedural activity as measured data.
+
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
   [GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases) with macOS, Windows and Linux builds.
