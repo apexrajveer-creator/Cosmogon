@@ -5,6 +5,7 @@ use cosmogon_sim::greenhouse::{Definition, Forecast, MODEL, Regime, WaterAssumpt
 
 pub struct CropPlanner {
     pub definition: Definition,
+    pub supplies: super::greenhouse_supplies::View,
     pub result: Option<Forecast>,
     selected_day: usize,
     pub graph: usize,
@@ -17,6 +18,7 @@ impl Default for CropPlanner {
     fn default() -> Self {
         Self {
             definition: Definition::default(),
+            supplies: Default::default(),
             result: None,
             selected_day: 30,
             graph: 0,
@@ -38,7 +40,7 @@ impl CropPlanner {
         Ok(())
     }
     pub fn metadata(&self) -> serde_json::Value {
-        serde_json::json!({"prepared_definition":self.definition,"forecast":self.result,"selected_age_days_after_emergence":self.selected_day,"pane":self.pane,"graph":self.graph,"prepared_inputs_match_forecast":self.result.as_ref().is_some_and(|f|f.definition==self.definition),"semantics":"Session planning view; may be hidden. Forecast does not install a greenhouse or allocate habitat resources."})
+        serde_json::json!({"supply_study":self.supplies.metadata(),"prepared_definition":self.definition,"forecast":self.result,"selected_age_days_after_emergence":self.selected_day,"pane":self.pane,"graph":self.graph,"prepared_inputs_match_forecast":self.result.as_ref().is_some_and(|f|f.definition==self.definition),"semantics":"Session planning view; may be hidden. Forecast does not install a greenhouse or allocate habitat resources."})
     }
 }
 fn chart(ui: &mut egui::Ui, f: &Forecast, selected: &mut usize, metric: usize) {
@@ -129,6 +131,7 @@ pub fn panel(
     world: &cosmogon_sim::Universe,
     habitat: Option<u64>,
 ) {
+    if planner.pane != 5 {
     ui.strong("Controlled lettuce crop planner");
     ui.label(
         egui::RichText::new("NASA MEC · five regimes · 23°C · 16 h light per terrestrial day")
@@ -139,8 +142,9 @@ pub fn panel(
             .small()
             .color(MUTED),
     );
+    }
     ui.horizontal_wrapped(|ui| {
-        for (i, label) in ["Forecast", "Inputs", "Compare", "Water model", "Files"]
+        for (i, label) in ["Forecast", "Inputs", "Compare", "Water model", "Files", "Finite supplies"]
             .iter()
             .enumerate()
         {
@@ -148,6 +152,7 @@ pub fn panel(
         }
     });
     ui.separator();
+    if planner.pane == 5 {super::greenhouse_supplies::panel(ui,&mut planner.supplies,&planner.definition,world,habitat);return;}
     if planner.pane == 1 {
         ui.strong("Growing regime and user assumptions");
         egui::ComboBox::from_id_salt("crop-regime")

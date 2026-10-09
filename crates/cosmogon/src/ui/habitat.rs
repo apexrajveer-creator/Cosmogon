@@ -256,7 +256,7 @@ pub fn panel(
         if form.tab!=4 && form.tab!=7 && form.tab!=9 && form.tab!=10 {ui.label(egui::RichText::new("Experimental mass, power and heat budgets").strong());
         ui.label(egui::RichText::new("NASA reference crew rates · user-assumed equipment · unvalidated field accuracy").small().color(ACCENT));}
         if sim.is_reference() {ui.colored_label(ACCENT,"Clone this reference world to a sandbox before building or configuring habitats.");}
-        if form.tab!=7 && (form.tab!=4 || !sim.universe.habitats.is_empty()) {egui::ComboBox::from_id_salt("habitat-selection").selected_text(form.selected.and_then(|id|sim.universe.habitats.iter().find(|h|h.id==id)).map(|h|h.definition.name.as_str()).unwrap_or("No habitats in this world")).show_ui(ui,|ui| {
+        if form.tab!=7 && (form.tab!=4 || !sim.universe.habitats.is_empty() && (form.crop.pane!=5 || form.crop.supplies.pane==3)) {egui::ComboBox::from_id_salt("habitat-selection").selected_text(form.selected.and_then(|id|sim.universe.habitats.iter().find(|h|h.id==id)).map(|h|h.definition.name.as_str()).unwrap_or("No habitats in this world")).show_ui(ui,|ui| {
             for h in &sim.universe.habitats {ui.selectable_value(&mut form.selected,Some(h.id),format!("{} · #{}",h.definition.name,h.id));}
         });}
         ui.horizontal_wrapped(|ui| {for (i,label) in ["Budgets","Controls","Build & import","Model & export","Crop planner","Oxygen","Water recovery","Recordings","WHY","Humidity","Breach"].iter().enumerate() {ui.selectable_value(&mut form.tab,i,*label);}});
@@ -394,7 +394,7 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
         Some("habitat-controls") => 1,
         Some("habitat-build") => 2,
         Some("habitat-model") => 3,
-        Some("greenhouse"|"greenhouse-water"|"greenhouse-daily-water"|"greenhouse-inputs"|"greenhouse-compare"|"greenhouse-model"|"greenhouse-files") => 4,
+        Some("greenhouse-supplies"|"greenhouse-supply-inputs"|"greenhouse-supply-model"|"greenhouse-supply-files"|"greenhouse"|"greenhouse-water"|"greenhouse-daily-water"|"greenhouse-inputs"|"greenhouse-compare"|"greenhouse-model"|"greenhouse-files") => 4,
         Some("habitat-oxygen") => 5,
         Some("habitat-water") => 6,
         Some("habitat-breach"|"habitat-breach-settings"|"habitat-breach-model")=>10,
@@ -405,6 +405,11 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
     form.breach_pane=match args.panel.as_deref(){Some("habitat-breach-settings")=>1,Some("habitat-breach-model")=>2,_=>0};
     form.moisture_pane=match args.panel.as_deref(){Some("habitat-humidity-settings")=>1,Some("habitat-humidity-model")=>2,_=>0};
     form.crop.pane=match args.panel.as_deref() {Some("greenhouse-inputs")=>1,Some("greenhouse-compare")=>2,Some("greenhouse-model")=>3,Some("greenhouse-files")=>4,_=>0};
+    if args.panel.as_deref().is_some_and(|p|p.starts_with("greenhouse-suppl")){form.crop.pane=5;}
+    form.crop.supplies.pane=match args.panel.as_deref(){Some("greenhouse-supply-inputs")=>1,Some("greenhouse-supply-model")=>2,Some("greenhouse-supply-files")=>3,_=>0};
+    form.crop.supplies.selected_day=args.greenhouse_supply_day.unwrap_or(30);
+    form.crop.supplies.resource=args.greenhouse_supply_resource.as_deref().and_then(|r|cosmogon_sim::greenhouse_supplies::RESOURCES.iter().position(|k|*k==r)).unwrap_or(0);
+    if let Some(p)=&args.greenhouse_supply_output {form.crop.supplies.output=p.clone();form.crop.supplies.launch=true;}
     form.crop.graph=match args.panel.as_deref() {Some("greenhouse-water")=>3,Some("greenhouse-daily-water")=>4,_=>0};
     form.why.section=match args.panel.as_deref(){Some("habitat-why-water")=>1,Some("habitat-why-heat")=>2,Some("habitat-why-air")=>3,Some("habitat-why-evidence")=>4,_=>0};
     form.recording.balance_mode=args.panel.as_deref().is_some_and(|p|p.starts_with("habitat-recording-balance")) || args.habitat_balance_output.is_some() || args.habitat_balance_from.is_some();
@@ -436,6 +441,7 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
         match cosmogon_sim::habitat_sweep::Plan::read(std::path::Path::new(path)) {Ok(plan)=>{if form.recording.figure_mode {form.recording.factorial_mode=plan.secondary.is_some();} form.recording.launch=Some(super::habitat_recordings::Launch {plan,id:args.habitat_study_id,output:args.habitat_study_output.clone().unwrap_or_default(),sample:args.habitat_sample,initial_path:args.load.clone()});},Err(e)=>form.recording.status=Some(e)}
     }
     form.recording.sync_graph_layout();
+    if let Some(path)=&args.greenhouse_supplies {form.tab=4;form.crop.pane=5;if let Err(e)=form.crop.supplies.import(std::path::Path::new(path)){error!("Cannot open crop supply study: {e}");form.crop.supplies.status=Some(e);exit.write(bevy::app::AppExit::error());}}
     if let Some(path)=&args.greenhouse_definition {form.tab=4;if let Err(e)=form.crop.import(std::path::Path::new(path)) {error!("Cannot open greenhouse definition at startup: {e}");form.crop.status=Some(e);exit.write(bevy::app::AppExit::error());}}
 }
 

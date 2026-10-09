@@ -213,3 +213,5 @@ Recorded balances: CLI `habitat-balance --recording FOLDER [--from-index N] [--o
 Cumulative cabin heat capture: use `--panel habitat-recording-balance-heat` with an enabled recording; generated definitions set `record_heat: true`. Balance outputs add protected `heat.csv` only when actual counters exist. [Guide](docs/CABIN_HEAT_ACCOUNTING.md).
 
 Cumulative heat trajectories use existing `habitat-compare --measure heat_storage`, reusable graph layouts and `habitat-figure`/native `--habitat-metric` selections. See [guide](docs/HEAT_TRAJECTORIES.md). Heat metrics are explicit choices; immutable existing aggregate catalogs stay unchanged.
+
+Crop supplies: `cosmogon-cli greenhouse-supply-definition`, `greenhouse-supplies --definition FILE --output NEW_DIR`, `greenhouse-supply-inspect --recording DIR`. Native `--greenhouse-supplies FILE_OR_DIR --panel greenhouse-supplies` opens the same calculation; `--greenhouse-supply-output NEW_DIR`, `--greenhouse-supply-day 0..30`, `--greenhouse-supply-resource liquid_water|carbon_dioxide|nutrient_hno3_equivalent|lighting_energy` support reproducible captures. See [guide](docs/FINITE_CROP_SUPPLIES.md).

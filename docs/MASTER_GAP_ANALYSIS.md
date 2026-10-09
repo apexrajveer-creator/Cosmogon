@@ -93,4 +93,6 @@ New work must meet the relevant definitions of done; partial implementations rem
 
 29. **Selected cumulative heat trajectories (built, partial phase 9/16):** actual retained signed heat/storage curves, explicit execution coverage/origins, supported four-branch contrasts and protected shared native/CLI research figures. Preserve immutable existing metric catalogs and final analyses.
 
-30. **Finite crop-supply studies (next, partial phase 9/16):** explicit finite liquid/CO₂/nutrient-equivalent/lighting budgets, source-based recipe projections and daily support brackets over unchanged maintained-regime forecasts. Preserve legacy definitions and separate planning from physical greenhouse stocks/stress.
+30. **Finite crop-supply studies (built, partial phase 9/16):** explicit finite liquid/CO₂/nutrient-equivalent/lighting budgets, source-based recipe projections and daily support brackets over unchanged maintained-regime forecasts. Preserve legacy definitions and separate planning from physical greenhouse stocks/stress.
+
+31. **Conservative crop material chemistry (next, partial phase 9/16):** separately pinned CHON surrogate material balances, explicit published-versus-derived oxygen and complete elemental residuals before any physical greenhouse stock transfer. Preserve original forecasts, finite supply studies and context; no measured tissue or full nutrient chemistry claim.

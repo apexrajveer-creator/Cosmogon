@@ -142,3 +142,5 @@ Recorded cabin balances preserve actual endpoint stocks, cumulative electricity 
 New habitat definitions retain actual interval heat counters for recorded span explanations; legacy history remains unavailable. [Cabin heat accounting](docs/CABIN_HEAT_ACCOUNTING.md).
 
 Recorded cumulative heat curves: [guide](docs/HEAT_TRAJECTORIES.md); actual signed counters with explicit origin and coverage, selectable native/CLI research figures. Existing saved aggregate analyses remain immutable.
+
+Crop research adds [finite supply studies](docs/FINITE_CROP_SUPPLIES.md): explicit water/CO₂/nutrient-equivalent/lighting budgets, actual daily forecast support, source recipe residuals and protected reproducibility files. Maintained-regime feasibility does not grant habitat inventories or predict stressed crops.

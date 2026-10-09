@@ -52,6 +52,10 @@ pub struct Args {
     pub habitat_sample: Option<usize>,
     pub habitat_pressure_reference:Option<usize>,
     pub greenhouse_definition: Option<String>,
+    pub greenhouse_supplies: Option<String>,
+    pub greenhouse_supply_output: Option<String>,
+    pub greenhouse_supply_day: Option<usize>,
+    pub greenhouse_supply_resource: Option<String>,
     pub surface_altitude: f64,
     pub surface_snapshot: bool,
     pub surface_horizon: bool,
@@ -164,6 +168,10 @@ impl Args {
                 "--habitat-verify" => a.habitat_verify=true,
                 "--habitat-pressure-reference" => {a.habitat_pressure_reference=Some(val().parse().unwrap_or(usize::MAX));},
                 "--habitat-sample" => {let v=val();a.habitat_sample=Some(v.parse().unwrap_or(usize::MAX));},
+                "--greenhouse-supplies" => a.greenhouse_supplies=Some(val()),
+                "--greenhouse-supply-output" => a.greenhouse_supply_output=Some(val()),
+                "--greenhouse-supply-day" => a.greenhouse_supply_day=Some(val().parse().unwrap_or(usize::MAX)),
+                "--greenhouse-supply-resource" => a.greenhouse_supply_resource=Some(val()),
                 "--greenhouse-definition" => a.greenhouse_definition=Some(val()),
                 "--habitat-definition" => a.habitat_definition=Some(val()),
                 "--terrain-section" => a.terrain_section = Some(val()),
@@ -203,13 +211,19 @@ impl Args {
                 f => eprintln!("ignoring unknown argument {f}"),
             }
         }
-        if (a.input_bindings.is_some() || a.camera_path.is_some() || a.habitat_recording.is_some() || a.greenhouse_definition.is_some() || a.habitat_definition.is_some() || a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
+        if (a.input_bindings.is_some() || a.camera_path.is_some() || a.habitat_recording.is_some() || a.greenhouse_definition.is_some() || a.greenhouse_supplies.is_some() || a.habitat_definition.is_some() || a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
             a.new = Some(Scenario::SolarSystemLab);
         }
         a
     }
 
     fn validate_surface(&self) -> Result<(), String> {
+        if self.greenhouse_supplies.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Choose a crop supply definition or study folder".into());}
+        if self.greenhouse_supply_day.is_some_and(|n|n>30) {return Err("Crop supply age must be an integer day from 0 to 30".into());}
+        if self.greenhouse_supply_resource.as_deref().is_some_and(|r|!cosmogon_sim::greenhouse_supplies::RESOURCES.contains(&r)) {return Err("Choose liquid_water, carbon_dioxide, nutrient_hno3_equivalent or lighting_energy".into());}
+        if (self.greenhouse_supply_output.is_some() || self.greenhouse_supply_day.is_some() || self.greenhouse_supply_resource.is_some()) && self.greenhouse_supplies.is_none() {return Err("Crop supply export/age/resource requires --greenhouse-supplies FILE_OR_FOLDER".into());}
+        if self.greenhouse_supply_output.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Choose a nonempty new crop supply output folder".into());}
+        if self.greenhouse_supplies.is_some() && (self.greenhouse_definition.is_some() || self.habitat_definition.is_some() || self.habitat_recording.is_some() || self.habitat_sweep.is_some() || self.habitat_audio_export.is_some()) {return Err("Choose one crop supply, crop forecast, habitat or offline export launch".into());}
         if self.input_bindings.as_deref()==Some("") {return Err("Choose an input-bindings file".into());}
         if self.input_bindings.is_some() && self.habitat_audio_export.is_some(){return Err("Keyboard controls require a native launch".into());}
         if self.camera_path.is_none() && (self.camera_path_time.is_some() || self.camera_path_play) {return Err("--camera-path-time/--camera-path-play require --camera-path FILE".into());}
@@ -265,6 +279,11 @@ impl Args {
 mod tests {
     use super::*;
 
+    #[test]
+    fn crop_supply_launch_refuses_incompatible_or_unbounded_requests() {
+        for v in [vec!["--greenhouse-supply-output","x"],vec!["--greenhouse-supplies","x","--greenhouse-supply-day","31"],vec!["--greenhouse-supplies","x","--greenhouse-supply-day","nan"],vec!["--greenhouse-supplies","x","--greenhouse-supply-resource","unknown"],vec!["--greenhouse-supplies","x","--greenhouse-definition","y"],vec!["--greenhouse-supplies","x","--habitat-recording","y"]] {assert!(Args::parse_from(v.into_iter().map(String::from)).validate_surface().is_err());}
+        assert!(Args::parse_from(["--greenhouse-supplies","x","--greenhouse-supply-day","12","--greenhouse-supply-resource","lighting_energy","--greenhouse-supply-output","z"].into_iter().map(String::from)).validate_surface().is_ok());
+    }
     #[test]
     fn balance_export_needs_evidence_and_ordered_indices() {
         for v in [vec!["--habitat-balance-output"],vec!["--habitat-balance-output","new"],vec!["--habitat-recording","x","--habitat-balance-output"," "],vec!["--habitat-recording","x","--habitat-balance-from","nan"],vec!["--habitat-recording","x","--habitat-balance-from","1024"],vec!["--habitat-recording","x","--habitat-balance-from","3","--habitat-sample","2"]] {assert!(Args::parse_from(v.into_iter().map(String::from)).validate_surface().is_err());}

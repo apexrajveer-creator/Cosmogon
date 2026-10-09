@@ -279,3 +279,5 @@ Original prototype; see docs/AUDIT.md.
 * Shared retained endpoint stock/electricity/temperature/counter reports, all four independent paired ledgers, actual source/method context and protected CSV/JSON exports. Native cached views and immutable workers preserve recordings/live state; sparse sampled heat/power budgets are not extrapolated. No simulation law/save/dependency/golden change.
 
 Selected cumulative cabin heat curves add eleven signed energy paths/storage, signed path/residual sums and executed/excluded time; protected native/CLI figures retain origin/coverage and four actual branch responses. Incomplete/different-origin comparisons stay unsupported. Existing recorded catalogs/analyses, physical laws, state/saves and golden unchanged.
+
+Added separate source-pinned finite crop-supply feasibility studies: explicit liquid/CO₂/HNO₃-equivalent/lighting budgets, daily support brackets over unchanged maintained forecasts, retained source rounding residual, shared native/CLI numerical exports and verified frozen-context reopening. No physical crop or habitat stock credits, simulation/save change or golden re-pin.

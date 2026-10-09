@@ -120,8 +120,9 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
                 .filter(|v| !v.starts_with("--"))
                 .ok_or_else(|| format!("{flag} needs a value"))
         };
-        if a.cmd=="greenhouse" && !matches!(flag.as_str(),"--definition"|"--output"|"--initial"|"--habitat-id") {return Err(format!("{flag} is not a greenhouse planning option"));}
-        if a.cmd=="greenhouse-definition" && flag!="--output" {return Err(format!("{flag} is not a greenhouse-definition option"));}
+        if matches!(a.cmd.as_str(),"greenhouse"|"greenhouse-supplies") && !matches!(flag.as_str(),"--definition"|"--output"|"--initial"|"--habitat-id") {return Err(format!("{flag} is not a greenhouse planning option"));}
+        if matches!(a.cmd.as_str(),"greenhouse-definition"|"greenhouse-supply-definition") && flag!="--output" {return Err(format!("{flag} is not a greenhouse-definition option"));}
+        if a.cmd=="greenhouse-supply-inspect" && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a crop supply inspection option"));}
         if a.cmd=="habitat-diagnose" && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
         if a.cmd=="habitat-verify" && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a habitat replay verification option"));}
         if a.cmd=="habitat-balance" && !matches!(flag.as_str(),"--recording"|"--from-index"|"--observation"|"--output") {return Err(format!("{flag} is not a recorded balance option"));}
@@ -155,7 +156,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--from-index" => {if a.cmd!="habitat-balance" {return Err("--from-index requires habitat-balance".into());} let n=number::<usize>(val()?,&flag)?;if n>=1024{return Err("Initial index must be between 0 and 1023".into());}a.from_index=Some(n);},
             "--reference-index" => {if a.cmd!="habitat-pressure" {return Err("--reference-index requires habitat-pressure".into());}let n=number::<usize>(val()?,&flag)?;if n>=1024 {return Err("Reference index must be between 0 and 1023".into());}a.reference_index=Some(n);},
             "--initial" => a.initial = Some(val()?),
-            "--habitat-id" => {if !matches!(a.cmd.as_str(),"habitat"|"habitat-sweep"|"greenhouse"|"habitat-diagnose") {return Err("--habitat-id requires habitat, habitat-sweep, habitat-diagnose or greenhouse".into());}a.habitat_id=Some(number(val()?,&flag)?);},
+            "--habitat-id" => {if !matches!(a.cmd.as_str(),"habitat"|"habitat-sweep"|"greenhouse"|"greenhouse-supplies"|"habitat-diagnose") {return Err("--habitat-id requires habitat, habitat-sweep, habitat-diagnose or greenhouse".into());}a.habitat_id=Some(number(val()?,&flag)?);},
             "--definition" => a.definition = Some(val()?),
             "--alignment" => {if a.cmd!="habitat-compare" {return Err("--alignment requires habitat-compare".into());}a.alignment=val()?;},
             "--parameter" => a.parameter = val()?,
@@ -193,7 +194,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         }
     }
     if matches!(a.cmd.as_str(),"habitat"|"habitat-definition") && a.initial.is_some() && (explicit_scenario || explicit_seed) {return Err("Choose saved --initial world or new --scenario/--seed, not both".into());}
-    if a.cmd=="greenhouse" && a.habitat_id.is_some() && a.initial.is_none() {return Err("Greenhouse habitat context requires --initial saved world".into());}
+    if matches!(a.cmd.as_str(),"greenhouse"|"greenhouse-supplies") && a.habitat_id.is_some() && a.initial.is_none() {return Err("Greenhouse habitat context requires --initial saved world".into());}
     if a.cmd=="habitat-sweep" {
         if a.initial.is_none() || a.output.is_none() {return Err("habitat-sweep requires --initial SAVE and --output NEW_DIR".into());}
         if a.definition.is_some() && explicit_sweep {return Err("Choose a saved sweep --definition or parameter/range/sample flags".into());}
@@ -210,6 +211,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     if a.cmd=="habitat-balance" && a.recording.is_none() {return Err("habitat-balance requires --recording FOLDER".into());}
     if a.cmd=="habitat-balance" && a.from_index.zip(a.observation).is_some_and(|(a,b)|a>b) {return Err("Choose ordered balance indices".into());}
     if a.cmd=="habitat-figure" && (a.recording.is_none() || a.definition.is_none() || a.output.is_none()) {return Err("habitat-figure requires --recording FOLDER --definition GRAPH_LAYOUT --output NEW_DIR".into());}
+    if a.cmd=="greenhouse-supply-inspect" && a.recording.is_none() {return Err("greenhouse-supply-inspect requires --recording STUDY_FOLDER".into());}
     if a.cmd=="habitat-inspect" && a.recording.is_none() {return Err("habitat-inspect requires --recording STUDY_FOLDER".into());}
     if a.cmd=="habitat" {
         if a.definition.is_none() && a.initial.is_none() {return Err("habitat requires --definition FILE or --initial saved world".into());}
@@ -259,6 +261,9 @@ fn help() {
   surface --target Mars          Sample authoritative MOLA height and source-cell coverage JSON
   section [--output NEW_DIR]      Calculate/export a source-supported MOLA terrain section
   sites                          Print historical landing references, sources and registration limits
+  greenhouse-supply-definition [--output NEW_FILE]  Emit explicit finite crop supply inputs
+  greenhouse-supplies [--definition FILE --initial SAVE --habitat-id N --output NEW_DIR]  Daily resource support
+  greenhouse-supply-inspect --recording STUDY_FOLDER [--output NEW_DIR]  Verify and reopen exact supply study
   greenhouse-definition [--output NEW_FILE]  Emit source-pinned editable crop planning inputs
   greenhouse [--definition FILE --output NEW_DIR]  31 controlled lettuce forecast rows
       [--initial SAVE --habitat-id ID]   Optional exact habitat/world context, no resource credit
@@ -333,6 +338,23 @@ fn greenhouse(a:&Args)->Result<(),String> {
     println!("{}",serde_json::to_string_pretty(&report).map_err(|e|e.to_string())?);Ok(())
 }
 
+fn greenhouse_supply_definition(a:&Args)->Result<(),String> {
+    use std::io::Write;
+    let json=serde_json::to_string_pretty(&cosmogon_sim::greenhouse_supplies::Definition::default()).map_err(|e|e.to_string())?;
+    if let Some(p)=&a.output {std::fs::OpenOptions::new().write(true).create_new(true).open(p).map_err(|e|e.to_string())?.write_all(json.as_bytes()).map_err(|e|e.to_string())?;}println!("{json}");Ok(())
+}
+fn greenhouse_supplies(a:&Args)->Result<(),String> {
+    use cosmogon_sim::greenhouse_supplies::{Bundle,Definition};
+    let b=if a.cmd=="greenhouse-supply-inspect" {Bundle::read(std::path::Path::new(a.recording.as_deref().ok_or("Choose a recorded supply study")?))?}else{
+        let d=match &a.definition {Some(p)=>Definition::read(std::path::Path::new(p))?,None=>Default::default()};
+        let u=a.initial.as_ref().map(|p|save::read_file(std::path::Path::new(p)).map_err(|e|e.to_string())).transpose()?;
+        let id=a.habitat_id.or_else(||u.as_ref().filter(|u|u.habitats.len()==1).map(|u|u.habitats[0].id));
+        Bundle::calculate(&d,u.as_ref().map(|u|(u,id)))?
+    };
+    if let Some(p)=&a.output {b.export(std::path::Path::new(p))?;}
+    println!("{}",serde_json::to_string_pretty(&serde_json::json!({"report":b.report,"manifest":b.manifest})).map_err(|e|e.to_string())?);Ok(())
+}
+
 fn main() {
     let a = match parse_args(std::env::args().skip(1)) {
         Ok(a) => a,
@@ -343,6 +365,8 @@ fn main() {
     };
     match a.cmd.as_str() {
         "help" => help(),
+        "greenhouse-supply-definition" => {if let Err(e)=greenhouse_supply_definition(&a) {eprintln!("Crop supply definition failed: {e}");std::process::exit(1);}},
+        "greenhouse-supplies"|"greenhouse-supply-inspect" => {if let Err(e)=greenhouse_supplies(&a) {eprintln!("Crop supply study failed: {e}");std::process::exit(1);}},
         "greenhouse-definition" => {if let Err(e)=greenhouse_definition(&a) {eprintln!("Greenhouse definition failed: {e}");std::process::exit(1);}},
         "greenhouse" => {if let Err(e)=greenhouse(&a) {eprintln!("Greenhouse planning failed: {e}");std::process::exit(1);}},
         "habitat-diagnose" => {if let Err(e)=habitat_diagnose(&a) {eprintln!("Habitat diagnosis failed: {e}");std::process::exit(1);}},
@@ -861,6 +885,12 @@ mod argument_tests {
             Scenario::Sol
         );
         assert_eq!(args(&["sweep", "--help"]).unwrap().cmd, "help");
+    }
+    #[test]
+    fn crop_supply_commands_refuse_ignored_or_missing_requests() {
+        for a in [vec!["greenhouse-supplies","--samples","2"],vec!["greenhouse-supplies","--habitat-id","0"],vec!["greenhouse-supply-definition","--initial","x"],vec!["greenhouse-supply-inspect"],vec!["greenhouse-supply-inspect","--recording","x","--initial","y"]] {assert!(args(&a).is_err());}
+        assert!(args(&["greenhouse-supplies","--definition","x","--initial","y","--habitat-id","0","--output","z"]).is_ok());
+        assert!(args(&["greenhouse-supply-inspect","--recording","x","--output","z"]).is_ok());
     }
     #[test]
     fn greenhouse_planning_rejects_ignored_world_and_time_options() {
