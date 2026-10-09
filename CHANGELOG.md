@@ -1,3 +1,7 @@
+## Unreleased — controlled cabin geometry and thermal studies
+
+- Add four typed volume/capacity/conductance/radiator studies, illustrative editable levels, fixed-inventory method/source notes, plan-dependent total-pressure catalogs, protected paired trajectories and exact independent replay. Reopened designs restore their actual typed controls with a fresh output field; staged inputs remain separate from completed evidence. Preserve legacy analyses, simulation laws/saves and golden `0xf2c4140a45ae509b`. No physical-expansion, equal-initial-energy or equipment-calibration claim.
+
 ## Unreleased — recorded pressure explanations
 
 - Add actual cabin gas components, explicitly ordered inventory/temperature/volume accounting between retained observations, and separately scoped finite breach substep evidence. Native tables, CLI and protected exact-input JSON/CSV exports share one derivation; preserve original studies, simulation laws/saves and golden `0xf2c4140a45ae509b`. Mathematical accounting is distinct from unique physical causation or field calibration.

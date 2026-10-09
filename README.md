@@ -132,3 +132,5 @@ Paired habitat [experiments](docs/PAIRED_HABITAT_EXPERIMENTS.md) compare all fou
 [Finite cabin breach](docs/CABIN_BREACH.md) models outward open-orifice gas loss with an outside mass ledger, explicit assumptions/thermal limits and actual saved studies.
 
 [Recorded pressure explanations](docs/RECORDED_PRESSURE.md) expose actual gas components and signed inventory, temperature and volume accounting, with exact retained inputs and protected evidence exports.
+
+Controlled [cabin geometry/thermal studies](docs/THERMAL_STUDIES.md) compare fixed-inventory volume, effective heat capacity, envelope conductance and radiator assumptions through the same protected recordings, four-corner contrasts and independent replay.

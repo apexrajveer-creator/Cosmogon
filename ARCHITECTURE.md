@@ -155,3 +155,5 @@ Optional `cosmogon_sim::breach` owns source-pinned finite outward orifice integr
 ### Recorded pressure accounting
 
 `cosmogon_sim::habitat_pressure` is a read-only derivation from validated retained Sample inputs. Four actual ideal-gas component pressures and ordered inventory → temperature → volume terms telescope between two stored states. Optional breach evidence uses its exact completed configuration/initial gas/resolved transfer separately from current controls and whole-observation gaps. No new dynamics/state/model pins; derived report identity and NASA ideal-gas equation are separate from physical source pins. Native `ui/habitat_pressure.rs`, recordings, CLI and capture/performance metadata share the report; asynchronous exports capture it at request time and create a protected complete evidence folder. Unavailable reference/substep remains absent.
+
+Controlled geometry/thermal plans select `Plan::metrics` and conditionally retain `configuration_assumptions`; legacy catalogs/reports remain exact. Native reopened controls derive from the validated stored plan, separate from completed recordings; [guide](docs/THERMAL_STUDIES.md).

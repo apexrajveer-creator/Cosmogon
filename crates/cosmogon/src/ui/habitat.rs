@@ -409,6 +409,7 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
     form.recording.why_mode=args.panel.as_deref().is_some_and(|p|p.starts_with("habitat-recording-why"));
     form.recording.why.section=match args.panel.as_deref(){Some("habitat-recording-why-water")=>1,Some("habitat-recording-why-heat")=>2,Some("habitat-recording-why-air")=>3,Some("habitat-recording-why-evidence")=>4,_=>0};
     form.recording.experiment_mode=args.panel.as_deref()==Some("habitat-experiments");
+    form.recording.keep_experiment_at_launch=form.recording.experiment_mode;
     form.recording.graph.load_preferences();
     if let Some(path)=&args.habitat_graph {match super::habitat_graph::Layout::read(std::path::Path::new(path)){Ok(d)=>form.recording.graph.layout=d,Err(e)=>form.recording.graph.status=Some(e)}}
     form.recording.apply_graph_layout();

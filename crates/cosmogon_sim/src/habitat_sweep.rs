@@ -27,9 +27,10 @@ pub enum Parameter {
     MoistureElectricityJKg,
     MoistureCondensateCapacityKg,
     BreachAreaM2,BreachDischarge,BreachOutsidePressurePa,BreachGamma,
+    VolumeM3, HeatCapacityJK, ConductanceWK, RadiatorAreaM2,
 }
 impl Parameter {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 23] = [
         Self::FirmPowerW,
         Self::SolarAreaM2,
         Self::BatteryCapacityJ,
@@ -45,9 +46,12 @@ impl Parameter {
         Self::MoistureRateKgS,
         Self::MoistureElectricityJKg,
         Self::MoistureCondensateCapacityKg,Self::BreachAreaM2,Self::BreachDischarge,Self::BreachOutsidePressurePa,Self::BreachGamma,
+        Self::VolumeM3, Self::HeatCapacityJK, Self::ConductanceWK, Self::RadiatorAreaM2,
     ];
     pub fn id(self) -> &'static str {
         match self {
+            Self::VolumeM3 => "volume_m3", Self::HeatCapacityJK => "heat_capacity_j_k",
+            Self::ConductanceWK => "conductance_w_k", Self::RadiatorAreaM2 => "radiator_area_m2",
             Self::BreachAreaM2=>"breach_area_m2",Self::BreachDischarge=>"breach_discharge",Self::BreachOutsidePressurePa=>"breach_outside_pressure_pa",Self::BreachGamma=>"breach_gamma",
             Self::FirmPowerW => "firm_power_w",
             Self::SolarAreaM2 => "solar_area_m2",
@@ -74,6 +78,10 @@ impl Parameter {
     }
     pub fn label(self) -> &'static str {
         match self {
+            Self::VolumeM3 => "Cabin volume (fixed initial gas)",
+            Self::HeatCapacityJK => "Effective cabin heat capacity",
+            Self::ConductanceWK => "Total envelope heat conductance",
+            Self::RadiatorAreaM2 => "Radiator area",
             Self::BreachAreaM2=>"Open breach throat area",Self::BreachDischarge=>"Assumed breach discharge coefficient",Self::BreachOutsidePressurePa=>"Assumed outside receiver pressure",Self::BreachGamma=>"Assumed gas heat-capacity ratio",
             Self::FirmPowerW => "External firm supply",
             Self::SolarAreaM2 => "Horizontal solar panel area",
@@ -96,11 +104,12 @@ impl Parameter {
     }
     pub fn unit(self) -> &'static str {
         match self {
+            Self::VolumeM3 => "m³", Self::HeatCapacityJK => "J/K", Self::ConductanceWK => "W/K",
             Self::FirmPowerW
             | Self::ElectrolysisPowerW
             | Self::SabatierPowerW
             | Self::MoisturePowerW => "W",
-            Self::SolarAreaM2 | Self::BreachAreaM2 => "m²",
+            Self::SolarAreaM2 | Self::BreachAreaM2 | Self::RadiatorAreaM2 => "m²",
             Self::BreachOutsidePressurePa=>"Pa",Self::BreachDischarge | Self::BreachGamma=>"dimensionless",
             Self::BatteryCapacityJ => "J",
             Self::WaterRecoveryFraction
@@ -112,11 +121,40 @@ impl Parameter {
             Self::MoistureCondensateCapacityKg => "kg",
         }
     }
+    pub fn geometry_or_thermal(self) -> bool {
+        matches!(self, Self::VolumeM3 | Self::HeatCapacityJK | Self::ConductanceWK | Self::RadiatorAreaM2)
+    }
+    pub fn assumption(self) -> Option<&'static str> {
+        match self {
+            Self::VolumeM3 => Some("Same initial gas mass and temperature, different assumed volume: initial pressure changes. This is a counterfactual cabin, not physical expansion or piston work."),
+            Self::HeatCapacityJK => Some("Same initial temperature, different effective heat capacity. Initial implied sensible energy is not held equal; capacity is an assumption, not measured material data."),
+            Self::ConductanceWK => Some("Total envelope conductance in W/K, not material conductivity or insulation thickness. No automatic geometry or equipment scaling."),
+            Self::RadiatorAreaM2 => Some("Radiating area changes at fixed emissivity, pump limit and initial stores. Actual removal is also limited by available power and thermostat demand."),
+            _ => None,
+        }
+    }
+    /// Illustrative two levels within existing bounds, never an optimal/calibrated design.
+    pub fn illustrative_levels(self, c: &habitat::Config) -> Option<[f64; 2]> {
+        let (current, minimum, maximum, zero_example) = match self {
+            Self::VolumeM3 => (c.volume_m3, 1.0, 1e6, 500.0),
+            Self::HeatCapacityJK => (c.heat_capacity_j_k, 1e6, 1e12, 50e6),
+            Self::ConductanceWK => (c.conductance_w_k, 0.0, 1000.0, 10.0),
+            Self::RadiatorAreaM2 => (c.radiator_area_m2, 0.0, 100_000.0, 25.0),
+            _ => return None,
+        };
+        c.validate().ok()?;
+        Some([(current * 0.5).clamp(minimum, maximum),
+            if current == 0.0 { zero_example } else { (current * 2.0).clamp(minimum, maximum) }])
+    }
     pub fn set(self, c: &mut habitat::Config, value: f64) -> Result<(), String> {
         if !value.is_finite() {
             return Err("Sweep values must be finite".into());
         }
         match self {
+            Self::VolumeM3 => c.volume_m3 = value,
+            Self::HeatCapacityJK => c.heat_capacity_j_k = value,
+            Self::ConductanceWK => c.conductance_w_k = value,
+            Self::RadiatorAreaM2 => c.radiator_area_m2 = value,
             Self::BreachAreaM2|Self::BreachDischarge|Self::BreachOutsidePressurePa|Self::BreachGamma=>{let b=c.breach.as_mut().ok_or("Enable outward cabin breach before sweeping its assumptions")?;match self {Self::BreachAreaM2=>b.area_m2=value,Self::BreachDischarge=>b.discharge_coefficient=value,Self::BreachOutsidePressurePa=>b.outside_pressure_pa=value,Self::BreachGamma=>b.gamma=value,_=>unreachable!()}},
             Self::FirmPowerW => c.firm_power_w = value,
             Self::SolarAreaM2 => c.solar_area_m2 = value,
@@ -231,6 +269,30 @@ impl Plan {
         };
         plan.validate()?;
         Ok(plan)
+    }
+    /// Preserve legacy catalogs; these plans additionally expose existing total pressure.
+    pub fn metrics(&self, h: &habitat::Habitat) -> Vec<Metric> {
+        let mut metrics: Vec<_> = Metric::for_habitat(h).collect();
+        if self.configuration_assumptions().is_some() && !metrics.contains(&Metric::TotalPressure) {
+            metrics.push(Metric::TotalPressure);
+        }
+        metrics
+    }
+    pub fn configuration_assumptions(&self) -> Option<serde_json::Value> {
+        let settings: Vec<_> = std::iter::once(self.parameter)
+            .chain(self.secondary.as_ref().map(|b| b.parameter))
+            .filter_map(|p| p.assumption().map(|note| serde_json::json!({"parameter":p.id(),"unit":p.unit(),"assumption":note})))
+            .collect();
+        if settings.is_empty() {return None;}
+        Some(serde_json::json!({"format":"cosmogon-habitat-configuration-assumptions","schema_version":1,
+            "settings":settings,"initial_controls":"Actual initial stocks and temperature preserved through ordinary edits; original definition remains unchanged. No gas refill, automatic geometry/equipment scaling or simulated expansion.",
+            "capacity_scope":"Effective lumped heat capacity is assumed. Changing it does not preserve equal implied initial thermal energy. Breach support still requires nonnegative structure heat capacity.",
+            "sources":[{"url":"https://www.grc.nasa.gov/www/k-12/airplane/eqstat.html","scope":"Ideal gas pV=nRT; supports the fixed-molecule volume/pressure relationship, not measured cabin geometry."},{"url":"https://www.grc.nasa.gov/www/k-12/airplane/specheat.html","scope":"Heat capacity and constant-volume heat/temperature relationships; no calibration of effective cabin capacity or envelope/radiator properties."}],
+            "limits":"Deterministic sensitivity at supplied assumptions, not field calibration, predictive uncertainty, physical expansion or equal-energy comparison."}))
+    }
+    pub(crate) fn with_assumptions(&self, mut report: serde_json::Value) -> serde_json::Value {
+        if let Some(note) = self.configuration_assumptions() {report["configuration_assumptions"] = note;}
+        report
     }
     pub fn branch_count(&self) -> usize {
         self.values.len() * if self.secondary.is_some() { 2 } else { 1 }
@@ -388,7 +450,7 @@ pub fn execute(
         let folder = format!("run-{i:03}");
         habitat::export(&initial, &world, id, &rows, &path.join(&folder))?;
         let recording = Recording::read(&path.join(&folder))?;
-        let final_values = Metric::for_habitat(&rows.last().unwrap().habitat)
+        let final_values = plan.metrics(&rows.last().unwrap().habitat).into_iter()
             .map(|m| {
                 (
                     m.id().to_string(),
@@ -414,6 +476,7 @@ pub fn execute(
         manifest["factorial_analysis"] = analysis;
         manifest["mechanism"]="Four independent common-state clones; both settings changed in one atomic ordinary edit. Standard order A0B0, A1B0, A0B1, A1B1. Initial stocks and old-configuration remainders preserved.".into();
     }
+    manifest = plan.with_assumptions(manifest);
     write(
         "manifest.json",
         &serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?,
@@ -676,4 +739,95 @@ mod tests {
             assert!(!root.exists());
         }
     }
+    #[test]
+    fn geometry_branches_preserve_actual_gas_and_inverse_volume_pressure() {
+        let u=world();
+        let before=crate::research::state_fingerprint(&u).unwrap();
+        let p=Plan::linear(Parameter::VolumeM3,250.0,1000.0,2,1,60.0).unwrap();
+        let root=std::env::temp_dir().join(format!("cosmogon-volume-fixed-gas-{}",std::process::id()));
+        let _=std::fs::remove_dir_all(&root);
+        let m=execute(&u,0,&p,&root).unwrap();
+        let a=Recording::read(&root.join("run-000")).unwrap();
+        let b=Recording::read(&root.join("run-001")).unwrap();
+        for r in [&a,&b] {
+            assert_eq!(r.rows[0].habitat.state,u.habitats[0].state);
+            assert_eq!(r.rows[0].habitat.definition,u.habitats[0].definition);
+            assert_eq!(p.metrics(&r.rows[0].habitat).len(),19);
+        }
+        let pa=a.rows[0].habitat.state.pressure_pa(&a.rows[0].habitat.config);
+        let pb=b.rows[0].habitat.state.pressure_pa(&b.rows[0].habitat.config);
+        assert!((pa/pb-4.0).abs()<1e-12);
+        assert!((pa*250.0-pb*1000.0).abs()<1e-7);
+        assert_eq!(m["runs"][0]["final_metrics"]["total_pressure"]["value"],pa);
+        assert_eq!(m["configuration_assumptions"],p.configuration_assumptions().unwrap());
+        assert_eq!(crate::research::state_fingerprint(&u).unwrap(),before);
+        let old=Plan::linear(Parameter::FirmPowerW,0.,1.,2,1,60.).unwrap();
+        assert_eq!(old.metrics(&u.habitats[0]).len(),18);
+        assert!(old.configuration_assumptions().is_none());
+        let mut enabled=u.habitats[0].clone();enabled.config.breach=Some(crate::breach::Config::default());
+        assert_eq!(p.metrics(&enabled).len(),22);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn thermal_assumptions_replay_records_at_fixed_stocks_and_temperature() {
+        let u=moisture_world();
+        let before=crate::research::state_fingerprint(&u).unwrap();
+        let root=std::env::temp_dir().join(format!("cosmogon-thermal-settings-{}",std::process::id()));
+        let _=std::fs::remove_dir_all(&root);
+        for (parameter,a,b) in [(Parameter::HeatCapacityJK,5e7,1e9),(Parameter::ConductanceWK,0.,100.),(Parameter::RadiatorAreaM2,0.,50.),(Parameter::VolumeM3,250.,1000.)] {
+            let p=Plan::linear(parameter,a,b,2,3,3600.).unwrap();
+            let folder=root.join(parameter.id());
+            execute(&u,0,&p,&folder.join("a")).unwrap();
+            execute(&u,0,&p,&folder.join("b")).unwrap();
+            for i in 0..2 {
+                let branch=format!("run-{i:03}");
+                for file in ["samples.json","samples.csv","report.json"] {
+                    assert_eq!(std::fs::read(folder.join("a").join(&branch).join(file)).unwrap(),std::fs::read(folder.join("b").join(&branch).join(file)).unwrap());
+                }
+                let r=Recording::read(&folder.join("a").join(&branch)).unwrap();
+                assert_eq!(r.rows[0].habitat.state,u.habitats[0].state);
+                assert_eq!(r.rows[0].habitat.totals,u.habitats[0].totals);
+                let mut replay=crate::save::read_file(&folder.join("a").join(&branch).join("initial.cosmo")).unwrap();
+                for row in &r.rows {
+                    replay.advance_to(row.simulation_time_s,None,None);
+                    assert_eq!(habitat::sample(&replay,0).unwrap(),*row);
+                    assert!((row.habitat.state.accounted_mass_kg()-u.habitats[0].state.accounted_mass_kg()).abs()<1e-8);
+                    assert!(row.habitat.budget.thermal_residual_j.abs()<0.1);
+                }
+            }
+            let aa=Recording::read(&folder.join("a/run-000")).unwrap();
+            let bb=Recording::read(&folder.join("a/run-001")).unwrap();
+            if parameter==Parameter::HeatCapacityJK {
+                let t=u.habitats[0].state.temperature_k;
+                assert_ne!(aa.rows[0].habitat.config.heat_capacity_j_k*t,bb.rows[0].habitat.config.heat_capacity_j_k*t);
+                assert!(aa.rows[2].habitat.state.temperature_k>bb.rows[2].habitat.state.temperature_k);
+            }
+            if parameter==Parameter::ConductanceWK {assert!(aa.rows[2].habitat.state.temperature_k>bb.rows[2].habitat.state.temperature_k);}
+        }
+        assert_eq!(crate::research::state_fingerprint(&u).unwrap(),before);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn geometry_thermal_bounds_and_illustrations_preflight_every_branch() {
+        let u=world();
+        let root=std::env::temp_dir().join(format!("cosmogon-thermal-invalid-{}",std::process::id()));
+        let _=std::fs::remove_dir_all(&root);
+        for (parameter,minimum,maximum) in [(Parameter::VolumeM3,1.,1e6),(Parameter::HeatCapacityJK,1e6,1e12),(Parameter::ConductanceWK,0.,1000.),(Parameter::RadiatorAreaM2,0.,100000.)] {
+            assert_eq!(Parameter::parse(parameter.id()).unwrap(),parameter);
+            assert_eq!(serde_json::to_value(parameter).unwrap(),parameter.id());
+            for invalid in [minimum-1.,maximum+1.] {
+                let p=Plan::linear(parameter,minimum,invalid,2,1,60.).unwrap();
+                assert!(execute(&u,0,&p,&root).is_err());assert!(!root.exists());
+            }
+            let mut config=u.habitats[0].config.clone();
+            for bound in [minimum,maximum] {
+                parameter.set(&mut config,bound).unwrap();
+                let levels=parameter.illustrative_levels(&config).unwrap();
+                assert_ne!(levels[0],levels[1]);
+                for level in levels {parameter.set(&mut config,level).unwrap();}
+            }
+            assert!(parameter.set(&mut config,f64::NAN).is_err());
+        }
+    }
+
 }

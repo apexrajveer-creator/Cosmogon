@@ -66,7 +66,7 @@ pub fn report_at(plan: &Plan, recordings: &[Recording], index: usize) -> Result<
     }
     let reference = &recordings[0];
     let time = reference.rows[index].simulation_time_s;
-    let metrics = Metric::for_habitat(&reference.rows[index].habitat).map(|metric| {
+    let metrics = plan.metrics(&reference.rows[index].habitat).into_iter().map(|metric| {
         let mut supported = true;
         let responses = std::array::from_fn(|i| {
             let pair = habitat_comparison::pair_at(reference,&recordings[i],metric,Alignment::World,index).expect("validated complete rows");
@@ -75,7 +75,7 @@ pub fn report_at(plan: &Plan, recordings: &[Recording], index: usize) -> Result<
         });
         (metric.id().into(),json!({"unit":metric.unit(),"support":if supported {"matched"} else {"unavailable_or_mismatched_interval"},"contrasts":Contrasts::of(responses,supported)}))
     }).collect::<serde_json::Map<String,Value>>();
-    Ok(
+    Ok(plan.with_assumptions(
         json!({"format":"cosmogon-habitat-factorial-analysis","schema_version":1,"method_source":METHOD_SOURCE,
         "a":{"parameter":plan.parameter.id(),"unit":plan.parameter.unit(),"levels":plan.values},
         "b":{"parameter":secondary.parameter.id(),"unit":secondary.parameter.unit(),"levels":secondary.values},
@@ -83,7 +83,7 @@ pub fn report_at(plan: &Plan, recordings: &[Recording], index: usize) -> Result<
         "formulas":{"a_at_b0":"Y10 - Y00","a_at_b1":"Y11 - Y01","b_at_a0":"Y01 - Y00","b_at_a1":"Y11 - Y10","average_a":"(A at B0 + A at B1)/2","average_b":"(B at A0 + B at A1)/2","difference_in_differences":"(Y11 - Y01) - (Y10 - Y00)","standard_ab_effect":"difference_in_differences / 2"},
         "scope":if index==plan.samples-1 {"Final stored observation of four common-state branches; initial stores fixed. A0/A1 and B0/B1 mean first/second supplied levels, not necessarily increasing values. Responses remain visible when contrasts lack support."} else {"Selected stored observation of four common-state branches; initial stores fixed. A0/A1 and B0/B1 mean first/second supplied levels, not necessarily increasing values. Responses remain visible when contrasts lack support."},
         "limits":"Conditional model contrasts at these two levels. No interpolation, p-values, significance, confidence intervals, independent noise replications, global optimum or field-hardware validation. First-versus-last corners change both settings and cannot isolate either effect."}),
-    )
+    ))
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -196,7 +196,7 @@ impl Design {
     }
     pub fn trajectory_report(&self) -> Result<Value, String> {
         let plan = self.plan()?;
-        let metrics = Metric::for_habitat(&self.recordings[0].rows[0].habitat)
+        let metrics = plan.metrics(&self.recordings[0].rows[0].habitat).into_iter()
             .map(|m| {
                 Ok((
                     m.id().into(),
@@ -204,13 +204,13 @@ impl Design {
                 ))
             })
             .collect::<Result<serde_json::Map<String, Value>, String>>()?;
-        Ok(
+        Ok(plan.with_assumptions(
             json!({"format":"cosmogon-habitat-factorial-trajectories","schema_version":1,"plan":plan,
             "common_state_fingerprint":self.manifest["common_state_fingerprint"],"common_data_versions":self.manifest["common_data_versions"],
             "habitat_id":self.manifest["habitat_id"],"recordings":self.recordings.iter().map(|r|&r.summary).collect::<Vec<_>>(),
             "method_source":METHOD_SOURCE,"order":self.analysis["order"],"formulas":self.analysis["formulas"],"limits":self.analysis["limits"],
             "scope":"All exact stored common-world observations. Interval contrasts require matching positive completed durations and ends. Missing values remain null or empty CSV cells. Snapshot flows may retain pre-edit configurations; flags are retained. No interpolation or live-state substitution.","final_analysis":self.analysis,"metrics":metrics}),
-        )
+        ))
     }
     pub fn export_trajectories(&self, path: &Path) -> Result<(), String> {
         use std::io::Write;
@@ -220,7 +220,7 @@ impl Design {
         let plan = self.plan()?;
         let mut csv=String::from("metric,unit,observation_index,simulation_time_s,y00,y10,y01,y11,a_at_b0,a_at_b1,b_at_a0,b_at_a1,average_a,average_b,difference_in_differences,standard_ab_effect,support00,support10,support01,support11,index00,index10,index01,index11,world_time00_s,world_time10_s,world_time01_s,world_time11_s,interval_end00_s,interval_end10_s,interval_end01_s,interval_end11_s,interval_seconds00,interval_seconds10,interval_seconds01,interval_seconds11,interval_config_matches00,interval_config_matches10,interval_config_matches01,interval_config_matches11\n");
         let cell = |v: Option<f64>| v.map(|x| format!("{x:.17e}")).unwrap_or_default();
-        for m in Metric::for_habitat(&self.recordings[0].rows[0].habitat) {
+        for m in plan.metrics(&self.recordings[0].rows[0].habitat) {
             for p in curve(&plan, &self.recordings, m)? {
                 let c = &p.contrasts;
                 let mut cells = vec![
@@ -270,7 +270,7 @@ impl Design {
         std::fs::create_dir(path).map_err(|e| {
             format!("Existing trajectory analyses are protected; choose a new folder: {e}")
         })?;
-        for (name,data) in [("trajectories.json",bytes),("contrasts.csv",csv.into_bytes()),("manifest.json",serde_json::to_vec_pretty(&json!({"format":"cosmogon-habitat-factorial-trajectory-export","schema_version":1,"complete":true,"observation_count":plan.samples,"metric_count":Metric::for_habitat(&self.recordings[0].rows[0].habitat).count(),"common_state_fingerprint":self.manifest["common_state_fingerprint"],"files":["trajectories.json","contrasts.csv"]})).map_err(|e|e.to_string())?)] {
+        for (name,data) in [("trajectories.json",bytes),("contrasts.csv",csv.into_bytes()),("manifest.json",serde_json::to_vec_pretty(&plan.with_assumptions(json!({"format":"cosmogon-habitat-factorial-trajectory-export","schema_version":1,"complete":true,"observation_count":plan.samples,"metric_count":plan.metrics(&self.recordings[0].rows[0].habitat).len(),"common_state_fingerprint":self.manifest["common_state_fingerprint"],"files":["trajectories.json","contrasts.csv"]}))).map_err(|e|e.to_string())?)] {
             let mut f=std::fs::OpenOptions::new().write(true).create_new(true).open(path.join(name)).map_err(|e|format!("Incomplete trajectory analysis: {e}"))?;
             f.write_all(&data).map_err(|e|format!("Incomplete trajectory analysis: {e}"))?;
         }
@@ -310,6 +310,9 @@ pub fn read(path: &Path) -> Result<Design, String> {
         || manifest["plan"] != serde_json::to_value(&plan).map_err(|e| e.to_string())?
     {
         return Err("Incomplete or unsupported paired design".into());
+    }
+    if manifest.get("configuration_assumptions") != plan.configuration_assumptions().as_ref() {
+        return Err("Design configuration assumptions disagree with its typed plan".into());
     }
     let id = manifest["habitat_id"]
         .as_u64()
@@ -358,12 +361,12 @@ pub fn read(path: &Path) -> Result<Design, String> {
         {
             return Err("Design branch differs from its common-state ordinary edit".into());
         }
-        for metric in Metric::for_habitat(&recording.rows.last().ok_or("Empty design branch")?.habitat) {
-            if runs[i]["final_metrics"][metric.id()]
-                != json!({"unit":metric.unit(),"value":metric.value(recording.rows.last().ok_or("Empty design branch")?)})
-            {
-                return Err("Design metric disagrees with recorded final observation".into());
-            }
+        let last=recording.rows.last().ok_or("Empty design branch")?;
+        let expected_metrics=plan.metrics(&last.habitat).into_iter().map(|metric|
+            (metric.id().into(),json!({"unit":metric.unit(),"value":metric.value(last)}))
+        ).collect::<serde_json::Map<String,Value>>();
+        if runs[i]["final_metrics"] != Value::Object(expected_metrics) {
+            return Err("Design metric catalog disagrees with recorded final observation".into());
         }
         recordings.push(recording);
     }
@@ -647,4 +650,45 @@ mod tests {
             .is_none());
         assert_eq!(legacy.branch_count(), 3);
     }
+    #[test]
+    fn volume_capacity_design_retains_pressure_interactions_sources_and_replay() {
+        let u=world();
+        let mut p=Plan::linear(Parameter::VolumeM3,250.,1000.,2,3,3600.).unwrap();
+        p.schema_version=2;p.secondary=Some(Secondary {parameter:Parameter::HeatCapacityJK,values:[5e7,1e9]});
+        let root=std::env::temp_dir().join(format!("cosmogon-volume-capacity-pair-{}",std::process::id()));
+        let _=std::fs::remove_dir_all(&root);
+        crate::habitat_sweep::execute(&u,0,&p,&root.join("design")).unwrap();
+        let d=read(&root.join("design")).unwrap();
+        assert_eq!(d.analysis["metrics"].as_object().unwrap().len(),19);
+        for index in 0..3 {
+            let report=d.report_at(index).unwrap();
+            let y:Vec<f64>=d.recordings.iter().map(|r|r.rows[index].habitat.state.pressure_pa(&r.rows[index].habitat.config)).collect();
+            let c=&report["metrics"]["total_pressure"]["contrasts"];
+            assert_eq!(c["responses"],json!(y));
+            let did=(y[3]-y[2])-(y[1]-y[0]);
+            assert_eq!(c["difference_in_differences"],did);
+            assert_eq!(c["standard_ab_effect"],did/2.0);
+            if index==0 {assert_eq!(did,0.0);} else {assert_ne!(did,0.0);}
+        }
+        assert_eq!(d.manifest["configuration_assumptions"],d.analysis["configuration_assumptions"]);
+        d.export_trajectories(&root.join("export")).unwrap();
+        let export:Value=serde_json::from_slice(&std::fs::read(root.join("export/manifest.json")).unwrap()).unwrap();
+        assert_eq!(export["metric_count"],19);
+        assert_eq!(export["configuration_assumptions"],d.analysis["configuration_assumptions"]);
+        let csv=std::fs::read_to_string(root.join("export/contrasts.csv")).unwrap();
+        assert_eq!(csv.lines().count(),58);assert!(csv.lines().all(|l|l.split(',').count()==40));
+        assert!(d.export_trajectories(&root.join("export")).is_err());
+        let replay=crate::habitat_replay::verify(&root.join("design")).unwrap();
+        assert_eq!(replay["verified"],true);
+        let file=root.join("design/manifest.json");let original=std::fs::read(&file).unwrap();
+        for mutate in 0..2 {
+            let mut bad:Value=serde_json::from_slice(&original).unwrap();
+            if mutate==0 {bad.as_object_mut().unwrap().remove("configuration_assumptions");}
+            else {bad["runs"][0]["final_metrics"]["total_pressure"]["value"]=1.0.into();}
+            std::fs::write(&file,serde_json::to_vec(&bad).unwrap()).unwrap();assert!(read(&root.join("design")).is_err());
+        }
+        std::fs::write(file,original).unwrap();assert!(read(&root.join("design")).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
 }

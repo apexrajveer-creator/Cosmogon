@@ -94,6 +94,7 @@ pub struct Study {
     pub recording: Option<Recording>,
     pub comparison: Option<Recording>,
     pub experiment_mode: bool,
+    pub keep_experiment_at_launch: bool,
     pub factorial_mode: bool,
     pub paired_pane: usize,
     pub effect: Effect,
@@ -236,7 +237,21 @@ impl Study {
         self.loaded_path=path.clone();
         self.path = path;
         self.comparison_path = comparison_path;
-        self.experiment_mode = false;
+        self.experiment_mode = self.keep_experiment_at_launch;
+        self.keep_experiment_at_launch = false;
+        if let Ok(plan) = serde_json::from_value::<Plan>(result.manifest["plan"].clone()) {
+            self.sweep.parameter = plan.parameter;
+            self.sweep.values = plan.values.iter().map(|v|v.to_string()).collect::<Vec<_>>().join(", ");
+            self.sweep.samples = plan.samples;
+            self.sweep.interval_hours = plan.interval_s / 3600.0;
+            self.sweep.paired = plan.secondary.is_some();
+            if let Some(b) = plan.secondary {
+                self.sweep.secondary_parameter = b.parameter;
+                self.sweep.secondary_values = b.values.iter().map(|v|v.to_string()).collect::<Vec<_>>().join(", ");
+            }
+            // Reopening a plan does not nominate its existing output for another write.
+            self.sweep.output.clear();
+        }
         self.recording = Some(result.a);
         self.comparison = Some(result.b);
         self.selected = index;
@@ -330,7 +345,7 @@ impl Study {
         let r = self.recording.as_ref()?;
         let row = &r.rows[self.selected.min(r.rows.len() - 1)];
         Some(
-            serde_json::json!({"summary":r.summary,"metric":self.metric.id(),"unit":self.metric.unit(),"selected_observation":self.selected,"selected_row":row,"why":self.why_mode.then(||self.why.metadata(&row.habitat,row.simulation_time_s,"recorded_completed_interval")),"selected_value":self.metric.value(row),"comparison":self.comparison.as_ref().map(|b| {let pairs=habitat_comparison::pairs(r,b,self.metric,self.alignment);let pair=&pairs[self.selected.min(pairs.len()-1)];serde_json::json!({"summary":b.summary,"alignment":self.alignment,"selected_pair":pair,"selected_row":pair.b_index.map(|j|&b.rows[j]),"report":habitat_comparison::report(r,b,self.metric,self.alignment)})}),"sweep":self.sweep_manifest,"pressure":self.pressure_mode.then(||self.pressure.metadata(r,self.selected,&self.loaded_path)),"paired_results_visible":self.factorial_mode && !self.pressure_mode,"graph_view":self.graph_metadata(),"graph_layout_visible":self.graph_mode,"replay":self.replay.metadata(),"paired_source":self.paired.as_ref().map(|_|&self.paired_source),"paired_selected_analysis":self.paired.as_ref().and_then(|d|d.report_at(self.selected).ok()),"paired_curve":self.paired_curve.as_ref().filter(|(m,_)|*m==self.metric).map(|(_,points)|serde_json::json!({"metric":self.metric.id(),"effect":self.effect.id(),"point_count":points.len(),"available_count":points.iter().filter(|p|self.effect.value(&p.contrasts).is_some()).count(),"selected_point":points.get(self.selected),"pane":self.paired_pane})),"scope":"Independent recorded view at capture request, possibly hidden; no live-world or camera change"}),
+            serde_json::json!({"summary":r.summary,"metric":self.metric.id(),"unit":self.metric.unit(),"selected_observation":self.selected,"selected_row":row,"why":self.why_mode.then(||self.why.metadata(&row.habitat,row.simulation_time_s,"recorded_completed_interval")),"selected_value":self.metric.value(row),"comparison":self.comparison.as_ref().map(|b| {let pairs=habitat_comparison::pairs(r,b,self.metric,self.alignment);let pair=&pairs[self.selected.min(pairs.len()-1)];serde_json::json!({"summary":b.summary,"alignment":self.alignment,"selected_pair":pair,"selected_row":pair.b_index.map(|j|&b.rows[j]),"report":habitat_comparison::report(r,b,self.metric,self.alignment)})}),"sweep":self.sweep_manifest,"staged_geometry_thermal_plan":(self.experiment_mode && (self.sweep.parameter.geometry_or_thermal() || self.sweep.paired && self.sweep.secondary_parameter.geometry_or_thermal())).then(||serde_json::json!({"parameter":self.sweep.parameter.id(),"values_text":self.sweep.values,"paired":self.sweep.paired,"secondary_parameter":self.sweep.secondary_parameter.id(),"secondary_values_text":self.sweep.secondary_values,"samples":self.sweep.samples,"interval_hours":self.sweep.interval_hours,"new_output":self.sweep.output,"scope":"Editable staged inputs for a new experiment; completed recording inputs remain separate"})),"pressure":self.pressure_mode.then(||self.pressure.metadata(r,self.selected,&self.loaded_path)),"paired_results_visible":self.factorial_mode && !self.pressure_mode,"graph_view":self.graph_metadata(),"graph_layout_visible":self.graph_mode,"replay":self.replay.metadata(),"paired_source":self.paired.as_ref().map(|_|&self.paired_source),"paired_selected_analysis":self.paired.as_ref().and_then(|d|d.report_at(self.selected).ok()),"paired_curve":self.paired_curve.as_ref().filter(|(m,_)|*m==self.metric).map(|(_,points)|serde_json::json!({"metric":self.metric.id(),"effect":self.effect.id(),"point_count":points.len(),"available_count":points.iter().filter(|p|self.effect.value(&p.contrasts).is_some()).count(),"selected_point":points.get(self.selected),"pane":self.paired_pane})),"scope":"Independent recorded view at capture request, possibly hidden; no live-world or camera change"}),
         )
     }
 }
@@ -415,7 +430,7 @@ pub fn panel(
         return;
     }
     if study.experiment_mode {
-        experiment(ui, study, world, habitat_id, reference);
+        ui.scope(|ui|{ui.spacing_mut().item_spacing.y=3.0;experiment(ui, study, world, habitat_id, reference);});
         if let Some(status) = &study.status {
             ui.colored_label(ACCENT, status);
         }
@@ -639,7 +654,8 @@ fn paired_results(ui:&mut egui::Ui,study:&mut Study) {
         study.replay.show(ui,&study.paired_source,pending);return;
     }
     if study.paired_pane==2 {
-        ui.label("All stored times and 18 metrics: four responses, eight contrasts, interval support, source/common-state identity and formulas.");
+        ui.label(format!("All stored times and {} metrics: four responses, eight contrasts, interval support, source/common-state identity and formulas.",plan.metrics(&design.recordings[0].rows[0].habitat).len()));
+        if let Some(note)=plan.configuration_assumptions() {assumptions(ui,&note);}
         ui.label("New trajectory analysis folder");ui.text_edit_singleline(&mut study.paired_output);
         if ui.add_enabled(!study.pending() && !study.paired_output.trim().is_empty(),egui::Button::new("Export protected JSON + CSV")).clicked() {
             let source=std::path::PathBuf::from(&study.paired_source);let output=std::path::PathBuf::from(study.paired_output.trim());
@@ -683,6 +699,23 @@ fn paired_results(ui:&mut egui::Ui,study:&mut Study) {
     ui.label(egui::RichText::new("Stored model results · gaps remain unavailable · sources/export in Files & method").small().color(MUTED));
 }
 
+fn example_levels(ui:&mut egui::Ui,parameter:Parameter,config:&cosmogon_sim::habitat::Config,values:&mut String) {
+    if let Some(levels)=parameter.illustrative_levels(config) {
+        ui.horizontal_wrapped(|ui| {
+            if ui.small_button("Use illustrative levels").clicked() {*values=format!("{}, {}",levels[0],levels[1]);}
+            ui.label(egui::RichText::new(format!("{}, {} {} · editable assumptions",levels[0],levels[1],parameter.unit())).small().color(MUTED));
+        });
+    }
+}
+fn assumptions(ui:&mut egui::Ui,note:&serde_json::Value) {
+    ui.colored_label(ACCENT,"Fixed initial stocks and temperature · assumed geometry/thermal properties");
+    egui::CollapsingHeader::new("What these changes mean").show(ui,|ui| {
+        if let Some(settings)=note["settings"].as_array() {for setting in settings {ui.label(setting["assumption"].as_str().unwrap_or(""));}}
+        ui.label(note["capacity_scope"].as_str().unwrap_or(""));
+        if let Some(sources)=note["sources"].as_array() {for source in sources {ui.hyperlink_to(source["scope"].as_str().unwrap_or("Source"),source["url"].as_str().unwrap_or(""));}}
+        ui.label(note["limits"].as_str().unwrap_or(""));
+    });
+}
 fn experiment(
     ui: &mut egui::Ui,
     study: &mut Study,
@@ -691,7 +724,7 @@ fn experiment(
     reference: bool,
 ) {
     ui.strong("Controlled habitat experiment");
-    ui.label("Vary settings in independent copies of the current world. Initial stocks stay fixed; the live world continues unchanged. Equipment/environment are assumptions; this measures modeled sensitivity.");
+    ui.label("Independent branches · fixed initial stocks · assumed properties");
     egui::ComboBox::from_id_salt("sweep-habitat")
         .selected_text(
             habitat_id
@@ -720,6 +753,9 @@ fn experiment(
         study.sweep.parameter.unit()
     ));
     ui.text_edit_singleline(&mut study.sweep.values);
+    if let Some(h)=habitat_id.and_then(|id|world.habitats.iter().find(|h|h.id==id)) {
+        example_levels(ui,study.sweep.parameter,&h.config,&mut study.sweep.values);
+    }
     ui.checkbox(&mut study.sweep.paired,"Pair with a second setting (four combinations)");
     if study.sweep.paired {
         egui::ComboBox::from_id_salt("habitat-second-setting").selected_text(study.sweep.secondary_parameter.label()).show_ui(ui,|ui| {
@@ -727,13 +763,14 @@ fn experiment(
         });
         ui.label(format!("Exactly two levels for each setting · second levels ({})",study.sweep.secondary_parameter.unit()));
         ui.text_edit_singleline(&mut study.sweep.secondary_values);
+        if let Some(h)=habitat_id.and_then(|id|world.habitats.iter().find(|h|h.id==id)) {
+            example_levels(ui,study.sweep.secondary_parameter,&h.config,&mut study.sweep.secondary_values);
+        }
     }
 
-    ui.horizontal(|ui| {
-        ui.label("Observations per run");
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Observations/run");
         ui.add(egui::DragValue::new(&mut study.sweep.samples).range(1..=1024));
-    });
-    ui.horizontal(|ui| {
         ui.label("Interval (terrestrial hours)");
         ui.add(
             egui::DragValue::new(&mut study.sweep.interval_hours)
@@ -770,6 +807,7 @@ fn experiment(
         p.validate()?;
         Ok(p)
     });
+    if let Some(note)=plan.as_ref().ok().and_then(Plan::configuration_assumptions) {assumptions(ui,&note);}
     let validation = plan.as_ref().map_err(Clone::clone).and_then(|_| {
         habitat_id
             .filter(|id| world.habitats.iter().any(|h| h.id == *id))
@@ -962,6 +1000,25 @@ mod tests {
         let reopened=open_design(root.clone(),root.to_string_lossy().into_owned(),Some(2)).unwrap();study.commit_sweep(reopened).unwrap();assert_eq!(study.metadata(),before);
         assert!(check_input(&root,Some(3)).is_err());
         std::fs::write(root.join("factorial.json"),b"{}").unwrap();assert!(open_design(root.clone(),root.to_string_lossy().into_owned(),None).is_err());assert_eq!(study.metadata(),before);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn geometry_worker_restores_exact_staged_plan_and_preserves_loaded_evidence() {
+        let mut u=Universe::new(cosmogon_sim::UniverseSettings {scenario:cosmogon_sim::Scenario::SolarSystemLab,..Default::default()});
+        u.apply_edit(cosmogon_sim::sandbox::Edit::CreateHabitat {definition:Box::new(cosmogon_sim::habitat::Definition::at(cosmogon_sim::BodyRef {system:0,body:3},0.,0.))}).unwrap();
+        let root=std::env::temp_dir().join(format!("cosmogon-native-geometry-{}",std::process::id()));let _=std::fs::remove_dir_all(&root);
+        let mut p=Plan::linear(Parameter::VolumeM3,250.,1000.,2,3,3600.).unwrap();
+        p.schema_version=2;p.secondary=Some(cosmogon_sim::habitat_factorial::Secondary {parameter:Parameter::HeatCapacityJK,values:[5e7,1e9]});
+        let result=run_sweep(u.clone(),0,p.clone(),root.join("good").to_string_lossy().into_owned(),Some(2)).unwrap();
+        let mut study=Study {keep_experiment_at_launch:true,..Default::default()};study.commit_sweep(result).unwrap();
+        assert!(study.experiment_mode);assert!(!study.keep_experiment_at_launch);
+        assert_eq!(study.sweep.parameter,p.parameter);assert_eq!(parse_levels(&study.sweep.values).unwrap(),p.values);
+        assert_eq!(study.sweep.secondary_parameter,Parameter::HeatCapacityJK);assert!(study.sweep.output.is_empty());
+        let before=study.metadata();assert_eq!(before.as_ref().unwrap()["paired_selected_analysis"]["metrics"].as_object().unwrap().len(),19);
+        let invalid=Plan::linear(Parameter::VolumeM3,250.,0.,2,3,3600.).unwrap();
+        assert!(run_sweep(u,0,invalid,root.join("bad").to_string_lossy().into_owned(),None).is_err());
+        assert_eq!(study.metadata(),before);assert!(!root.join("bad").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 
