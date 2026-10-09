@@ -395,7 +395,7 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
         Some("habitat-water") => 6,
         Some("habitat-breach"|"habitat-breach-settings"|"habitat-breach-model")=>10,
         Some("habitat-humidity"|"habitat-humidity-settings"|"habitat-humidity-model")=>9,
-        Some("habitat-paired"|"habitat-paired-table"|"habitat-paired-files"|"habitat-paired-replay"|"habitat-graph-layout"|"habitat-recordings"|"habitat-experiments"|"habitat-recording-why"|"habitat-recording-why-water"|"habitat-recording-why-heat"|"habitat-recording-why-air"|"habitat-recording-why-evidence") => 7,
+        Some("habitat-paired"|"habitat-paired-table"|"habitat-paired-files"|"habitat-paired-replay"|"habitat-graph-layout"|"habitat-recordings"|"habitat-recording-pressure"|"habitat-recording-pressure-change"|"habitat-recording-pressure-breach"|"habitat-recording-pressure-files"|"habitat-experiments"|"habitat-recording-why"|"habitat-recording-why-water"|"habitat-recording-why-heat"|"habitat-recording-why-air"|"habitat-recording-why-evidence") => 7,
         _ => 0,
     };
     form.breach_pane=match args.panel.as_deref(){Some("habitat-breach-settings")=>1,Some("habitat-breach-model")=>2,_=>0};
@@ -403,6 +403,9 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
     form.crop.pane=match args.panel.as_deref() {Some("greenhouse-inputs")=>1,Some("greenhouse-compare")=>2,Some("greenhouse-model")=>3,Some("greenhouse-files")=>4,_=>0};
     form.crop.graph=match args.panel.as_deref() {Some("greenhouse-water")=>3,Some("greenhouse-daily-water")=>4,_=>0};
     form.why.section=match args.panel.as_deref(){Some("habitat-why-water")=>1,Some("habitat-why-heat")=>2,Some("habitat-why-air")=>3,Some("habitat-why-evidence")=>4,_=>0};
+    form.recording.pressure_mode=args.panel.as_deref().is_some_and(|p|p.starts_with("habitat-recording-pressure"));
+    form.recording.pressure.pane=match args.panel.as_deref(){Some("habitat-recording-pressure-change")=>1,Some("habitat-recording-pressure-breach")=>2,Some("habitat-recording-pressure-files")=>3,_=>0};
+    if let Some(index)=args.habitat_pressure_reference {form.recording.pressure.reference=super::habitat_pressure::Reference::Chosen;form.recording.pressure.index=index;}
     form.recording.why_mode=args.panel.as_deref().is_some_and(|p|p.starts_with("habitat-recording-why"));
     form.recording.why.section=match args.panel.as_deref(){Some("habitat-recording-why-water")=>1,Some("habitat-recording-why-heat")=>2,Some("habitat-recording-why-air")=>3,Some("habitat-recording-why-evidence")=>4,_=>0};
     form.recording.experiment_mode=args.panel.as_deref()==Some("habitat-experiments");

@@ -47,6 +47,7 @@ pub struct Args {
     pub habitat_verify: bool,
     pub habitat_graph: Option<String>,
     pub habitat_sample: Option<usize>,
+    pub habitat_pressure_reference:Option<usize>,
     pub greenhouse_definition: Option<String>,
     pub surface_altitude: f64,
     pub surface_snapshot: bool,
@@ -155,6 +156,7 @@ impl Args {
                 "--habitat-effect" => a.habitat_effect=Some(val()),
                 "--habitat-graph" => a.habitat_graph=Some(val()),
                 "--habitat-verify" => a.habitat_verify=true,
+                "--habitat-pressure-reference" => {a.habitat_pressure_reference=Some(val().parse().unwrap_or(usize::MAX));},
                 "--habitat-sample" => {let v=val();a.habitat_sample=Some(v.parse().unwrap_or(usize::MAX));},
                 "--greenhouse-definition" => a.greenhouse_definition=Some(val()),
                 "--habitat-definition" => a.habitat_definition=Some(val()),
@@ -231,6 +233,8 @@ impl Args {
         if self.habitat_recording.is_some() && self.greenhouse_definition.is_some() {return Err("Choose a habitat recording or a crop planner definition for the launch pane".into());}
         if let Some(effect)=&self.habitat_effect {cosmogon_sim::habitat_factorial::Effect::parse(effect)?;}
         if let Some(metric)=&self.habitat_metric {cosmogon_sim::habitat_recording::Metric::parse(metric)?;}
+        if self.habitat_pressure_reference.is_some() && self.habitat_recording.is_none() {return Err("--habitat-pressure-reference requires --habitat-recording".into());}
+        if self.habitat_pressure_reference.is_some_and(|n|n>=1024) {return Err("--habitat-pressure-reference must be an index between 0 and 1023".into());}
         if self.habitat_sample.is_some_and(|n|n>=1024) {return Err("--habitat-sample must be an index between 0 and 1023".into());}
 
         if self.mars_terrain.as_deref().is_some_and(|v|!matches!(v,"4"|"16")) {return Err("--mars-terrain requires 4 or 16 pixels per degree".into());}
@@ -246,6 +250,11 @@ impl Args {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pressure_reference_requires_recording_and_bounded_index() {
+        for v in [vec!["--habitat-pressure-reference"],vec!["--habitat-pressure-reference","0"],vec!["--habitat-recording","x","--habitat-pressure-reference","nan"],vec!["--habitat-recording","x","--habitat-pressure-reference","1024"]] {assert!(Args::parse_from(v.into_iter().map(String::from)).validate_surface().is_err());}
+        let a=Args::parse_from(["--habitat-recording","x","--habitat-pressure-reference","0"].into_iter().map(String::from));assert!(a.validate_surface().is_ok());assert_eq!(a.habitat_pressure_reference,Some(0));
+    }
     #[test]
     fn graph_layout_requires_file_and_recorded_context() {
         for values in [vec!["--habitat-graph"],vec!["--habitat-graph","layout.json"],vec!["--habitat-recording","root","--habitat-graph"]] {assert!(Args::parse_from(values.into_iter().map(String::from)).validate_surface().is_err());}

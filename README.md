@@ -130,3 +130,5 @@ Paired habitat [experiments](docs/PAIRED_HABITAT_EXPERIMENTS.md) compare all fou
 [Recorded graph navigation](docs/RECORDED_GRAPHS.md) adds time windows, actual-point cursors, explicit scales and reusable layouts while keeping complete numerical exports unchanged.
 
 [Finite cabin breach](docs/CABIN_BREACH.md) models outward open-orifice gas loss with an outside mass ledger, explicit assumptions/thermal limits and actual saved studies.
+
+[Recorded pressure explanations](docs/RECORDED_PRESSURE.md) expose actual gas components and signed inventory, temperature and volume accounting, with exact retained inputs and protected evidence exports.

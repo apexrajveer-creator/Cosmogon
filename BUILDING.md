@@ -199,3 +199,7 @@ Controlled moisture studies reuse the existing native/CLI habitat sweeps; [MOIST
 [RECORDED_GRAPHS](docs/RECORDED_GRAPHS.md) documents native `--habitat-graph FILE`, layout imports/exports/preferences and `--panel habitat-graph-layout` captures.
 
 [CABIN_BREACH](docs/CABIN_BREACH.md) documents optional `config.breach`, protected CLI studies, new metrics/settings and native `--panel habitat-breach|habitat-breach-settings|habitat-breach-model` captures.
+
+## Recorded pressure explanations
+
+`cosmogon-cli habitat-pressure --recording ORDINARY_BRANCH_DIR --observation 12 --reference-index 0 --output NEW_DIR` exports actual components and ordered change terms. Omit reference-index for the previous stored observation; an initial observation has unavailable change accounting. Native `--habitat-recording DIR --habitat-sample 12 --habitat-pressure-reference 0 --panel habitat-recording-pressure-change --capture /tmp/pressure.png --capture-metadata --capture-after 240 --quit` uses the exact same report. Panels `habitat-recording-pressure`, `-change`, `-breach`, `-files` cover components/accounting/resolved substep/evidence. See [guide](docs/RECORDED_PRESSURE.md) and [verification](docs/RECORDED_PRESSURE_VALIDATION.md).

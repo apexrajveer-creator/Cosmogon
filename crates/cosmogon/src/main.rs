@@ -63,6 +63,10 @@ fn main() -> bevy::app::AppExit {
         return match result {Ok(())=>{println!("Saved habitat sound preview to {output}");AppExit::Success},Err(e)=>{eprintln!("Cannot export habitat sound: {e}");AppExit::error()}};
     }
     if let Some(path)=&args.habitat_graph {if let Err(e)=ui::habitat_graph::Layout::read(std::path::Path::new(path)){eprintln!("Cannot open recorded graph layout: {e}");return AppExit::error();}}
+    if let Some(index)=args.habitat_pressure_reference {
+        let path=std::path::Path::new(args.habitat_recording.as_deref().expect("validated pressure recording"));
+        if let Err(e)=ui::habitat_recordings::check_input(path,Some(index)) {eprintln!("Cannot select pressure reference: {e}");return AppExit::error();}
+    }
     if args.habitat_effect.is_some() || args.habitat_verify {
         let paired=if let Some(path)=&args.habitat_recording {cosmogon_sim::habitat_factorial::read(std::path::Path::new(path)).map(|_|())}
         else if let Some(path)=&args.habitat_sweep {cosmogon_sim::habitat_sweep::Plan::read(std::path::Path::new(path)).and_then(|p|if p.secondary.is_some(){Ok(())}else{Err("Paired effect/replay selection requires a paired plan".into())})}

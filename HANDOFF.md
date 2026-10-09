@@ -68,6 +68,8 @@ The connected [recorded graph navigation](docs/RECORDED_GRAPHS.md) build adds ac
 
 The connected [finite cabin breach](docs/CABIN_BREACH.md) build adds optional source-pinned outward orifice flow, actual escaped O₂/N₂/CO₂/vapor, finite outside mass history, explicit split thermal/enthalpy identities and bounded supported integration. Native controls/WHY/graphs, exact saves and controlled studies share the same state. Checks: 349 passed plus one existing ignored, 49 distinct cases, thirteen inspected packaged layouts and a 48-second normal run; [verification](docs/CABIN_BREACH_VALIDATION.md). Absent legacy worlds/golden stay unchanged. Seal/rarefied/inward flow, EVA, field calibration and physical greenhouse remain incomplete. Recorded pressure explanations follow.
 
+The connected [recorded pressure explanations](docs/RECORDED_PRESSURE.md) build adds actual O₂/N₂/CO₂/vapor components, ordered endpoint pressure accounting, retained breach substep scope and protected shared numeric evidence. Checks: 357 passed plus one existing ignored, 54 distinct cases, fifteen inspected final packaged layouts and a 48-second normal run; [verification](docs/RECORDED_PRESSURE_VALIDATION.md). Original inputs, simulation laws, saves and the golden remain unchanged. Ordered accounting is not unique causation or reconstructed history. Controlled geometry/thermal assumption studies follow; calibration, physical greenhouse and the directive remain incomplete.
+
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
   [GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases) with macOS, Windows and Linux builds.
@@ -114,6 +116,7 @@ Map of the 1.0 features (start here when changing one):
 | Saved paired-design replay verification | `habitat_replay.rs`, `habitat_factorial.rs` | `ui/habitat_replay.rs`; CLI `habitat-verify` |
 | Recorded habitat graph navigation | — | `ui/habitat_graph.rs`, `ui/habitat_recordings.rs`; protected layouts and native `--habitat-graph` |
 | Finite outward cabin breach | `breach.rs`, `habitat.rs` | `ui/habitat_breach.rs`; native/CLI studies, WHY and recordings |
+| Recorded cabin pressure explanations | `habitat_pressure.rs` | `ui/habitat_pressure.rs`; CLI `habitat-pressure` and protected component/term evidence |
 | Habitat WHY / diagnostics exports | `habitat_diagnostics.rs` | `ui/habitat_why.rs`, `ui/habitat_recordings.rs`; CLI `habitat-diagnose` |
 | Habitat equipment listening / WAV | completed `habitat.rs` budgets | `habitat_audio.rs`, `audio.rs`, `ui/alerts.rs` |
 | Sound modes/mixer | — | `audio.rs`, `ui/alerts.rs` (synthesised; no audio files) |

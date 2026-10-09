@@ -1,3 +1,7 @@
+## Unreleased — recorded pressure explanations
+
+- Add actual cabin gas components, explicitly ordered inventory/temperature/volume accounting between retained observations, and separately scoped finite breach substep evidence. Native tables, CLI and protected exact-input JSON/CSV exports share one derivation; preserve original studies, simulation laws/saves and golden `0xf2c4140a45ae509b`. Mathematical accounting is distinct from unique physical causation or field calibration.
+
 # Changelog
 
 ## Unreleased — finite cabin breach
