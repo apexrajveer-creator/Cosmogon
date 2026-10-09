@@ -27,3 +27,5 @@ A complete reusable layout:
 ```
 
 For paired input, `effect` selects `average_a`, `average_b` or `difference_in_differences`; actual independent four-branch responses accompany the chosen effect in `figure.json`. Ordinary input uses its recorded response(s). Existing output is protected and the complete figure manifest is written last. No new solver, state/save schema, dependency or golden change. Temperature/effective capacity are reduced model assumptions; summed interval C×ΔT is not absolute energy, hardware calibration, full-system thermodynamic closure or predictive uncertainty. [Accounting basis](CABIN_HEAT_ACCOUNTING.md), [preimplementation design](HEAT_TRAJECTORIES_DESIGN.md).
+
+Originally installed finite crops add two retained signed chemical/vapor storage debits. For those worlds, `heat_paths` and `heat_residual` include the optional debits, and selected figure/comparison context declares the crop model and assumptions. Legacy eleven-term arrays and saved aggregate catalogs stay unchanged. See [FINITE_GREENHOUSE](FINITE_GREENHOUSE.md).

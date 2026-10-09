@@ -36,9 +36,9 @@ fn quantity(
         scope,
     }
 }
-fn stocks(s: &State) -> [(&'static str, &'static str, f64); 21] {
+fn stocks(s: &State) -> Vec<(&'static str, &'static str, f64)> {
     let g = s.escaped_gas.unwrap_or_default();
-    [
+    let mut values=vec![
         ("oxygen", "Cabin O₂", s.oxygen_kg),
         ("nitrogen", "Cabin N₂", s.nitrogen_kg),
         ("co2", "Cabin CO₂", s.co2_kg),
@@ -64,7 +64,9 @@ fn stocks(s: &State) -> [(&'static str, &'static str, f64); 21] {
         ("escaped_co2", "Escaped CO₂", g.co2_kg),
         ("escaped_vapor", "Escaped vapor", g.vapor_kg),
         ("battery", "Stored battery energy", s.battery_j),
-    ]
+    ];
+    if let Some(c)=&s.crop {values.extend([("crop_nutrients","Crop nutrient-equivalent",c.nutrient_equivalent_kg),("crop_standing_edible","Standing edible dry material",c.standing_dry_kg[0]),("crop_standing_inedible","Standing inedible dry material",c.standing_dry_kg[1]),("crop_harvested_edible","Harvested edible dry material",c.harvested_dry_kg[0]),("crop_harvested_inedible","Harvested inedible dry material",c.harvested_dry_kg[1])]);}
+    values
 }
 fn counters(t: &Totals) -> [(&'static str, &'static str, &'static str, f64); 15] {
     [
@@ -199,6 +201,7 @@ pub fn explain(r: &Recording, from: usize, to: usize) -> Result<Report, String> 
     }
     let sa = stocks(&a.habitat.state);
     let sb = stocks(&b.habitat.state);
+    if sa.len()!=sb.len() {return Err("Crop endpoint stock availability changes within retained range".into());}
     let quantities: Vec<_> = sa
         .iter()
         .zip(&sb)
@@ -374,7 +377,7 @@ impl Bundle {
             return Err("A balance bundle needs one ordinary or all four paired reports".into());
         }
         for r in &self.reports {
-            if r.stocks.len() != 21
+            if r.stocks.len() != stocks(&r.initial.habitat.state).len()
                 || r.cumulative_counters.len() != 15
                 || r.from_index > r.to_index
                 || r.to_index >= 1024
@@ -387,7 +390,7 @@ impl Bundle {
         }
         for r in &self.reports {
             if let Some(h) = &r.heat {
-                if h.terms.len() != 11
+                if h.terms.len() != if r.final_sample.habitat.state.crop.is_some() {13} else {11}
                     || h.terms.iter().any(|t| {
                         !t.initial_j.is_finite()
                             || !t.final_j.is_finite()
@@ -440,6 +443,7 @@ impl Bundle {
                 .push(json!("heat.csv"));
             manifest["heat_accounting_source"] = crate::habitat_heat::source();
         }
+        if self.reports.iter().any(|r|r.final_sample.habitat.uses_crop()) {manifest["crop_source"]=crate::crop_process::source();}
         if path.as_os_str().is_empty() {
             return Err("Choose a nonempty new balance folder".into());
         }

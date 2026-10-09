@@ -49,6 +49,7 @@ pub fn allocations(h: &Habitat) -> Vec<Allocation> {
         Allocation { id:"sabatier", label:"CO₂ reduction", requested_w:None, served_w:None, rated_w:None, evidence:"budget.sabatier; interval configuration power limit" },
     ];
     if h.uses_moisture() {rows.push(Allocation {id:"moisture",label:"Dehumidifier",requested_w:None,served_w:None,rated_w:None,evidence:"budget.moisture; interval configuration power limit"});}
+    if h.uses_crop(){rows.push(Allocation{id:"crop",label:"Finite crop light + auxiliary",requested_w:None,served_w:None,rated_w:None,evidence:"budget.crop; last priority after existing services/reactors/moisture"});}
     if support(h) != "supported" {
         return rows;
     }
@@ -88,20 +89,23 @@ pub fn allocations(h: &Habitat) -> Vec<Allocation> {
     }
     let moisture_request=b.moisture.as_ref().map(|m|m.requested_w).or_else(||c.moisture.is_none().then_some(0.0));
     let moisture_served=b.moisture.as_ref().map(|m|m.delivered_w).or_else(||c.moisture.is_none().then_some(0.0));
-    if let Some(row)=rows.get_mut(6) {row.rated_w=Some(c.moisture.as_ref().map(|m|m.power_limit_w).unwrap_or(0.0));row.requested_w=moisture_request;row.served_w=moisture_served;}
+    if let Some(row)=rows.iter_mut().find(|r|r.id=="moisture") {row.rated_w=Some(c.moisture.as_ref().map(|m|m.power_limit_w).unwrap_or(0.0));row.requested_w=moisture_request;row.served_w=moisture_served;}
+    let crop_requested=b.crop.as_ref().map(|v|v.requested_w).or_else(||c.crop.is_none().then_some(0.));
+    let crop_served=b.crop.as_ref().map(|v|v.delivered_w).or_else(||c.crop.is_none().then_some(0.));
+    if let Some(row)=rows.iter_mut().find(|r|r.id=="crop"){row.requested_w=crop_requested;row.served_w=crop_served;row.rated_w=Some(c.crop.as_ref().map_or(0.,|c|c.light_power_w()+c.auxiliary_power_w));}
     rows[3].rated_w = Some(c.heater_limit_w + c.radiator_pump_w);
     rows[3].requested_w = rows[4]
         .requested_w
         .zip(rows[5].requested_w)
         .and_then(|(e, s)| {
             remainder(
-                b.requested_w - c.base_load_w - c.scrubber_power_w - c.recycler_power_w - e - s - moisture_request?,
+                b.requested_w - c.base_load_w - c.scrubber_power_w - c.recycler_power_w - e - s - moisture_request? - crop_requested?,
             )
         });
     rows[3].served_w = rows[4]
         .served_w
         .zip(rows[5].served_w)
-        .and_then(|(e, s)| remainder(available - e - s - moisture_served?));
+        .and_then(|(e, s)| remainder(available - e - s - moisture_served? - crop_served?));
     rows
 }
 #[derive(Clone, Debug, Serialize)]
@@ -186,11 +190,14 @@ pub fn explain(h: &Habitat) -> Diagnostics {
     let vapor=moisture.map(|m|m.crew_vapor_kg).or_else(||c.moisture.is_none().then_some(0.0));
     let days = c.crew as f64 * b.seconds / SECONDS_PER_DAY * b.served_cycle_fraction;
     let recovered = b.water_recovered_kg;
-    let potable_net = e_water.map(|w| recovered - 3.217 * days - w);
+    let crop=b.crop.as_ref();
+    let crop_water=crop.map(|v|v.water_consumed_kg()).or_else(||c.crop.is_none().then_some(0.));
+    let crop_debit=crop.map(|v|v.thermal_debit_j()).or_else(||c.crop.is_none().then_some(0.));
+    let potable_net = e_water.zip(crop_water).map(|(w,crop)| recovered - 3.217 * days - w - crop);
     let cooling=b.breach.as_ref().map(|e|e.lumped_cooling_j/b.seconds).or_else(||c.breach.is_none().then_some(0.0));
-    let heat_sum = e_heat.zip(s_heat).zip(phase).zip(cooling).map(|(((e, s),(debit,credit)),cooling)| {
+    let heat_sum = e_heat.zip(s_heat).zip(phase).zip(cooling).zip(crop_debit).map(|((((e, s),(debit,credit)),cooling),crop_debit)| {
         b.delivered_w + b.battery_losses_w + b.metabolic_heat_w - e + s - b.radiator_rejection_w
-            + b.conduction_w - debit/b.seconds + credit/b.seconds - cooling
+            + b.conduction_w - debit/b.seconds + credit/b.seconds - cooling - crop_debit/b.seconds
     });
     d.power = vec![
         term(
@@ -509,6 +516,16 @@ pub fn explain(h: &Habitat) -> Diagnostics {
             for (id,label,value) in [("breach_enthalpy","Breach full outflow enthalpy",e.outflow_enthalpy_j),("breach_structure","Breach structure energy change",e.structure_energy_change_j),("breach_gas","Breach gas internal energy change",e.gas_energy_change_j),("breach_phase","Breach vapor phase energy change",e.phase_energy_change_j),("breach_energy_residual","Breach substep energy residual",e.energy_residual_j)] {d.heat.push(term(id,label,"J",Some(value),"Separate breach substep identity: structure + gas + phase + outflow = residual; not additive watts in main signed sum"));}
             d.explanations.push(Explanation{id:"breach",text:format!("{}; resolved {:.6} of {:.6} seconds, {} integration steps. Outside pressure, gamma and discharge are assumptions. Main heat debit is temperature-equivalent; full gas/structure/phase/enthalpy identity is separate. Processes/thermal minute precedes breach flow, so fast coupled transients remain approximate.",e.status.label(),e.integrated_seconds,b.seconds,e.integration_steps),evidence:vec!["budget.breach","budget.configuration.breach"]});
         }
+    }
+    if h.uses_crop(){
+        d.heat.push(term("crop_chemical","Crop dry chemical storage debit","W",crop.map(|v|-v.chemical_storage_j/b.seconds).or_else(||c.crop.is_none().then_some(0.)),"-budget.crop.chemical_storage_j / seconds; user-assumed dry chemical basis"));
+        d.heat.push(term("crop_vapor","Crop vapor phase storage debit","W",crop.map(|v|-v.vapor_phase_j/b.seconds).or_else(||c.crop.is_none().then_some(0.)),"-budget.crop.vapor_phase_j / seconds; finite vapor transfer"));
+        if let Some(sum)=d.heat.iter_mut().find(|t|t.id=="sum"){sum.evidence="Signed bus/battery/metabolic/reaction/crew-phase/condensation/radiator/conduction/breach terms minus crop chemical and vapor storage";}
+        d.water.push(term("crop_liquid","Crop liquid consumed","kg",crop_water,"budget.crop.metabolic_water_kg + vapor_generated_kg; future recycle excluded"));
+        d.water.push(term("crop_vapor","Crop vapor added","kg",crop.map(|v|v.vapor_generated_kg).or_else(||c.crop.is_none().then_some(0.)),"budget.crop.vapor_generated_kg; separate from crew vapor"));
+        d.air_and_crew.push(term("crop_co2","Captured CO2 consumed by crop","kg",crop.map(|v|v.co2_consumed_kg).or_else(||c.crop.is_none().then_some(0.)),"budget.crop.co2_consumed_kg; start stocks after reduction priority"));
+        d.air_and_crew.push(term("crop_oxygen","Conservative crop oxygen to reserve","kg",crop.map(|v|v.oxygen_generated_kg).or_else(||c.crop.is_none().then_some(0.)),"budget.crop.oxygen_generated_kg; available to regulator next interval"));
+        d.explanations.push(Explanation{id:"crop",text:crop.map(|v|format!("{}; supported source progress {:.9} to {:.9} days. Maintained chamber conditions and chemical storage are assumptions; no biological survival or diet claim.",v.reason,v.source_progress_before,v.source_progress_after)).unwrap_or("No completed crop transfer evidence".into()),evidence:vec!["budget.crop","budget.configuration.crop","state.crop"]});
     }
     let mut note = |id, text: String, evidence: Vec<&'static str>| {
         d.explanations.push(Explanation { id, text, evidence })

@@ -109,6 +109,13 @@ fn pool(name: &str, co2: f64, water: f64, nutrient: f64, published: f64) -> Resu
         mass_residual_kg_per_kg: co2 + water + nutrient - 1.0 - oxygen,
     })
 }
+/// Separately pinned CHON composition, shared with the finite reference process.
+pub fn pools() -> Result<[Pool; 2], String> {
+    Ok([
+        pool("edible", 1.82, 0.57, 0.20, 1.59)?,
+        pool("inedible", 1.68, 0.55, 0.08, 1.32)?,
+    ])
+}
 pub fn calculate(b: &Bundle) -> Result<Report, String> {
     let fresh = Bundle::calculate(
         &b.report.definition,
@@ -117,10 +124,7 @@ pub fn calculate(b: &Bundle) -> Result<Report, String> {
     if fresh.report != b.report || fresh.manifest != b.manifest {
         return Err("Crop chemistry requires an exact validated original supply study".into());
     }
-    let pools = [
-        pool("edible", 1.82, 0.57, 0.20, 1.59)?,
-        pool("inedible", 1.68, 0.55, 0.08, 1.32)?,
-    ];
+    let pools = pools()?;
     let rows = b
         .report
         .rows

@@ -28,6 +28,8 @@ const CO2: f64 = 0.0440095;
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop: Option<crate::crop_process::Config>,
     pub crew: u32,
     pub volume_m3: f64,
     pub firm_power_w: f64,
@@ -102,6 +104,7 @@ impl Default for Config {
             co2_alert_pa: 400.0,
             cold_alert_k: 283.15,
             hot_alert_k: 303.15,
+            crop: None,
             electrolysis: None,
             sabatier: None,
             moisture: None,
@@ -187,6 +190,7 @@ impl Config {
         ] {
             bounds(v, 0.0, 200_000.0, n)?;
         }
+        if let Some(c) = &self.crop {c.validate()?;if self.moisture.is_none(){return Err("Finite crop vapor requires enabled cabin moisture accounting".into());}}
         if let Some(c) = &self.electrolysis {c.validate()?;}
         if let Some(c) = &self.sabatier {c.validate()?;}
         if let Some(c) = &self.moisture {c.validate()?;}
@@ -197,6 +201,10 @@ impl Config {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Initial {
+    #[serde(default, skip_serializing_if = "zero")]
+    pub captured_co2_kg: f64,
+    #[serde(default, skip_serializing_if = "zero")]
+    pub crop_nutrient_equivalent_kg: f64,
     pub temperature_k: f64,
     pub oxygen_pa: f64,
     pub nitrogen_pa: f64,
@@ -210,6 +218,8 @@ pub struct Initial {
 impl Default for Initial {
     fn default() -> Self {
         Self {
+            captured_co2_kg: 0.0,
+            crop_nutrient_equivalent_kg: 0.0,
             temperature_k: 293.15,
             oxygen_pa: 21_200.0,
             nitrogen_pa: 79_900.0,
@@ -282,6 +292,10 @@ impl Definition {
         ] {
             bounds(v, 0.0, 1.0e7, n)?;
         }
+        bounds(i.captured_co2_kg,0.,self.config.capture_capacity_kg,"Initial captured CO2")?;
+        bounds(i.crop_nutrient_equivalent_kg,0.,1e7,"Initial crop nutrient-equivalent")?;
+        if self.config.crop.is_none() && i.crop_nutrient_equivalent_kg!=0. {return Err("Initial crop nutrients require an explicit installed crop".into());}
+        if let Some(c)=&self.config.crop {if i.oxygen_reserve_kg>c.oxygen_capacity_kg {return Err("Initial oxygen reserve exceeds crop product capacity".into());}}
         if let Some(c) = &self.config.electrolysis {
             if i.oxygen_reserve_kg > c.oxygen_capacity_kg {return Err("Initial O₂ reserve exceeds electrolysis product capacity".into());}
         }
@@ -308,6 +322,8 @@ impl Definition {
 fn zero(v: &f64) -> bool {*v == 0.0}
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct State {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop: Option<crate::crop_process::State>,
     pub temperature_k: f64,
     pub oxygen_kg: f64,
     pub nitrogen_kg: f64,
@@ -352,6 +368,7 @@ impl State {
             + self.methane_kg
             + self.sabatier_water_kg
             + self.water_vapor_kg + self.condensate_kg
+            + self.crop.as_ref().map_or(0.,|c|c.mass_kg())
     }
     pub fn accounted_mass_kg(&self)->f64 {self.mass_kg()+self.escaped_gas.map(|g|g.mass_kg()).unwrap_or(0.0)}
     pub fn cabin_gas(&self)->crate::breach::Gas {crate::breach::Gas {oxygen_kg:self.oxygen_kg,nitrogen_kg:self.nitrogen_kg,co2_kg:self.co2_kg,vapor_kg:self.water_vapor_kg}}
@@ -399,6 +416,8 @@ pub struct Totals {
 /// Last completed interval; instantaneous estimates are not silently mixed with these.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct Budget {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop: Option<crate::crop_process::Budget>,
     pub seconds: f64,
     pub configuration: Option<Config>,
     pub environment_available: bool,
@@ -470,6 +489,7 @@ impl Habitat {
         let i = &definition.initial;
         let mass = |p: f64, m: f64| p * c.volume_m3 * m / (R * i.temperature_k);
         let state = State {
+            crop: c.crop.as_ref().map(|crop|crate::crop_process::State::new(crop,i.crop_nutrient_equivalent_kg,time)).transpose()?,
             temperature_k: i.temperature_k,
             oxygen_kg: mass(i.oxygen_pa, O2),
             nitrogen_kg: mass(i.nitrogen_pa, N2),
@@ -481,14 +501,15 @@ impl Habitat {
             food_dry_kg: i.food_dry_kg,
             food_water_kg: i.food_water_kg,
             dry_waste_kg: 0.0,
-            captured_co2_kg: 0.0,
+            captured_co2_kg: i.captured_co2_kg,
             hydrogen_kg: 0.0,
             methane_kg: 0.0,
             sabatier_water_kg: 0.0,
             water_vapor_kg:0.0,condensate_kg:0.0,escaped_gas:None,
             battery_j: i.battery_j,
         };
-        let heat=definition.record_heat.then(||crate::habitat_heat::Ledger::new(time,c.heat_capacity_j_k));
+        let mut heat=definition.record_heat.then(||crate::habitat_heat::Ledger::new(time,c.heat_capacity_j_k));
+        if c.crop.is_some(){if let Some(l)=&mut heat {l.crop_storage_debits_j=Some([0.;2]);}}
         Ok(Self {
             id,
             config: definition.config.clone(),
@@ -519,6 +540,15 @@ impl Habitat {
             "Cabin model temperature",
         )?;
         let s = &self.state;
+        if let Some(crop)=&s.crop {crop.validate(self.last_time)?;let original=self.definition.config.crop.as_ref().ok_or("Crop state lacks original explicit installation")?;if original.crop!=crop.source_crop || original.dry_chemical_energy_j_kg!=crop.dry_chemical_energy_j_kg || self.definition.initial.crop_nutrient_equivalent_kg!=crop.initial_nutrient_equivalent_kg{return Err("Installed crop source/initial stock differs from original setup".into());}}
+        if let Some(l)=&self.heat {
+            match (&s.crop,l.crop_storage_debits_j) {
+                (Some(c),Some(v)) => {for (actual,wanted) in v.into_iter().zip([-c.chemical_energy_j(),-c.vapor_generated_kg*crate::moisture::REFERENCE_PHASE_J_KG]) {if (actual-wanted).abs()>1e-8*wanted.abs().max(1.) {return Err("Crop heat counters disagree with actual cumulative storage".into());}}}
+                (None,None)=>{},_=>return Err("Crop heat supplement and installed state disagree".into())
+            }
+        }
+        if self.definition.config.crop.is_some() && s.crop.is_none(){return Err("Original installed crop state is missing".into());}
+        if let Some(b)=&self.budget.crop {let c=self.budget.configuration.as_ref().and_then(|c|c.crop.as_ref()).ok_or("Crop interval has no retained configuration")?;s.crop.as_ref().ok_or("Crop interval lacks installed state")?.validate_budget(b,c,self.budget.seconds,self.last_time)?;}
         for value in [
             s.oxygen_kg,
             s.nitrogen_kg,
@@ -597,7 +627,7 @@ impl Habitat {
             }
             if s.temperature_k!=b.final_temperature_k {return Err("Breach final temperature disagrees with cabin".into());}
         }
-        for (actual,expected) in [(s.water_vapor_kg,t.crew_vapor_kg-t.condensed_kg-s.escaped_gas.map(|g|g.vapor_kg).unwrap_or(0.0)),(s.condensate_kg,t.condensed_kg-t.condensate_processed_kg)] {
+        for (actual,expected) in [(s.water_vapor_kg,t.crew_vapor_kg+s.crop.as_ref().map_or(0.,|c|c.vapor_generated_kg)-t.condensed_kg-s.escaped_gas.map(|g|g.vapor_kg).unwrap_or(0.0)),(s.condensate_kg,t.condensed_kg-t.condensate_processed_kg)] {
             if (actual-expected).abs()>1e-8*actual.abs().max(expected.abs()).max(t.crew_vapor_kg).max(1.0) {return Err("Moisture stores disagree with cumulative transfer history".into());}
         }
         bounds(self.budget.condensate_processed_kg,0.0,self.budget.water_processed_kg,"Condensate processed")?;
@@ -670,6 +700,7 @@ impl Habitat {
     }
     pub fn check_config(&self, c: &Config) -> Result<(), String> {
         c.validate()?;
+        if let Some(crop)=&c.crop {self.state.crop.as_ref().ok_or("Install crops through a new explicit habitat definition; toggling does not grant initial nutrients")?.check_config(crop)?;if self.state.oxygen_reserve_kg>crop.oxygen_capacity_kg{return Err("New crop product capacity is below held oxygen; no gas discarded".into());}}
         if c.battery_capacity_j < self.state.battery_j {
             return Err(
                 "New battery capacity is below stored energy; no energy was discarded".into(),
@@ -693,6 +724,7 @@ impl Habitat {
         if let Some(m)=&c.moisture {if m.condensate_capacity_kg<self.state.condensate_kg {return Err("New condensate capacity is below held liquid; no water discarded".into());}}
         Ok(())
     }
+    pub fn uses_crop(&self)->bool {self.config.crop.is_some() || self.definition.config.crop.is_some() || self.state.crop.is_some() || self.budget.crop.is_some()}
     pub fn uses_breach(&self)->bool {self.config.breach.is_some() || self.definition.config.breach.is_some() || self.budget.breach.is_some() || self.state.escaped_gas.is_some() || self.totals.breach_enthalpy_j>0.0}
     pub fn uses_moisture(&self)->bool {self.config.moisture.is_some() || self.definition.config.moisture.is_some() || self.budget.moisture.is_some() || self.totals.crew_vapor_kg>0.0 || self.state.water_vapor_kg>0.0 || self.state.condensate_kg>0.0}
     pub fn uses_sabatier(&self) -> bool {
@@ -705,6 +737,7 @@ impl Habitat {
     }
     /// Only fixed scheduler intervals or explicit edit-time remainders enter here.
     pub fn step(&mut self, time: f64, env: Environment) -> Result<(), String> {
+        if let Some(c)=&self.config.crop {self.state.crop.as_ref().ok_or("Crop state is not installed")?.check_config(c)?;}
         let dt = time - self.last_time;
         if !dt.is_finite() || !(0.0..=PERIOD + 0.001).contains(&dt) {
             return Err("Habitat interval must be forward and at most 60 seconds".into());
@@ -742,6 +775,8 @@ impl Habitat {
         let old_mass = s.accounted_mass_kg();
         let old_battery = s.battery_j;
         let old_temperature = s.temperature_k;
+        let crop_start=(s.potable_water_kg,s.captured_co2_kg,s.oxygen_reserve_kg);
+        let crop_request=c.crop.as_ref().zip(s.crop.as_ref()).map_or(0.,|(c,state)|state.request_w(c,self.last_time,dt));
         let generated = c.firm_power_w
             + flux * c.solar_area_m2 * c.solar_efficiency * c.atmospheric_transmission;
         let heater_request =
@@ -778,6 +813,7 @@ impl Habitat {
             reactor_request,
             sabatier_request,
             moisture_request,
+            crop_request,
         ];
         let requested: f64 = requests.iter().sum();
         let discharge = (requested - generated)
@@ -792,7 +828,7 @@ impl Habitat {
             - discharge / c.discharge_efficiency * dt)
             .max(0.0);
         let mut available = generated + discharge;
-        let mut supplied = [0.0; 8];
+        let mut supplied = [0.0; 9];
         for (i, request) in requests.iter().enumerate() {
             supplied[i] = available.min(*request);
             available -= supplied[i];
@@ -893,9 +929,18 @@ impl Habitat {
             s.sabatier_water_kg+=b.water_generated_kg;
             self.totals.sabatier_co2_consumed_kg+=b.co2_consumed_kg;
         }
+        // Crop transfer uses only feeds/headroom present at interval start after prior
+        // claims. Newly captured CO2/recycled water/freed reserve space wait one minute.
+        let crop=c.crop.as_ref().zip(s.crop.as_mut()).map(|(crop,state)| {
+            let capacity=crop.oxygen_capacity_kg.min(c.electrolysis.as_ref().map_or(crop.oxygen_capacity_kg,|e|e.oxygen_capacity_kg));
+            let stocks=crate::crop_process::Stocks {water_kg:s.potable_water_kg.min((crop_start.0-c.crew as f64*3.217*dt/SECONDS_PER_DAY-reactor.as_ref().map_or(0.,|b|b.water_consumed_kg)).max(0.)),co2_kg:s.captured_co2_kg.min((crop_start.1-reduction.as_ref().map_or(0.,|b|b.co2_consumed_kg)).max(0.)),oxygen_headroom_kg:(capacity-s.oxygen_reserve_kg).max(0.).min((capacity-crop_start.2-reactor.as_ref().map_or(0.,|b|b.oxygen_generated_kg)).max(0.))};
+            state.execute(crop,self.last_time,dt,supplied[8],stocks)
+        }).transpose()?;
+        let crop_debit=crop.as_ref().map_or(0.,|b|b.thermal_debit_j());
+        if let Some(b)=&crop {s.potable_water_kg=(s.potable_water_kg-b.water_consumed_kg()).max(0.);s.captured_co2_kg=(s.captured_co2_kg-b.co2_consumed_kg).max(0.);s.oxygen_reserve_kg+=b.oxygen_generated_kg;s.water_vapor_kg+=b.vapor_generated_kg;}
         // Reaction enthalpy leaves the thermal balance; the remaining reactor electricity
         // is waste heat. Never count all bus electricity as heat AND as reaction energy.
-        let gross = delivered + losses + metabolic - reaction_enthalpy/dt + reaction_heat/dt - crew_phase/dt + condensation_heat/dt;
+        let gross = delivered + losses + metabolic - reaction_enthalpy/dt + reaction_heat/dt - crew_phase/dt + condensation_heat/dt - crop_debit/dt;
         let rejection = rejection_capacity.min(
             ((s.temperature_k - c.temperature_setpoint_k).max(0.0) * c.heat_capacity_j_k / dt
                 + gross)
@@ -956,6 +1001,7 @@ impl Habitat {
             mass_residual_kg: s.accounted_mass_kg() - old_mass,
             electric_residual_j: electrical_residual,
             thermal_residual_j: (storage - net - conduction) * dt + cooling,
+            crop,
             electrolysis: reactor,
             sabatier: reduction,
             breach,
@@ -1002,6 +1048,7 @@ impl Habitat {
     pub fn report(&self) -> serde_json::Value {
         let mut report=serde_json::json!({"format":"cosmogon-habitat-report","schema_version":1,"habitat":self,"diagnostics":crate::habitat_diagnostics::explain(self),"oxygen_partial_pressure_pa":self.state.oxygen_pa(&self.config),"co2_partial_pressure_pa":self.state.co2_pa(&self.config),"total_pressure_pa":self.state.pressure_pa(&self.config),"data_states":{"crew_rates":"Published nominal reference model (NASA BVAD), not individual measurements","equipment_and_initial_stocks":"User-assumed design inputs","current_stores_and_budgets":"Modelled","exterior_temperature":"Global reduced climate model; local measured weather unavailable","horizontal_irradiance":"Derived from primary-star state and approximate body frame"},"electrolysis_source":self.uses_electrolysis().then(crate::electrolysis::source),"sabatier_source":self.uses_sabatier().then(crate::sabatier::source),"moisture_source":self.uses_moisture().then(crate::moisture::source),"breach_source":self.uses_breach().then(crate::breach::source),"moisture_observation":self.uses_moisture().then(||serde_json::json!({"vapor_pressure_pa":self.state.vapor_pressure_pa(&self.config),"relative_humidity":self.state.relative_humidity(&self.config),"reference_phase_energy_j":self.state.phase_energy_j(),"supersaturated":self.state.relative_humidity(&self.config).map(|v|v>1.0)})),"uncertainty":null,"uncertainty_scope":"Input and predictive model uncertainty are not quantified","source":{"url":SOURCE,"version":"NASA BVAD Rev2 February 2022, Table 3-31","equipment":"User-assumed capacities, powers, efficiencies and alert thresholds"},"limits":"Reduced nominal demand and lumped thermal model, not validated mission hardware, local weather, purification quality, medical response or safety certification. Optional reduced humidity budget; no greenhouse exchange, wall/ice condensation, seal/inward/rarefied leakage, EVA, maintenance, radiation or resupply."});
         if self.heat.is_some() {report["heat_accounting"]=crate::habitat_heat::habitat_span(self);}
+        if self.uses_crop() {report["crop_source"]=crate::crop_process::source();report["data_states"]["crop_operation"] = serde_json::json!("Finite modelled transfers under user-assumed ideal maintained source conditions; not calibrated biology/chamber hardware");report["limits"]=serde_json::json!("Reduced nominal demand and lumped thermal model with optional conserved maintained-reference crop transfers. No independently controlled chamber, calibrated crop physiology, complete diet credit, wall/ice condensation, seal/inward/rarefied leakage, EVA, maintenance, radiation or resupply. Crop-specific source/progress/energy assumptions are retained separately in crop_source.");}
         report
     }
 }
@@ -1239,7 +1286,9 @@ pub fn export(
     let csv=samples_csv(rows);
     let mut manifest=serde_json::json!({"format":"cosmogon-habitat-study","schema_version":1,"model":MODEL,"habitat_id":id,"sample_count":rows.len(),"initial_state_fingerprint":crate::research::state_fingerprint(initial)?,"final_state_fingerprint":crate::research::state_fingerprint(final_world)?,"fingerprint_scope":"FNV-1a state identity, not cryptographic integrity","app_version":env!("CARGO_PKG_VERSION"),"simulation_time_coordinate":"seconds since J2000, same coordinate as world","habitat_intervals":"fixed 60 s plus explicit edit-time remainders; samples may follow the last completed interval","source":SOURCE,"model_descriptor":crate::research::PhysicsModelRegistry::get("habitat"),"electrolysis_model_descriptor":h.uses_electrolysis().then(||crate::research::PhysicsModelRegistry::get("electrolysis")),"electrolysis_source":h.report()["electrolysis_source"],"sabatier_model_descriptor":h.uses_sabatier().then(||crate::research::PhysicsModelRegistry::get("sabatier")),"sabatier_source":h.report()["sabatier_source"],"breach_source":h.uses_breach().then(crate::breach::source),"breach_model_descriptor":h.uses_breach().then(||crate::research::PhysicsModelRegistry::get("breach")),"moisture_source":h.uses_moisture().then(crate::moisture::source),"moisture_model_descriptor":h.uses_moisture().then(||crate::research::PhysicsModelRegistry::get("moisture")),"limits":h.report()["limits"]});
     if h.heat.is_some() {manifest["heat_accounting_source"]=crate::habitat_heat::source();manifest["heat_accounting_model_descriptor"]=serde_json::to_value(crate::research::PhysicsModelRegistry::get("habitat-heat")).map_err(|e|e.to_string())?;}
-    let data=[("definition.json",serde_json::to_vec_pretty(&h.definition).map_err(|e|e.to_string())?),("report.json",serde_json::to_vec_pretty(&h.report()).map_err(|e|e.to_string())?),("samples.json",serde_json::to_vec_pretty(rows).map_err(|e|e.to_string())?),("samples.csv",csv.into_bytes()),("initial.cosmo",crate::save::to_json(initial,"Habitat study initial world").map_err(|e|e.to_string())?.into_bytes()),("final.cosmo",crate::save::to_json(final_world,"Habitat study final world").map_err(|e|e.to_string())?.into_bytes()),("manifest.json",serde_json::to_vec_pretty(&manifest).map_err(|e|e.to_string())?)];
+    if h.uses_crop() {manifest["crop_source"]=crate::crop_process::source();manifest["crop_model_descriptor"]=serde_json::to_value(crate::research::PhysicsModelRegistry::get("finite-crop")).map_err(|e|e.to_string())?;}
+    let mut data=vec![("definition.json",serde_json::to_vec_pretty(&h.definition).map_err(|e|e.to_string())?),("report.json",serde_json::to_vec_pretty(&h.report()).map_err(|e|e.to_string())?),("samples.json",serde_json::to_vec_pretty(rows).map_err(|e|e.to_string())?),("samples.csv",csv.into_bytes()),("initial.cosmo",crate::save::to_json(initial,"Habitat study initial world").map_err(|e|e.to_string())?.into_bytes()),("final.cosmo",crate::save::to_json(final_world,"Habitat study final world").map_err(|e|e.to_string())?.into_bytes()),("manifest.json",serde_json::to_vec_pretty(&manifest).map_err(|e|e.to_string())?)];
+    if h.uses_crop() {data.push(("crop.csv",crate::crop_process::samples_csv(rows).into_bytes()));}
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }

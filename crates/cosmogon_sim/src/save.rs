@@ -121,6 +121,7 @@ pub fn data_versions(u: &Universe) -> std::collections::BTreeMap<String, String>
         m.insert("nasa-pds-mgs-mola-megdr-16ppd".into(), crate::planet::mola::DATASET_16.into());
     }
     if !u.habitats.is_empty() || u.next_habitat_id>0 {m.insert("cosmogon-habitat-budgets".into(),crate::habitat::MODEL.into());}
+    if u.habitats.iter().any(crate::habitat::Habitat::uses_crop) {m.insert("cosmogon-finite-crop-reference".into(),crate::crop_process::MODEL.into());m.insert("cosmogon-crop-chon-surrogate".into(),crate::crop_chemistry::MODEL.into());m.insert("ciaaw-chon-nominal".into(),crate::crop_chemistry::ATOMIC_MODEL.into());}
     if u.habitats.iter().any(crate::habitat::Habitat::uses_electrolysis) {m.insert("cosmogon-water-electrolysis".into(),crate::electrolysis::MODEL.into());}
     if u.habitats.iter().any(crate::habitat::Habitat::uses_moisture) {m.insert("cosmogon-cabin-moisture".into(),crate::moisture::MODEL.into());}
     if u.habitats.iter().any(crate::habitat::Habitat::uses_sabatier) {m.insert("cosmogon-sabatier".into(),crate::sabatier::MODEL.into());}
@@ -151,6 +152,7 @@ pub fn from_json(s: &str) -> Result<Universe, SaveError> {
         }
     }
     if u.next_habitat_id>0 && terrain_versions.get("cosmogon-habitat-budgets").and_then(Value::as_str)!=Some(crate::habitat::MODEL) {return Err(SaveError::Model("Missing or mismatched experiment model version".into()));}
+    for (id,model) in [("cosmogon-finite-crop-reference",crate::crop_process::MODEL),("cosmogon-crop-chon-surrogate",crate::crop_chemistry::MODEL),("ciaaw-chon-nominal",crate::crop_chemistry::ATOMIC_MODEL)] {if (expected.contains_key(id) || terrain_versions.get(id).is_some()) && terrain_versions.get(id).and_then(Value::as_str)!=Some(model){return Err(SaveError::Model(format!("Missing or mismatched {id} model pin")));}}
     if (expected.contains_key("cosmogon-water-electrolysis") || terrain_versions.get("cosmogon-water-electrolysis").is_some())
         && terrain_versions.get("cosmogon-water-electrolysis").and_then(Value::as_str)!=Some(crate::electrolysis::MODEL) {
         return Err(SaveError::Model("Missing or mismatched electrolysis model version".into()));

@@ -104,7 +104,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         a.cmd = c;
         if matches!(a.cmd.as_str(),"habitat"|"habitat-sweep") {a.samples=25;a.interval_days=1.0/24.0;a.scenario=Scenario::SolarSystemLab;}
         if a.cmd=="habitat-sweep" {a.parameter="firm_power_w".into();}
-        if a.cmd=="habitat-definition" {a.scenario=Scenario::SolarSystemLab;a.target="Mars".into();}
+        if matches!(a.cmd.as_str(),"habitat-definition"|"habitat-crop-definition") {a.scenario=Scenario::SolarSystemLab;a.target="Mars".into();}
     }
     if matches!(a.cmd.as_str(), "--help" | "-h" | "help") {
         a.cmd = "help".into();
@@ -123,14 +123,14 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if matches!(a.cmd.as_str(),"greenhouse"|"greenhouse-supplies") && !matches!(flag.as_str(),"--definition"|"--output"|"--initial"|"--habitat-id") {return Err(format!("{flag} is not a greenhouse planning option"));}
         if matches!(a.cmd.as_str(),"greenhouse-definition"|"greenhouse-supply-definition") && flag!="--output" {return Err(format!("{flag} is not a greenhouse-definition option"));}
         if matches!(a.cmd.as_str(),"crop-chemistry"|"crop-chemistry-inspect"|"greenhouse-supply-inspect") && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a crop supply/chemistry inspection option"));}
-        if a.cmd=="habitat-diagnose" && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
+        if matches!(a.cmd.as_str(),"habitat-diagnose"|"habitat-crop-harvest") && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
         if a.cmd=="habitat-verify" && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a habitat replay verification option"));}
         if a.cmd=="habitat-balance" && !matches!(flag.as_str(),"--recording"|"--from-index"|"--observation"|"--output") {return Err(format!("{flag} is not a recorded balance option"));}
         if a.cmd=="habitat-figure" && !matches!(flag.as_str(),"--recording"|"--reference"|"--definition"|"--output") {return Err(format!("{flag} is not a recorded figure option"));}
         if a.cmd=="habitat-pressure" && !matches!(flag.as_str(),"--recording"|"--observation"|"--reference-index"|"--output") {return Err(format!("{flag} is not a recorded pressure option"));}
         if a.cmd=="habitat-inspect" && !matches!(flag.as_str(),"--recording"|"--observation"|"--output") {return Err(format!("{flag} is not a habitat inspection option"));}
         if a.cmd=="habitat" && !matches!(flag.as_str(),"--definition"|"--habitat-id"|"--initial"|"--output"|"--samples"|"--interval-days"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat study option"));}
-        if a.cmd=="habitat-definition" && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat-definition option"));}
+        if matches!(a.cmd.as_str(),"habitat-definition"|"habitat-crop-definition") && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat-definition option"));}
         if a.cmd=="habitat-sweep" && !matches!(flag.as_str(),"--definition"|"--habitat-id"|"--initial"|"--output"|"--samples"|"--interval-days"|"--parameter"|"--from"|"--to"|"--runs") {return Err(format!("{flag} is not a habitat sweep option"));}
         if a.cmd=="habitat-compare" && !matches!(flag.as_str(),"--recording"|"--reference"|"--measure"|"--alignment"|"--output") {return Err(format!("{flag} is not a habitat comparison option"));}
         if matches!(flag.as_str(),"--parameter"|"--from"|"--to"|"--runs"|"--samples"|"--interval-days") {explicit_sweep=true;}
@@ -156,7 +156,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--from-index" => {if a.cmd!="habitat-balance" {return Err("--from-index requires habitat-balance".into());} let n=number::<usize>(val()?,&flag)?;if n>=1024{return Err("Initial index must be between 0 and 1023".into());}a.from_index=Some(n);},
             "--reference-index" => {if a.cmd!="habitat-pressure" {return Err("--reference-index requires habitat-pressure".into());}let n=number::<usize>(val()?,&flag)?;if n>=1024 {return Err("Reference index must be between 0 and 1023".into());}a.reference_index=Some(n);},
             "--initial" => a.initial = Some(val()?),
-            "--habitat-id" => {if !matches!(a.cmd.as_str(),"habitat"|"habitat-sweep"|"greenhouse"|"greenhouse-supplies"|"habitat-diagnose") {return Err("--habitat-id requires habitat, habitat-sweep, habitat-diagnose or greenhouse".into());}a.habitat_id=Some(number(val()?,&flag)?);},
+            "--habitat-id" => {if !matches!(a.cmd.as_str(),"habitat"|"habitat-sweep"|"greenhouse"|"greenhouse-supplies"|"habitat-diagnose"|"habitat-crop-harvest") {return Err("--habitat-id requires habitat, habitat-sweep, habitat-diagnose or greenhouse".into());}a.habitat_id=Some(number(val()?,&flag)?);},
             "--definition" => a.definition = Some(val()?),
             "--alignment" => {if a.cmd!="habitat-compare" {return Err("--alignment requires habitat-compare".into());}a.alignment=val()?;},
             "--parameter" => a.parameter = val()?,
@@ -193,7 +193,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             unknown => return Err(format!("Unknown flag {unknown}; use --help")),
         }
     }
-    if matches!(a.cmd.as_str(),"habitat"|"habitat-definition") && a.initial.is_some() && (explicit_scenario || explicit_seed) {return Err("Choose saved --initial world or new --scenario/--seed, not both".into());}
+    if matches!(a.cmd.as_str(),"habitat"|"habitat-definition"|"habitat-crop-definition") && a.initial.is_some() && (explicit_scenario || explicit_seed) {return Err("Choose saved --initial world or new --scenario/--seed, not both".into());}
     if matches!(a.cmd.as_str(),"greenhouse"|"greenhouse-supplies") && a.habitat_id.is_some() && a.initial.is_none() {return Err("Greenhouse habitat context requires --initial saved world".into());}
     if a.cmd=="habitat-sweep" {
         if a.initial.is_none() || a.output.is_none() {return Err("habitat-sweep requires --initial SAVE and --output NEW_DIR".into());}
@@ -205,6 +205,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         cosmogon_sim::habitat_comparison::Alignment::parse(&a.alignment)?;
         cosmogon_sim::habitat_recording::Metric::parse(a.measure.as_deref().unwrap_or("water"))?;
     }
+    if a.cmd=="habitat-crop-harvest" && (a.initial.is_none() || a.habitat_id.is_none() || a.output.is_none()) {return Err("habitat-crop-harvest requires --initial SAVE --habitat-id ID --output NEW_DIR".into());}
     if a.cmd=="habitat-diagnose" && (a.initial.is_none() || a.habitat_id.is_none()) {return Err("habitat-diagnose requires --initial SAVE and explicit --habitat-id ID".into());}
     if a.cmd=="habitat-verify" && a.recording.is_none() {return Err("habitat-verify requires --recording COMPLETE_PAIRED_FOLDER".into());}
     if a.cmd=="habitat-pressure" && (a.recording.is_none() || a.observation.is_none()) {return Err("habitat-pressure requires --recording ORDINARY_BRANCH_FOLDER and --observation INDEX".into());}
@@ -269,6 +270,8 @@ fn help() {
   greenhouse-definition [--output NEW_FILE]  Emit source-pinned editable crop planning inputs
   greenhouse [--definition FILE --output NEW_DIR]  31 controlled lettuce forecast rows
       [--initial SAVE --habitat-id ID]   Optional exact habitat/world context, no resource credit
+  habitat-crop-harvest --initial SAVE --habitat-id ID --output NEW_DIR  Explicit completed-cycle transfer
+  habitat-crop-definition [--target Mars --output NEW_FILE]  Explicit finite crop setup; maintained assumption starts false
   habitat-definition [--target Mars --latitude N --longitude E] [--initial SAVE]
       [--output NEW_FILE]        Create a complete editable preset for this world.
   habitat --definition FILE [--initial SAVE] [--output NEW_DIR]
@@ -380,6 +383,7 @@ fn main() {
         "greenhouse-supplies"|"greenhouse-supply-inspect" => {if let Err(e)=greenhouse_supplies(&a) {eprintln!("Crop supply study failed: {e}");std::process::exit(1);}},
         "greenhouse-definition" => {if let Err(e)=greenhouse_definition(&a) {eprintln!("Greenhouse definition failed: {e}");std::process::exit(1);}},
         "greenhouse" => {if let Err(e)=greenhouse(&a) {eprintln!("Greenhouse planning failed: {e}");std::process::exit(1);}},
+        "habitat-crop-harvest" => {if let Err(e)=habitat_crop_harvest(&a){eprintln!("Crop harvest failed: {e}");std::process::exit(1);}},
         "habitat-diagnose" => {if let Err(e)=habitat_diagnose(&a) {eprintln!("Habitat diagnosis failed: {e}");std::process::exit(1);}},
         "habitat-verify" => {
             match habitat_verify(&a) {Ok(v)=>{println!("{}",serde_json::to_string_pretty(&v).unwrap());if v["verified"]!=true {eprintln!("Replay differs from saved observations; results are preserved.");std::process::exit(1);}},Err(e)=>{eprintln!("Habitat replay did not complete: {e}");std::process::exit(1);}}
@@ -405,7 +409,7 @@ fn main() {
         },
         "habitat-sweep" => {if let Err(e)=habitat_sweep(&a) {eprintln!("Habitat sweep failed: {e}");std::process::exit(1);}},
         "habitat-compare" => {if let Err(e)=habitat_compare(&a) {eprintln!("Habitat comparison failed: {e}");std::process::exit(1);}},
-        "habitat-definition" => {if let Err(e)=habitat_definition(&a) {eprintln!("Habitat definition failed: {e}");std::process::exit(1);}},
+        "habitat-definition"|"habitat-crop-definition" => {if let Err(e)=habitat_definition(&a) {eprintln!("Habitat definition failed: {e}");std::process::exit(1);}},
         "habitat" => {if let Err(e)=habitat(&a) {eprintln!("Habitat study failed: {e}");std::process::exit(1);}},
         "section" => {if let Err(e)=section(&a) {eprintln!("Terrain section failed: {e}");std::process::exit(1);}},
         "sites" => println!("{}", serde_json::to_string_pretty(&cosmogon_sim::planet::landing::registry()).unwrap()),
@@ -840,11 +844,26 @@ fn habitat(a:&Args)->Result<(),String> {
     println!("{}",serde_json::to_string_pretty(&serde_json::json!({"format":"cosmogon-habitat-study-result","schema_version":1,"samples":rows.len(),"interval_s":a.interval_days*cosmogon_sim::time::SECONDS_PER_DAY,"initial_state_fingerprint":cosmogon_sim::research::state_fingerprint(&initial)?,"final_state_fingerprint":cosmogon_sim::research::state_fingerprint(&u)?,"report":u.habitats.iter().find(|h|h.id==id).expect("sampled").report()})).map_err(|e|e.to_string())?);Ok(())
 }
 
+fn habitat_crop_harvest(a:&Args)->Result<(),String> {
+    use std::io::Write;
+    let mut u=save::read_file(std::path::Path::new(a.initial.as_deref().ok_or("Initial world required")?)).map_err(|e|e.to_string())?;
+    let before=u.clone();let id=a.habitat_id.ok_or("Habitat identity required")?;
+    let system=u.habitats.iter().find(|h|h.id==id).ok_or("No such habitat")?.definition.body.system;
+    let edit=cosmogon_sim::sandbox::Edit::HarvestHabitatCrop {system,id};
+    let action=serde_json::json!({"format":"cosmogon-crop-harvest","schema_version":1,"edit":edit,"before_state_fingerprint":cosmogon_sim::research::state_fingerprint(&before)?});
+    u.apply_edit(edit)?;
+    let p=std::path::Path::new(a.output.as_deref().ok_or("New output folder required")?);
+    let row=cosmogon_sim::habitat::sample(&u,id)?;
+    cosmogon_sim::habitat::export(&u,&u,id,&[row],p)?;
+    for (name,text) in [("before-harvest.cosmo",save::to_json(&before,"Before explicit crop harvest").map_err(|e|e.to_string())?),("harvest-action.json",serde_json::to_string_pretty(&action).map_err(|e|e.to_string())?)] {let mut f=std::fs::OpenOptions::new().write(true).create_new(true).open(p.join(name)).map_err(|e|e.to_string())?;f.write_all(text.as_bytes()).map_err(|e|e.to_string())?;}
+    println!("{}",serde_json::to_string_pretty(&u.habitats.iter().find(|h|h.id==id).expect("harvested").report()).map_err(|e|e.to_string())?);Ok(())
+}
+
 fn habitat_definition(a:&Args)->Result<(),String> {
     use std::io::Write;
     let u=if let Some(p)=&a.initial {save::read_file(std::path::Path::new(p)).map_err(|e|e.to_string())?} else {Universe::new(settings(a,a.seed))};
     let r=u.systems.iter().find_map(|s|s.bodies.iter().enumerate().find(|(_,b)|b.exists() && b.kind.has_surface() && b.name.eq_ignore_ascii_case(&a.target)).map(|(j,_)|cosmogon_sim::BodyRef {system:s.id,body:j as u32})).ok_or("Target must identify an existing solid world")?;
-    let d=cosmogon_sim::habitat::Definition::at(r,a.latitude,a.longitude);d.validate()?;
+    let d=if a.cmd=="habitat-crop-definition" {cosmogon_sim::crop_process::definition_at(r,a.latitude,a.longitude)} else {cosmogon_sim::habitat::Definition::at(r,a.latitude,a.longitude)};d.validate()?;
     let text=serde_json::to_string_pretty(&d).map_err(|e|e.to_string())?;
     if let Some(path)=&a.output {let p=std::path::Path::new(path);if let Some(parent)=p.parent().filter(|p|!p.as_os_str().is_empty()) {std::fs::create_dir_all(parent).map_err(|e|e.to_string())?;}let mut f=std::fs::OpenOptions::new().write(true).create_new(true).open(p).map_err(|e|format!("Existing definitions are protected: {e}"))?;f.write_all(text.as_bytes()).map_err(|e|e.to_string())?;}
     println!("{text}");Ok(())
@@ -857,6 +876,14 @@ mod argument_tests {
         parse_args(values.iter().map(|s| s.to_string()))
     }
 
+    #[test]
+    fn installed_crop_commands_refuse_ignored_or_ambiguous_inputs() {
+        assert!(args(&["habitat-crop-definition","--output","x"]).is_ok());
+        assert!(args(&["habitat-crop-definition","--samples","2"]).is_err());
+        assert!(args(&["habitat-crop-definition","--initial","s","--seed","4"]).is_err());
+        for v in [vec!["habitat-crop-harvest"],vec!["habitat-crop-harvest","--initial","s","--habitat-id","0"],vec!["habitat-crop-harvest","--initial","s","--habitat-id","0","--output","o","--samples","3"]] {assert!(args(&v).is_err());}
+        assert!(args(&["habitat-crop-harvest","--initial","s","--habitat-id","0","--output","o"]).is_ok());
+    }
     #[test]
     fn crop_chemistry_requires_explicit_source_and_refuses_ignored_arguments() {
         for cmd in ["crop-chemistry","crop-chemistry-inspect"] {

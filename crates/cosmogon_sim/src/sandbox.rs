@@ -96,6 +96,7 @@ pub enum Edit {
     SetMarsTerrain { body: BodyRef, dataset: terrain::ElevationData },
     CreateHabitat { definition: Box<crate::habitat::Definition> },
     ConfigureHabitat { system: u32, id: u64, config: Box<crate::habitat::Config> },
+    HarvestHabitatCrop { system:u32,id:u64 },
     RemoveHabitat { system: u32, id: u64 },
     SetStar { system: u32, property: StarProperty },
     /// Choose analytic (Kepler) or N-body gravity and its settings.
@@ -107,7 +108,7 @@ pub enum Edit {
 impl Edit {
     pub fn system(&self) -> u32 {
         match self {
-            Edit::AddBody { system, .. } | Edit::SetStar { system, .. } | Edit::SetPhysics { system, .. } | Edit::Intervene { system, .. } | Edit::ConfigureHabitat {system,..} | Edit::RemoveHabitat {system,..} => *system,
+            Edit::AddBody { system, .. } | Edit::SetStar { system, .. } | Edit::SetPhysics { system, .. } | Edit::Intervene { system, .. } | Edit::ConfigureHabitat {system,..} | Edit::RemoveHabitat {system,..} | Edit::HarvestHabitatCrop {system,..} => *system,
             Edit::CreateHabitat {definition} => definition.body.system,
             Edit::RemoveBody { body } | Edit::SetState { body, .. } | Edit::Impulse { body, .. } | Edit::SetOrbit { body, .. } | Edit::SetProperty { body, .. } | Edit::SetMarsTerrain { body, .. } => body.system,
         }
@@ -427,6 +428,7 @@ fn validate(u: &Universe, e: &Edit) -> Result<(), String> {
             let h=u.habitats.iter().find(|h|h.id==*id && h.definition.body.system==*system).ok_or("No such habitat")?;
             h.check_config(config)?;
         }
+        Edit::HarvestHabitatCrop {system,id} => {let h=u.habitats.iter().find(|h|h.id==*id && h.definition.body.system==*system).ok_or("No such habitat")?;h.state.crop.as_ref().ok_or("No installed crop")?.clone().harvest()?;}
         Edit::RemoveHabitat {system,id} => {if !u.habitats.iter().any(|h|h.id==*id && h.definition.body.system==*system) {return Err("No such habitat".into());}}
         Edit::SetMarsTerrain { body, dataset } => {
             body_ok(body)?;
@@ -472,6 +474,7 @@ fn describe(u: &Universe, e: &Edit) -> String {
         },
         Edit::CreateHabitat {definition} => format!("Built {} on {}",definition.name,name(&definition.body)),
         Edit::ConfigureHabitat {id,..} => format!("Configured habitat {id}"),
+        Edit::HarvestHabitatCrop {id,..} => format!("Harvested completed crop in habitat {id}"),
         Edit::RemoveHabitat {id,..} => format!("Removed habitat {id}"),
         Edit::SetMarsTerrain { body, dataset } => format!("Set terrain of {} to {}", name(body), dataset.mola().expect("validated MOLA").label()),
         Edit::SetStar { system, property } => {
@@ -507,7 +510,7 @@ impl Universe {
             return Ok(EditOutcome { created: None, summary });
         }
         // Habitat edits have their own conserved state; never activate orbital dynamics.
-        if matches!(edit,Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::RemoveHabitat {..}) {
+        if matches!(edit,Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::HarvestHabitatCrop {..} | Edit::RemoveHabitat {..}) {
             let summary=describe(self,&edit);
             let body=match &edit {
                 Edit::CreateHabitat {definition} => {
@@ -529,6 +532,7 @@ impl Universe {
                     preview.check_config(config)?;preview.config=(**config).clone();
                     let body=preview.definition.body;self.habitats[i]=preview;self.habitat_events(i,t);body
                 }
+                Edit::HarvestHabitatCrop {id,..} => {let i=self.habitats.iter().position(|h|h.id==*id).expect("validated habitat");let mut preview=self.habitats[i].clone();let env=self.habitat_environment(&preview.definition,t);preview.step(t,env)?;preview.state.crop.as_mut().ok_or("No installed crop")?.harvest()?;let body=preview.definition.body;self.habitats[i]=preview;body}
                 Edit::RemoveHabitat {id,..} => {let i=self.habitats.iter().position(|h|h.id==*id).expect("validated habitat");self.habitats.remove(i).definition.body}
                 _=>unreachable!(),
             };
@@ -732,7 +736,7 @@ impl Universe {
                     sys.deactivate_dynamics(t)?;
                 }
             }
-            Edit::Intervene { .. } | Edit::SetMarsTerrain { .. } | Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::RemoveHabitat {..} => unreachable!("handled above"),
+            Edit::Intervene { .. } | Edit::SetMarsTerrain { .. } | Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::HarvestHabitatCrop {..} | Edit::RemoveHabitat {..} => unreachable!("handled above"),
         }
 
         let sys = &mut self.systems[s];

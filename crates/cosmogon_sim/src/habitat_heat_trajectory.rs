@@ -54,7 +54,9 @@ pub fn point(row: &Sample) -> Value {
 }
 
 pub fn context(recordings: &[&Recording]) -> Value {
-    json!({"source":habitat_heat::source(),"scope":SCOPE,"series":recordings.iter().enumerate().map(|(i,r)|json!({"recording_index":i,"first_world_time_s":r.rows.first().map(|r|r.simulation_time_s),"observations":r.rows.iter().enumerate().map(|(i,r)|json!({"observation_index":i,"simulation_time_s":r.simulation_time_s,"coverage":point(r)})).collect::<Vec<_>>()})).collect::<Vec<_>>()})
+    let mut value=json!({"source":habitat_heat::source(),"scope":SCOPE,"series":recordings.iter().enumerate().map(|(i,r)|json!({"recording_index":i,"first_world_time_s":r.rows.first().map(|r|r.simulation_time_s),"observations":r.rows.iter().enumerate().map(|(i,r)|json!({"observation_index":i,"simulation_time_s":r.simulation_time_s,"coverage":point(r)})).collect::<Vec<_>>()})).collect::<Vec<_>>()});
+    if recordings.iter().any(|r|r.rows.iter().any(|s|s.habitat.uses_crop())) {value["optional_crop_storage"]=crate::crop_process::source();}
+    value
 }
 
 pub fn label(row: &Sample) -> String {

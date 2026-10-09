@@ -101,6 +101,7 @@ impl Recording {
         let mut uses_sabatier = false;
         let mut uses_moisture = false;
         let mut uses_breach = false;
+        let mut uses_crop = false;
         for row in &rows {
             if !row.simulation_time_s.is_finite()
                 || row.simulation_time_s < initial.time
@@ -123,6 +124,7 @@ impl Recording {
             uses_sabatier |= row.habitat.uses_sabatier();
             uses_moisture |= row.habitat.uses_moisture();
             uses_breach |= row.habitat.uses_breach();
+            uses_crop |= row.habitat.uses_crop();
         }
         for (used, key, descriptor, expected) in [
             (
@@ -171,6 +173,10 @@ impl Recording {
                 return Err("Recording declares an unused reaction source".into());
             }
         }
+        if uses_crop {
+            if m["crop_source"]!=crate::crop_process::source() || m["crop_model_descriptor"]!=serde_json::to_value(crate::research::PhysicsModelRegistry::get("finite-crop")).map_err(|e|e.to_string())? {return Err("Crop source/model mismatch".into());}
+            if read(&path.join("crop.csv"),16*1024*1024)?!=crate::crop_process::samples_csv(&rows) {return Err("Actual crop CSV disagrees with saved observations".into());}
+        } else if !m["crop_source"].is_null() || !m["crop_model_descriptor"].is_null() {return Err("Recording declares unused crop process".into());}
         if definition.record_heat {
             if m["heat_accounting_source"] != crate::habitat_heat::source()
                 || m["heat_accounting_model_descriptor"]
@@ -213,6 +219,7 @@ impl Recording {
             "moisture_source",
             "breach_source",
             "heat_accounting",
+            "crop_source",
         ] {
             if report[key] != expected[key] {
                 return Err(format!(
@@ -255,6 +262,7 @@ impl Recording {
         if uses_breach {
             summary["breach_source"] = m["breach_source"].clone();
         }
+        if uses_crop {summary["crop_source"]=m["crop_source"].clone();summary["crop_model_descriptor"]=m["crop_model_descriptor"].clone();}
         Ok(Self { rows, summary })
     }
 }
@@ -391,8 +399,8 @@ impl Metric {
             Self::HeatConduction => ledger.terms_j[8],
             Self::HeatBreach => ledger.terms_j[9],
             Self::HeatStorage => ledger.terms_j[10],
-            Self::HeatPaths => ledger.terms_j[..10].iter().sum(),
-            Self::HeatResidual => ledger.terms_j[..10].iter().sum::<f64>() - ledger.terms_j[10],
+            Self::HeatPaths => ledger.heat_path_sum_j(),
+            Self::HeatResidual => ledger.heat_path_sum_j() - ledger.terms_j[10],
             Self::HeatExecuted => ledger.executed_seconds,
             Self::HeatExcluded => {
                 ledger.environment_missing_seconds + ledger.start_temperature_unsupported_seconds

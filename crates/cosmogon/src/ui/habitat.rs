@@ -23,6 +23,8 @@ pub struct HabitatUi {
     tab: usize,
     moisture_pane:usize,
     breach_pane:usize,
+    crop_pane:usize,
+    crop_setup:Definition,
     why: super::habitat_why::View,
     pub crop: super::greenhouse::CropPlanner,
     pub recording: super::habitat_recordings::Study,
@@ -43,6 +45,8 @@ impl Default for HabitatUi {
             tab: 0,
             moisture_pane:0,
             breach_pane:0,
+            crop_pane:0,
+            crop_setup:cosmogon_sim::crop_process::definition_at(cosmogon_sim::BodyRef {system:0,body:0},0.,0.),
             why: Default::default(),
             crop: Default::default(),
             recording: Default::default(),
@@ -50,6 +54,11 @@ impl Default for HabitatUi {
     }
 }
 impl HabitatUi {
+    pub fn crop_metadata(&self,u:&cosmogon_sim::Universe)->Option<serde_json::Value> {
+        if self.tab!=11 {return None;}
+        Some(serde_json::json!({"pane":self.crop_pane,"selected_habitat":self.selected,"staged_configuration":self.draft,"new_setup":self.crop_setup,"observation":self.selected.and_then(|id|u.habitats.iter().find(|h|h.id==id)).map(|h|h.report())}))
+    }
+
     pub fn breach_metadata(&self,u:&cosmogon_sim::Universe)->Option<serde_json::Value> {
         if self.tab!=10{return None;}
         Some(serde_json::json!({"pane":self.breach_pane,"selected_habitat":self.selected,"staged_configuration":self.draft,"observation":self.selected.and_then(|id|u.habitats.iter().find(|h|h.id==id)).map(|h|h.report())}))
@@ -251,20 +260,41 @@ pub fn panel(
     let max_height = (ctx.available_rect().height() - bottom_margin).max(240.0);
     // The planner needs room for its axes and selected-day values on first opening.
     // Keep the window resizable; the scroll area handles smaller screens.
-    egui::Window::new("Habitat engineering").open(&mut open).default_pos([345.0,82.0]).default_width(540.0).default_height(if form.tab==4 || form.tab==7 || form.tab==9 || form.tab==10 {540.0} else {480.0}).max_height(max_height).show(ctx,|ui| {
+    egui::Window::new("Habitat engineering").open(&mut open).default_pos([345.0,82.0]).default_width(540.0).default_height(if form.tab==4 || form.tab==7 || form.tab==9 || form.tab==10 || form.tab==11 {540.0} else {480.0}).max_height(max_height).show(ctx,|ui| {
       egui::ScrollArea::vertical().max_height(max_height).show(ui,|ui| {
-        if form.tab!=4 && form.tab!=7 && form.tab!=9 && form.tab!=10 {ui.label(egui::RichText::new("Experimental mass, power and heat budgets").strong());
+        if form.tab!=4 && form.tab!=7 && form.tab!=9 && form.tab!=10 && form.tab!=11 {ui.label(egui::RichText::new("Experimental mass, power and heat budgets").strong());
         ui.label(egui::RichText::new("NASA reference crew rates · user-assumed equipment · unvalidated field accuracy").small().color(ACCENT));}
         if sim.is_reference() {ui.colored_label(ACCENT,"Clone this reference world to a sandbox before building or configuring habitats.");}
         if form.tab!=7 && (form.tab!=4 || !sim.universe.habitats.is_empty() && (form.crop.pane!=5 || form.crop.supplies.pane==3)) {egui::ComboBox::from_id_salt("habitat-selection").selected_text(form.selected.and_then(|id|sim.universe.habitats.iter().find(|h|h.id==id)).map(|h|h.definition.name.as_str()).unwrap_or("No habitats in this world")).show_ui(ui,|ui| {
             for h in &sim.universe.habitats {ui.selectable_value(&mut form.selected,Some(h.id),format!("{} · #{}",h.definition.name,h.id));}
         });}
-        ui.horizontal_wrapped(|ui| {for (i,label) in ["Budgets","Controls","Build & import","Model & export","Crop planner","Oxygen","Water recovery","Recordings","WHY","Humidity","Breach"].iter().enumerate() {ui.selectable_value(&mut form.tab,i,*label);}});
+        ui.horizontal_wrapped(|ui| {for (i,label) in ["Budgets","Controls","Build & import","Model & export","Crop planner","Oxygen","Water recovery","Recordings","WHY","Humidity","Breach","Installed crops"].iter().enumerate() {ui.selectable_value(&mut form.tab,i,*label);}});
         if let Some(status)=&form.status {ui.colored_label(ACCENT,status);}
         if form.tab==7 {
             super::habitat_recordings::panel(ui,&mut form.recording,&sim.universe,&mut form.selected,sim.is_reference());
         } else if form.tab==4 {
             super::greenhouse::panel(ui,&mut form.crop,&sim.universe,form.selected);
+        } else if form.tab==11 && (form.crop_pane==3 || sim.universe.habitats.is_empty()) {
+            ui.horizontal(|ui|{ui.selectable_value(&mut form.crop_pane,3,"New crop setup");if !sim.universe.habitats.is_empty(){ui.selectable_value(&mut form.crop_pane,0,"Installed readings");}});
+            ui.strong("New finite crop experiment");
+            ui.label("Creates original finite stocks and a pinned reference cycle on the selected solid world. Existing habitats receive no stock grant.");
+            let body=match sim.selected {Some(Target::Body(r))=>Some(r),_=>None};
+            let mut create_crop=false;
+            if let Some(r)=body {let b=sim.universe.body(r);ui.label(format!("Selected world: {}",b.name));create_crop=ui.add_enabled(!sim.is_reference() && b.exists() && b.kind.has_surface(),egui::Button::new("Build finite crop experiment")).clicked();} else {ui.label("Select a planet or moon with a solid surface.");}
+            ui.text_edit_singleline(&mut form.crop_setup.name);
+            number(ui,"Latitude north (°)",&mut form.crop_setup.latitude_deg,-90.,90.);
+            number(ui,"Longitude east (°)",&mut form.crop_setup.longitude_east_deg,0.,360.);
+            let c=form.crop_setup.config.crop.as_mut().expect("explicit new setup");
+            ui.checkbox(&mut c.assume_maintained_conditions,"Assume source growing conditions are maintained");
+            ui.label("Explicit ideal chamber boundary, not measured or simulated HVAC. Unchecked means no light request or production.");
+            number(ui,"Crop area (m²)",&mut c.crop.area_m2,0.01,1000.);
+            number(ui,"Fixture efficacy (µmol/J)",&mut c.crop.fixture_efficacy_umol_j,0.1,20.);
+            number(ui,"Assumed dry chemical energy (J/kg)",&mut c.dry_chemical_energy_j_kg,0.,1e9);
+            number(ui,"Original captured CO₂ (kg)",&mut form.crop_setup.initial.captured_co2_kg,0.,form.crop_setup.config.capture_capacity_kg);
+            number(ui,"Original nutrient equivalent (kg)",&mut form.crop_setup.initial.crop_nutrient_equivalent_kg,0.,1e7);
+            number(ui,"Original potable water (kg)",&mut form.crop_setup.initial.potable_water_kg,0.,1e7);
+            ui.label("Other crew, battery and equipment inputs use the habitat preset. Import an advanced definition in Build & import for complete customization.");
+            if create_crop {let mut d=form.crop_setup.clone();d.body=body.expect("available build target");edit=Some(Edit::CreateHabitat {definition:Box::new(d)});}
         } else if form.tab==2 || sim.universe.habitats.is_empty() {
             ui.label("Create a new experiment on the selected solid world. Initial stocks are finite; this does not construct a measured mission habitat.");
             let body=match sim.selected {Some(Target::Body(r))=>Some(r),_=>None};
@@ -307,9 +337,9 @@ pub fn panel(
                 });
               }
               8=>{form.why.show(ui,h,sim.universe.time,sim.paused);}
-              1|5|6|9|10=>{
+              1|5|6|9|10|11=>{
                 if form.key!=Some((sim.generation,h.id)) || form.baseline.as_ref()!=Some(c) {form.key=Some((sim.generation,h.id));form.draft=c.clone();form.baseline=Some(c.clone());}
-                if form.tab!=9 && form.tab!=10 {ui.label("Changes are staged until Apply. Stored mass/energy stay intact; reducing capacity below stored quantity is rejected.");}
+                if form.tab!=9 && form.tab!=10 && form.tab!=11 {ui.label("Changes are staged until Apply. Stored mass/energy stay intact; reducing capacity below stored quantity is rejected.");}
                 if form.tab==5 {super::habitat_oxygen::readings(ui,h);}
                 if form.tab==6 {super::habitat_water::readings(ui,h);}
                 if form.tab==9 {
@@ -323,6 +353,16 @@ pub fn panel(
                     }
                     if form.moisture_pane==0 {super::habitat_humidity::readings(ui,h);} else if form.moisture_pane==2 {super::habitat_humidity::model(ui);}
                 }
+                if form.tab==11 {
+                    ui.horizontal_wrapped(|ui| {for (i,label) in ["Overview","Settings","Model & sources","New crop setup"].iter().enumerate() {ui.selectable_value(&mut form.crop_pane,i,*label);}});
+                    if form.crop_pane==0 {if super::habitat_crop::readings(ui,h,!sim.is_reference()) && !sim.is_reference() {edit=Some(Edit::HarvestHabitatCrop {system:h.definition.body.system,id:h.id});}}
+                    else if form.crop_pane==2 {super::habitat_crop::model(ui);}
+                    else if form.crop_pane==1 {
+                        ui.add_enabled_ui(!sim.is_reference(),|ui|super::habitat_crop::controls(ui,&mut form.draft.crop,h.definition.config.crop.as_ref()));
+                        ui.horizontal(|ui| {if ui.add_enabled(!sim.is_reference() && form.draft!=*c,egui::Button::new("Apply configuration")).clicked(){edit=Some(Edit::ConfigureHabitat {system:h.definition.body.system,id:h.id,config:Box::new(form.draft.clone())});}
+                        if ui.button("Discard staged changes").clicked(){form.draft=c.clone();}});
+                    }
+                }
                 if form.tab==10 {
                     ui.horizontal(|ui| {for (i,label) in ["Overview","Settings","Model & sources"].iter().enumerate() {ui.selectable_value(&mut form.breach_pane,i,*label);}});
                     if form.breach_pane==1 {
@@ -334,8 +374,8 @@ pub fn panel(
                         ui.add_enabled_ui(!sim.is_reference(),|ui|super::habitat_breach::controls(ui,&mut form.draft.breach,true));
                     } else if form.breach_pane==0 {super::habitat_breach::readings(ui,h);} else {super::habitat_breach::model(ui);}
                 }
-                ui.add_enabled_ui(!sim.is_reference(),|ui| {if form.tab==5 {super::habitat_oxygen::controls(ui,&mut form.draft.electrolysis,false);} else if form.tab==6 {super::habitat_water::controls(ui,&mut form.draft.sabatier,false);} else if form.tab==9 {if form.moisture_pane==1 {super::habitat_humidity::controls(ui,&mut form.draft.moisture,true);}} else if form.tab!=10 {config(ui,&mut form.draft);}});
-                if form.tab!=9 && form.tab!=10 {ui.horizontal(|ui| {
+                ui.add_enabled_ui(!sim.is_reference(),|ui| {if form.tab==5 {super::habitat_oxygen::controls(ui,&mut form.draft.electrolysis,false);} else if form.tab==6 {super::habitat_water::controls(ui,&mut form.draft.sabatier,false);} else if form.tab==9 {if form.moisture_pane==1 {super::habitat_humidity::controls(ui,&mut form.draft.moisture,true);}} else if form.tab!=10 && form.tab!=11 {config(ui,&mut form.draft);}});
+                if form.tab!=9 && form.tab!=10 && form.tab!=11 {ui.horizontal(|ui| {
                     if ui.add_enabled(!sim.is_reference() && form.draft!=*c,egui::Button::new("Apply configuration")).clicked() {edit=Some(Edit::ConfigureHabitat {system:h.definition.body.system,id:h.id,config:Box::new(form.draft.clone())});}
                     if ui.button("Discard staged changes").clicked() {form.draft=c.clone();}
                     if ui.add_enabled(!sim.is_reference(),egui::Button::new("Remove habitat")).clicked() {edit=Some(Edit::RemoveHabitat {system:h.definition.body.system,id:h.id});}
@@ -367,7 +407,7 @@ pub fn panel(
             Ok(out) => {
                 if created {
                     form.selected = sim.universe.habitats.last().map(|h| h.id);
-                    form.tab = 0;
+                    form.tab = if sim.universe.habitats.last().is_some_and(|h|h.uses_crop()) {form.crop_pane=0;11} else {0};
                 }
                 form.key = None;
                 out.summary
@@ -391,6 +431,7 @@ pub fn panel(
 pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit: MessageWriter<bevy::app::AppExit>) {
     form.tab = match args.panel.as_deref() {
         Some("habitat-why"|"habitat-why-water"|"habitat-why-heat"|"habitat-why-air"|"habitat-why-evidence") => 8,
+        Some("habitat-crop"|"habitat-crop-settings"|"habitat-crop-model"|"habitat-crop-build")=>11,
         Some("habitat-controls") => 1,
         Some("habitat-build") => 2,
         Some("habitat-model") => 3,
@@ -402,6 +443,7 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
         Some("habitat-recording-balance-heat"|"habitat-recording-balance"|"habitat-recording-balance-electricity"|"habitat-recording-balance-temperature"|"habitat-recording-balance-counters"|"habitat-recording-balance-files"|"habitat-figure"|"habitat-paired"|"habitat-paired-table"|"habitat-paired-files"|"habitat-paired-replay"|"habitat-graph-layout"|"habitat-recordings"|"habitat-recording-pressure"|"habitat-recording-pressure-change"|"habitat-recording-pressure-breach"|"habitat-recording-pressure-files"|"habitat-experiments"|"habitat-recording-why"|"habitat-recording-why-water"|"habitat-recording-why-heat"|"habitat-recording-why-air"|"habitat-recording-why-evidence") => 7,
         _ => 0,
     };
+    form.crop_pane=match args.panel.as_deref(){Some("habitat-crop-settings")=>1,Some("habitat-crop-model")=>2,Some("habitat-crop-build")=>3,_=>0};
     form.breach_pane=match args.panel.as_deref(){Some("habitat-breach-settings")=>1,Some("habitat-breach-model")=>2,_=>0};
     form.moisture_pane=match args.panel.as_deref(){Some("habitat-humidity-settings")=>1,Some("habitat-humidity-model")=>2,_=>0};
     form.crop.pane=match args.panel.as_deref() {Some("greenhouse-inputs")=>1,Some("greenhouse-compare")=>2,Some("greenhouse-model")=>3,Some("greenhouse-files")=>4,_=>0};

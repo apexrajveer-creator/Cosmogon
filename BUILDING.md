@@ -217,3 +217,5 @@ Cumulative heat trajectories use existing `habitat-compare --measure heat_storag
 Crop supplies: `cosmogon-cli greenhouse-supply-definition`, `greenhouse-supplies --definition FILE --output NEW_DIR`, `greenhouse-supply-inspect --recording DIR`. Native `--greenhouse-supplies FILE_OR_DIR --panel greenhouse-supplies` opens the same calculation; `--greenhouse-supply-output NEW_DIR`, `--greenhouse-supply-day 0..30`, `--greenhouse-supply-resource liquid_water|carbon_dioxide|nutrient_hno3_equivalent|lighting_energy` support reproducible captures. See [guide](docs/FINITE_CROP_SUPPLIES.md).
 
 Crop chemistry uses `crop-chemistry` / `crop-chemistry-inspect` and native `--panel greenhouse-chemistry[-model|-files]`, with original `--greenhouse-supplies` or verified `--crop-chemistry` source and protected `--crop-chemistry-output`; [commands and units](docs/CROP_CHEMISTRY.md).
+
+Finite installed crop setup, strict CLI harvest and packaged `habitat-crop` panels: [FINITE_GREENHOUSE](docs/FINITE_GREENHOUSE.md). Crop state uses explicit optional source pins; legacy saves/CSV catalogs remain available.
