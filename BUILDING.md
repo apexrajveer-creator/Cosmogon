@@ -211,3 +211,5 @@ Recorded figures use `cosmogon-cli habitat-figure --recording FOLDER --definitio
 Recorded balances: CLI `habitat-balance --recording FOLDER [--from-index N] [--observation N] [--output NEW_DIR]`; native `--panel habitat-recording-balance[-electricity|-temperature|-counters|-files]`, `--habitat-balance-from N`, `--habitat-sample N` and `--habitat-balance-output NEW_DIR`. See [guide](docs/RECORDED_BALANCES.md). Both indices refer to actual retained rows; export waits for recording/sweep workers.
 
 Cumulative cabin heat capture: use `--panel habitat-recording-balance-heat` with an enabled recording; generated definitions set `record_heat: true`. Balance outputs add protected `heat.csv` only when actual counters exist. [Guide](docs/CABIN_HEAT_ACCOUNTING.md).
+
+Cumulative heat trajectories use existing `habitat-compare --measure heat_storage`, reusable graph layouts and `habitat-figure`/native `--habitat-metric` selections. See [guide](docs/HEAT_TRAJECTORIES.md). Heat metrics are explicit choices; immutable existing aggregate catalogs stay unchanged.

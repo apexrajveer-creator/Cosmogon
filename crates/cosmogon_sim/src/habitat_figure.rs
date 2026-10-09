@@ -38,6 +38,8 @@ pub struct Figure {
     pub exact_samples: Vec<Vec<Sample>>,
     pub analysis: Option<Value>,
     pub configuration_assumptions: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heat_trajectory_context: Option<Value>,
     pub limits: &'static str,
 }
 impl Figure {
@@ -74,7 +76,15 @@ impl Figure {
                             coordinate_s: alignment
                                 .coordinate(s.simulation_time_s, r.rows[0].simulation_time_s),
                             value,
-                            support: if value.is_some() {
+                            support: if value.is_some()
+                                && metric.is_heat()
+                                && s.habitat.heat.as_ref().is_some_and(|h| {
+                                    h.environment_missing_seconds
+                                        + h.start_temperature_unsupported_seconds
+                                        > 0.
+                                }) {
+                                "available_executed_subset"
+                            } else if value.is_some() {
                                 "available"
                             } else {
                                 "unavailable"
@@ -97,6 +107,9 @@ impl Figure {
             exact_samples: recordings.iter().map(|r| r.rows.clone()).collect(),
             analysis: b.map(|b| crate::habitat_comparison::report(a, b, metric, alignment)),
             configuration_assumptions: None,
+            heat_trajectory_context: metric
+                .is_heat()
+                .then(|| crate::habitat_heat_trajectory::context(&recordings)),
             limits: LIMITS,
         })
     }
@@ -128,6 +141,12 @@ impl Figure {
                 value: effect.value(&p.contrasts),
                 support: if effect.value(&p.contrasts).is_some() {
                     "matched"
+                } else if metric.is_heat() {
+                    p.branch_support
+                        .iter()
+                        .copied()
+                        .find(|s| *s != "matched")
+                        .unwrap_or("unavailable_or_mismatched_interval")
                 } else {
                     "unavailable_or_mismatched_interval"
                 }
@@ -151,6 +170,9 @@ impl Figure {
                 json!({"plan":plan,"common_state_fingerprint":d.manifest["common_state_fingerprint"],"common_data_versions":d.manifest["common_data_versions"],"final_analysis":d.analysis,"selected_metric_points":curve}),
             ),
             configuration_assumptions: plan.configuration_assumptions(),
+            heat_trajectory_context: metric.is_heat().then(|| {
+                crate::habitat_heat_trajectory::context(&d.recordings.iter().collect::<Vec<_>>())
+            }),
             limits: LIMITS,
         })
     }
@@ -242,8 +264,11 @@ impl Figure {
         out.push_str(&xml(self.metric));
         out.push_str("</title><desc id=\"desc\">");
         out.push_str(&xml(LIMITS));
+        if self.heat_trajectory_context.is_some() {
+            out.push_str(&xml(crate::habitat_heat_trajectory::SCOPE));
+        }
         out.push_str("</desc>");
-        let _=write!(out,"<metadata>{}</metadata>",xml(&json!({"format":self.format,"schema_version":self.schema_version,"layout":self.layout,"mode":self.mode,"source_summaries":self.source_summaries,"full_inputs":"figure.json","numeric_values":"points.csv"}).to_string()));
+        let _=write!(out,"<metadata>{}</metadata>",xml(&json!({"format":self.format,"schema_version":self.schema_version,"layout":self.layout,"mode":self.mode,"source_summaries":self.source_summaries,"full_inputs":"figure.json","numeric_values":"points.csv","heat_trajectory_context":self.heat_trajectory_context}).to_string()));
         out.push_str("<rect width=\"1000\" height=\"720\" fill=\"white\"/><g font-family=\"sans-serif\" fill=\"#18212c\">");
         text(&mut out, 110., 38., 24., "start", self.metric);
         text(
@@ -408,7 +433,11 @@ impl Figure {
             635.,
             13.,
             "start",
-            "Markers: stored samples. Lines: visual guides; gaps remain unavailable.",
+            if self.heat_trajectory_context.is_some() {
+                "Cumulative from ledger origin; executed subset only. Coverage/origins: figure.json."
+            } else {
+                "Markers: stored samples. Lines: visual guides; gaps remain unavailable."
+            },
         );
         text(&mut out,110.,658.,13.,"start","Source/model identity, exact inputs and assumptions: figure.json; original numbers: points.csv.");
         text(&mut out,110.,681.,13.,"start","Model sensitivity only; no measured-hardware accuracy or predictive uncertainty claimed.");

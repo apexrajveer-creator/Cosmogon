@@ -67,6 +67,10 @@ pub fn pair_at(
         "different_interval_support"
     } else if av.is_none() || bv.is_none() {
         "unavailable_value"
+    } else if metric.is_heat() {
+        br.map_or("unavailable_value", |br| {
+            crate::habitat_heat_trajectory::support(ar, br, alignment, ta, tb)
+        })
     } else {
         "matched"
     };
@@ -101,7 +105,11 @@ pub fn report(
     let rows = pairs(a, b, metric, alignment);
     let ah = &a.rows[0].habitat;
     let bh = &b.rows[0].habitat;
-    serde_json::json!({"format":"cosmogon-habitat-comparison","schema_version":1,"metric":metric.id(),"unit":metric.unit(),"alignment":alignment,"pairs":rows,"matched_value_count":rows.iter().filter(|r|r.b_minus_a.is_some()).count(),"a":a.summary,"b":b.summary,"a_initial_conditions":{"definition":ah.definition,"configuration":ah.config,"state":ah.state},"b_initial_conditions":{"definition":bh.definition,"configuration":bh.config,"state":bh.state},"initial_conditions_differ":ah.definition!=bh.definition || ah.config!=bh.config || ah.state!=bh.state,"source_versions_differ":a.summary["initial_dataset_versions"]!=b.summary["initial_dataset_versions"] || a.summary["electrolysis_source"]!=b.summary["electrolysis_source"] || a.summary["sabatier_source"]!=b.summary["sabatier_source"],"limits":"Exact stored times only; interval differences require equal completed durations and aligned interval ends. No interpolation, extrapolation, causal attribution, confidence interval or field validation. Elapsed alignment may compare different physical epochs."})
+    let mut report = serde_json::json!({"format":"cosmogon-habitat-comparison","schema_version":1,"metric":metric.id(),"unit":metric.unit(),"alignment":alignment,"pairs":rows,"matched_value_count":rows.iter().filter(|r|r.b_minus_a.is_some()).count(),"a":a.summary,"b":b.summary,"a_initial_conditions":{"definition":ah.definition,"configuration":ah.config,"state":ah.state},"b_initial_conditions":{"definition":bh.definition,"configuration":bh.config,"state":bh.state},"initial_conditions_differ":ah.definition!=bh.definition || ah.config!=bh.config || ah.state!=bh.state,"source_versions_differ":a.summary["initial_dataset_versions"]!=b.summary["initial_dataset_versions"] || a.summary["electrolysis_source"]!=b.summary["electrolysis_source"] || a.summary["sabatier_source"]!=b.summary["sabatier_source"],"limits":"Exact stored times only; interval differences require equal completed durations and aligned interval ends. No interpolation, extrapolation, causal attribution, confidence interval or field validation. Elapsed alignment may compare different physical epochs."});
+    if metric.is_heat() {
+        report["heat_trajectory_context"] = crate::habitat_heat_trajectory::context(&[a, b]);
+    }
+    report
 }
 pub fn export(
     a: &Recording,

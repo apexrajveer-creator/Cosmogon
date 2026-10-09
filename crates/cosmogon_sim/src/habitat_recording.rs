@@ -10,9 +10,17 @@ use serde_json::Value;
 use std::{io::Read, path::Path};
 
 pub(crate) fn read(path: &Path, limit: u64) -> Result<String, String> {
-    let metadata=std::fs::metadata(path).map_err(|e|format!("{}: {e}",path.display()))?;
-    if !metadata.is_file() {return Err("Study entries must be regular files".into());}
-    if metadata.len()>limit {return Err(format!("{} exceeds the {} byte study limit",path.display(),limit));}
+    let metadata = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    if !metadata.is_file() {
+        return Err("Study entries must be regular files".into());
+    }
+    if metadata.len() > limit {
+        return Err(format!(
+            "{} exceeds the {} byte study limit",
+            path.display(),
+            limit
+        ));
+    }
     let f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     if !f.metadata().map_err(|e| e.to_string())?.is_file() {
         return Err("Study entries must be regular files".into());
@@ -91,7 +99,8 @@ impl Recording {
         let mut previous = None;
         let mut uses_electrolysis = false;
         let mut uses_sabatier = false;
-        let mut uses_moisture=false;let mut uses_breach=false;
+        let mut uses_moisture = false;
+        let mut uses_breach = false;
         for row in &rows {
             if !row.simulation_time_s.is_finite()
                 || row.simulation_time_s < initial.time
@@ -112,7 +121,8 @@ impl Recording {
             }
             uses_electrolysis |= row.habitat.uses_electrolysis();
             uses_sabatier |= row.habitat.uses_sabatier();
-            uses_moisture |= row.habitat.uses_moisture();uses_breach |= row.habitat.uses_breach();
+            uses_moisture |= row.habitat.uses_moisture();
+            uses_breach |= row.habitat.uses_breach();
         }
         for (used, key, descriptor, expected) in [
             (
@@ -127,13 +137,27 @@ impl Recording {
                 "sabatier_model_descriptor",
                 crate::sabatier::source(),
             ),
-            (uses_moisture,"moisture_source","moisture_model_descriptor",crate::moisture::source()),
-            (uses_breach,"breach_source","breach_model_descriptor",crate::breach::source()),
+            (
+                uses_moisture,
+                "moisture_source",
+                "moisture_model_descriptor",
+                crate::moisture::source(),
+            ),
+            (
+                uses_breach,
+                "breach_source",
+                "breach_model_descriptor",
+                crate::breach::source(),
+            ),
         ] {
             if used
                 && (m[key] != expected
                     || m[descriptor]["id"]
-                        != if key == "breach_source" {"breach"} else if key == "moisture_source" {"moisture"} else if key == "sabatier_source" {
+                        != if key == "breach_source" {
+                            "breach"
+                        } else if key == "moisture_source" {
+                            "moisture"
+                        } else if key == "sabatier_source" {
                             "sabatier"
                         } else {
                             "electrolysis"
@@ -148,8 +172,24 @@ impl Recording {
             }
         }
         if definition.record_heat {
-            if m["heat_accounting_source"]!=crate::habitat_heat::source() || m["heat_accounting_model_descriptor"]!=serde_json::to_value(crate::research::PhysicsModelRegistry::get("habitat-heat")).map_err(|e|e.to_string())? {return Err("Missing or mismatched recorded heat accounting source/model".into());}
-        } else if !m["heat_accounting_source"].is_null() || !m["heat_accounting_model_descriptor"].is_null() {return Err("Recording declares unused heat accounting".into());}
+            if m["heat_accounting_source"] != crate::habitat_heat::source()
+                || m["heat_accounting_model_descriptor"]
+                    != serde_json::to_value(crate::research::PhysicsModelRegistry::get(
+                        "habitat-heat",
+                    ))
+                    .map_err(|e| e.to_string())?
+            {
+                return Err("Missing or mismatched recorded heat accounting source/model".into());
+            }
+        } else if !m["heat_accounting_source"].is_null()
+            || !m["heat_accounting_model_descriptor"].is_null()
+        {
+            return Err("Recording declares unused heat accounting".into());
+        }
+        if definition.record_heat {
+            crate::habitat_heat::span(&rows)
+                .map_err(|e| format!("Recorded heat continuity: {e}"))?;
+        }
         let report = json(&path.join("report.json"), 2 * 1024 * 1024)?;
         let expected = last.habitat.report();
         for key in [
@@ -167,9 +207,17 @@ impl Recording {
                 ));
             }
         }
-        for key in ["electrolysis_source", "sabatier_source", "moisture_source", "breach_source", "heat_accounting"] {
+        for key in [
+            "electrolysis_source",
+            "sabatier_source",
+            "moisture_source",
+            "breach_source",
+            "heat_accounting",
+        ] {
             if report[key] != expected[key] {
-                return Err("Recorded report reaction source disagrees with final habitat".into());
+                return Err(format!(
+                    "Recorded report {key} disagrees with final habitat"
+                ));
             }
         }
         // Diagnostics are additive derived evidence. Old studies have no such key.
@@ -201,8 +249,12 @@ impl Recording {
             }
         }
         let mut summary = serde_json::json!({"format":"cosmogon-habitat-recording-inspection","schema_version":1,"model":habitat::MODEL,"habitat_id":id,"name":definition.name,"body":definition.body,"latitude_deg":definition.latitude_deg,"longitude_east_deg":definition.longitude_east_deg,"sample_count":count,"initial_time_s":initial.time,"final_time_s":final_world.time,"duration_s":final_world.time-initial.time,"initial_state_fingerprint":initial_fp,"final_state_fingerprint":final_fp,"initial_dataset_versions":save::data_versions(&initial),"final_dataset_versions":save::data_versions(&final_world),"electrolysis_source":m["electrolysis_source"],"sabatier_source":m["sabatier_source"],"moisture_source":m["moisture_source"],"checks":"Bounded formats, sources/models, row budgets/identity/mass/time, exact endpoint worlds/fingerprints, original definition, report and CSV/JSON consistency","validation_scope":"Structural numerical consistency; no independent trajectory replay, cryptographic authenticity, predictive confidence or field calibration","metrics":Metric::for_habitat(&first.habitat).map(|v|serde_json::json!({"id":v.id(),"label":v.label(),"unit":v.unit()})).collect::<Vec<_>>()});
-        if definition.record_heat {summary["heat_accounting_source"]=m["heat_accounting_source"].clone();}
-        if uses_breach {summary["breach_source"]=m["breach_source"].clone();}
+        if definition.record_heat {
+            summary["heat_accounting_source"] = m["heat_accounting_source"].clone();
+        }
+        if uses_breach {
+            summary["breach_source"] = m["breach_source"].clone();
+        }
         Ok(Self { rows, summary })
     }
 }
@@ -224,11 +276,32 @@ pub enum Metric {
     ElectrolysisOxygen,
     SabatierWater,
     SabatierHeat,
-    Vapor,Condensate,Humidity,CondensationHeat,
-    TotalPressure,EscapedGas,BreachLoss,BreachCooling,
+    Vapor,
+    Condensate,
+    Humidity,
+    CondensationHeat,
+    TotalPressure,
+    EscapedGas,
+    BreachLoss,
+    BreachCooling,
+    HeatBus,
+    HeatBattery,
+    HeatMetabolic,
+    HeatElectrolysis,
+    HeatSabatier,
+    HeatCrewVapor,
+    HeatCondensation,
+    HeatRadiator,
+    HeatConduction,
+    HeatBreach,
+    HeatStorage,
+    HeatPaths,
+    HeatResidual,
+    HeatExecuted,
+    HeatExcluded,
 }
 impl Metric {
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 37] = [
         Self::Water,
         Self::OxygenReserve,
         Self::Hydrogen,
@@ -242,13 +315,114 @@ impl Metric {
         Self::UnservedPower,
         Self::ElectrolysisOxygen,
         Self::SabatierWater,
-        Self::SabatierHeat,Self::Vapor,Self::Condensate,Self::Humidity,Self::CondensationHeat,Self::TotalPressure,Self::EscapedGas,Self::BreachLoss,Self::BreachCooling,
+        Self::SabatierHeat,
+        Self::Vapor,
+        Self::Condensate,
+        Self::Humidity,
+        Self::CondensationHeat,
+        Self::TotalPressure,
+        Self::EscapedGas,
+        Self::BreachLoss,
+        Self::BreachCooling,
+        Self::HeatBus,
+        Self::HeatBattery,
+        Self::HeatMetabolic,
+        Self::HeatElectrolysis,
+        Self::HeatSabatier,
+        Self::HeatCrewVapor,
+        Self::HeatCondensation,
+        Self::HeatRadiator,
+        Self::HeatConduction,
+        Self::HeatBreach,
+        Self::HeatStorage,
+        Self::HeatPaths,
+        Self::HeatResidual,
+        Self::HeatExecuted,
+        Self::HeatExcluded,
     ];
-    /// Additive breach metrics do not rewrite older design analyses/summary identities.
-    pub fn for_habitat(h:&habitat::Habitat)->impl Iterator<Item=Self> {let used=h.uses_breach();Self::ALL.into_iter().filter(move |m| used || !matches!(m,Self::TotalPressure|Self::EscapedGas|Self::BreachLoss|Self::BreachCooling))}
+    /// Saved catalog identity is immutable, including existing heat-enabled designs.
+    /// New heat metrics are explicit selections, never silently added to aggregate analyses.
+    pub fn for_habitat(h: &habitat::Habitat) -> impl Iterator<Item = Self> {
+        let used = h.uses_breach();
+        Self::ALL.into_iter().filter(move |m| {
+            !m.is_heat()
+                && (used
+                    || !matches!(
+                        m,
+                        Self::TotalPressure
+                            | Self::EscapedGas
+                            | Self::BreachLoss
+                            | Self::BreachCooling
+                    ))
+        })
+    }
+    pub fn is_heat(self) -> bool {
+        matches!(
+            self,
+            Self::HeatBus
+                | Self::HeatBattery
+                | Self::HeatMetabolic
+                | Self::HeatElectrolysis
+                | Self::HeatSabatier
+                | Self::HeatCrewVapor
+                | Self::HeatCondensation
+                | Self::HeatRadiator
+                | Self::HeatConduction
+                | Self::HeatBreach
+                | Self::HeatStorage
+                | Self::HeatPaths
+                | Self::HeatResidual
+                | Self::HeatExecuted
+                | Self::HeatExcluded
+        )
+    }
+    fn heat_value(self, row: &Sample) -> Option<f64> {
+        let ledger = row.habitat.heat.as_ref()?;
+        ledger.validate(row.habitat.last_time).ok()?;
+        let value = match self {
+            Self::HeatBus => ledger.terms_j[0],
+            Self::HeatBattery => ledger.terms_j[1],
+            Self::HeatMetabolic => ledger.terms_j[2],
+            Self::HeatElectrolysis => ledger.terms_j[3],
+            Self::HeatSabatier => ledger.terms_j[4],
+            Self::HeatCrewVapor => ledger.terms_j[5],
+            Self::HeatCondensation => ledger.terms_j[6],
+            Self::HeatRadiator => ledger.terms_j[7],
+            Self::HeatConduction => ledger.terms_j[8],
+            Self::HeatBreach => ledger.terms_j[9],
+            Self::HeatStorage => ledger.terms_j[10],
+            Self::HeatPaths => ledger.terms_j[..10].iter().sum(),
+            Self::HeatResidual => ledger.terms_j[..10].iter().sum::<f64>() - ledger.terms_j[10],
+            Self::HeatExecuted => ledger.executed_seconds,
+            Self::HeatExcluded => {
+                ledger.environment_missing_seconds + ledger.start_temperature_unsupported_seconds
+            }
+            _ => return None,
+        };
+        value.is_finite().then_some(value)
+    }
     pub fn id(self) -> &'static str {
         match self {
-            Self::TotalPressure=>"total_pressure",Self::EscapedGas=>"escaped_gas",Self::BreachLoss=>"breach_loss",Self::BreachCooling=>"breach_cooling",
+            Self::HeatBus => "heat_bus",
+            Self::HeatBattery => "heat_battery",
+            Self::HeatMetabolic => "heat_metabolic",
+            Self::HeatElectrolysis => "heat_electrolysis",
+            Self::HeatSabatier => "heat_sabatier",
+            Self::HeatCrewVapor => "heat_crew_vapor",
+            Self::HeatCondensation => "heat_condensation",
+            Self::HeatRadiator => "heat_radiator",
+            Self::HeatConduction => "heat_conduction",
+            Self::HeatBreach => "heat_breach",
+            Self::HeatStorage => "heat_storage",
+            Self::HeatPaths => "heat_paths",
+            Self::HeatResidual => "heat_residual",
+            Self::HeatExecuted => "heat_executed",
+            Self::HeatExcluded => "heat_excluded",
+
+            Self::TotalPressure => "total_pressure",
+            Self::EscapedGas => "escaped_gas",
+            Self::BreachLoss => "breach_loss",
+            Self::BreachCooling => "breach_cooling",
             Self::Water => "water",
             Self::OxygenReserve => "oxygen_reserve",
             Self::Hydrogen => "hydrogen",
@@ -263,7 +437,10 @@ impl Metric {
             Self::ElectrolysisOxygen => "electrolysis_oxygen",
             Self::SabatierWater => "sabatier_water",
             Self::SabatierHeat => "sabatier_heat",
-            Self::Vapor=>"vapor",Self::Condensate=>"condensate",Self::Humidity=>"humidity",Self::CondensationHeat=>"condensation_heat",
+            Self::Vapor => "vapor",
+            Self::Condensate => "condensate",
+            Self::Humidity => "humidity",
+            Self::CondensationHeat => "condensation_heat",
         }
     }
     pub fn parse(id: &str) -> Result<Self, String> {
@@ -274,7 +451,26 @@ impl Metric {
     }
     pub fn label(self) -> &'static str {
         match self {
-            Self::TotalPressure=>"Total cabin pressure",Self::EscapedGas=>"Cumulative escaped cabin gas",Self::BreachLoss=>"Supported interval gas escape",Self::BreachCooling=>"Supported interval equivalent cooling",
+            Self::HeatBus => "Cumulative bus heat",
+            Self::HeatBattery => "Cumulative conversion heat",
+            Self::HeatMetabolic => "Cumulative metabolic heat",
+            Self::HeatElectrolysis => "Cumulative electrolysis debit",
+            Self::HeatSabatier => "Cumulative reduction heat",
+            Self::HeatCrewVapor => "Cumulative crew vapor debit",
+            Self::HeatCondensation => "Cumulative condensation heat",
+            Self::HeatRadiator => "Cumulative radiator debit",
+            Self::HeatConduction => "Cumulative signed conduction",
+            Self::HeatBreach => "Cumulative breach cooling debit",
+            Self::HeatStorage => "Cumulative interval sensible storage",
+            Self::HeatPaths => "Cumulative signed heat paths",
+            Self::HeatResidual => "Cumulative heat minus storage residual",
+            Self::HeatExecuted => "Cumulative executed model time",
+            Self::HeatExcluded => "Cumulative excluded model time",
+
+            Self::TotalPressure => "Total cabin pressure",
+            Self::EscapedGas => "Cumulative escaped cabin gas",
+            Self::BreachLoss => "Supported interval gas escape",
+            Self::BreachCooling => "Supported interval equivalent cooling",
             Self::Water => "Water stock",
             Self::OxygenReserve => "Oxygen reserve",
             Self::Hydrogen => "Isolated hydrogen",
@@ -289,37 +485,89 @@ impl Metric {
             Self::ElectrolysisOxygen => "Interval electrolytic oxygen",
             Self::SabatierWater => "Interval raw water produced",
             Self::SabatierHeat => "Interval reference reaction heat",
-            Self::Vapor=>"Cabin water vapor",Self::Condensate=>"Isolated condensate",Self::Humidity=>"Relative humidity",Self::CondensationHeat=>"Interval reference condensation heat",
+            Self::Vapor => "Cabin water vapor",
+            Self::Condensate => "Isolated condensate",
+            Self::Humidity => "Relative humidity",
+            Self::CondensationHeat => "Interval reference condensation heat",
         }
     }
     pub fn unit(self) -> &'static str {
+        if self.is_heat() {
+            return if matches!(self, Self::HeatExecuted | Self::HeatExcluded) {
+                "s"
+            } else {
+                "J"
+            };
+        }
         match self {
             Self::Temperature => "K",
             Self::OxygenPressure | Self::Co2Pressure | Self::TotalPressure => "Pa",
             Self::Battery => "kWh",
             Self::DeliveredPower | Self::UnservedPower => "W",
             Self::SabatierHeat | Self::CondensationHeat | Self::BreachCooling => "kJ",
-            Self::Humidity=>"%",
+            Self::Humidity => "%",
             _ => "kg",
         }
     }
     pub fn is_interval(self) -> bool {
-        matches!(self,Self::DeliveredPower | Self::UnservedPower | Self::ElectrolysisOxygen | Self::SabatierWater | Self::SabatierHeat | Self::CondensationHeat | Self::BreachLoss | Self::BreachCooling)
+        matches!(
+            self,
+            Self::DeliveredPower
+                | Self::UnservedPower
+                | Self::ElectrolysisOxygen
+                | Self::SabatierWater
+                | Self::SabatierHeat
+                | Self::CondensationHeat
+                | Self::BreachLoss
+                | Self::BreachCooling
+        )
     }
     pub fn value(self, row: &Sample) -> Option<f64> {
+        if self.is_heat() {
+            return self.heat_value(row);
+        }
         let h = &row.habitat;
         let s = &h.state;
         let b = &h.budget;
         Some(match self {
-            Self::TotalPressure=>s.pressure_pa(&h.config),
-            Self::EscapedGas=>{if !h.uses_breach(){return None;}s.escaped_gas.unwrap_or_default().mass_kg()},
-            Self::BreachLoss|Self::BreachCooling=>{let e=b.breach.as_ref()?;if !e.status.supported(){return None;}
-                if self==Self::BreachLoss{e.escaped.mass_kg()}else{e.lumped_cooling_j/1000.0}},
+            Self::TotalPressure => s.pressure_pa(&h.config),
+            Self::EscapedGas => {
+                if !h.uses_breach() {
+                    return None;
+                }
+                s.escaped_gas.unwrap_or_default().mass_kg()
+            }
+            Self::BreachLoss | Self::BreachCooling => {
+                let e = b.breach.as_ref()?;
+                if !e.status.supported() {
+                    return None;
+                }
+                if self == Self::BreachLoss {
+                    e.escaped.mass_kg()
+                } else {
+                    e.lumped_cooling_j / 1000.0
+                }
+            }
             Self::Water => s.potable_water_kg,
-            Self::Vapor=>{if !h.uses_moisture(){return None;}s.water_vapor_kg},
-            Self::Condensate=>{if !h.uses_moisture(){return None;}s.condensate_kg},
-            Self::Humidity=>{if !h.uses_moisture(){return None;}100.0*s.relative_humidity(&h.config)?},
-            Self::CondensationHeat=>b.moisture.as_ref()?.condensation_heat_j/1000.0,
+            Self::Vapor => {
+                if !h.uses_moisture() {
+                    return None;
+                }
+                s.water_vapor_kg
+            }
+            Self::Condensate => {
+                if !h.uses_moisture() {
+                    return None;
+                }
+                s.condensate_kg
+            }
+            Self::Humidity => {
+                if !h.uses_moisture() {
+                    return None;
+                }
+                100.0 * s.relative_humidity(&h.config)?
+            }
+            Self::CondensationHeat => b.moisture.as_ref()?.condensation_heat_j / 1000.0,
             Self::OxygenReserve => s.oxygen_reserve_kg,
             Self::Hydrogen => s.hydrogen_kg,
             Self::Methane => s.methane_kg,
@@ -341,6 +589,21 @@ impl Metric {
             Self::ElectrolysisOxygen => b.electrolysis.as_ref()?.oxygen_generated_kg,
             Self::SabatierWater => b.sabatier.as_ref()?.water_generated_kg,
             Self::SabatierHeat => b.sabatier.as_ref()?.reaction_heat_j / 1000.0,
+            Self::HeatBus
+            | Self::HeatBattery
+            | Self::HeatMetabolic
+            | Self::HeatElectrolysis
+            | Self::HeatSabatier
+            | Self::HeatCrewVapor
+            | Self::HeatCondensation
+            | Self::HeatRadiator
+            | Self::HeatConduction
+            | Self::HeatBreach
+            | Self::HeatStorage
+            | Self::HeatPaths
+            | Self::HeatResidual
+            | Self::HeatExecuted
+            | Self::HeatExcluded => unreachable!("Heat metrics are handled above"),
         })
     }
 }
@@ -427,7 +690,11 @@ mod tests {
             ),
             ("manifest.json", "sabatier_source", Value::Null),
             ("report.json", "total_pressure_pa", serde_json::json!(0)),
-            ("report.json", "diagnostics", serde_json::json!({"invented":true})),
+            (
+                "report.json",
+                "diagnostics",
+                serde_json::json!({"invented":true}),
+            ),
         ] {
             let p = root.join(file);
             let original = std::fs::read_to_string(&p).unwrap();
@@ -458,10 +725,14 @@ mod tests {
         std::fs::write(&p, original).unwrap();
         assert!(Recording::read(&root).is_ok());
         let p = root.join("report.json");
-        let mut legacy: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        let mut legacy: Value =
+            serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
         legacy.as_object_mut().unwrap().remove("diagnostics");
         std::fs::write(p, legacy.to_string()).unwrap();
-        assert!(Recording::read(&root).is_ok(), "Legacy reports without derived diagnostics remain valid");
+        assert!(
+            Recording::read(&root).is_ok(),
+            "Legacy reports without derived diagnostics remain valid"
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

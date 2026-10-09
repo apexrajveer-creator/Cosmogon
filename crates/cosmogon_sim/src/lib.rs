@@ -63,3 +63,4 @@ pub use universe::{BodyRef, Scenario, Universe, UniverseSettings};
 
 pub mod habitat_balance;
 pub mod habitat_heat;
+pub mod habitat_heat_trajectory;

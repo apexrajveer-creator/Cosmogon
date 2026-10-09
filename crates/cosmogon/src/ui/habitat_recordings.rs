@@ -369,9 +369,12 @@ impl Study {
     pub fn metadata(&self) -> Option<serde_json::Value> {
         let r = self.recording.as_ref()?;
         let row = &r.rows[self.selected.min(r.rows.len() - 1)];
-        Some(
-            serde_json::json!({"summary":r.summary,"metric":self.metric.id(),"unit":self.metric.unit(),"selected_observation":self.selected,"selected_row":row,"why":self.why_mode.then(||self.why.metadata(&row.habitat,row.simulation_time_s,"recorded_completed_interval")),"selected_value":self.metric.value(row),"comparison":self.comparison.as_ref().map(|b| {let pairs=habitat_comparison::pairs(r,b,self.metric,self.alignment);let pair=&pairs[self.selected.min(pairs.len()-1)];serde_json::json!({"summary":b.summary,"alignment":self.alignment,"selected_pair":pair,"selected_row":pair.b_index.map(|j|&b.rows[j]),"report":habitat_comparison::report(r,b,self.metric,self.alignment)})}),"sweep":self.sweep_manifest,"staged_geometry_thermal_plan":(self.experiment_mode && (self.sweep.parameter.geometry_or_thermal() || self.sweep.paired && self.sweep.secondary_parameter.geometry_or_thermal())).then(||serde_json::json!({"parameter":self.sweep.parameter.id(),"values_text":self.sweep.values,"paired":self.sweep.paired,"secondary_parameter":self.sweep.secondary_parameter.id(),"secondary_values_text":self.sweep.secondary_values,"samples":self.sweep.samples,"interval_hours":self.sweep.interval_hours,"new_output":self.sweep.output,"scope":"Editable staged inputs for a new experiment; completed recording inputs remain separate"})),"pressure":self.pressure_mode.then(||self.pressure.metadata(r,self.selected,&self.loaded_path)),"balance":self.balance_mode.then(||self.balance.metadata()),"paired_results_visible":self.factorial_mode && !self.pressure_mode && !self.figure_mode && !self.balance_mode,"graph_view":self.graph_metadata(),"graph_layout_visible":self.graph_mode,"figure":self.figure_mode.then(||serde_json::json!({"graph":self.graph_metadata(),"export":self.figure.metadata(),"paired_contrast":self.factorial_mode})),"replay":self.replay.metadata(),"paired_source":self.paired.as_ref().map(|_|&self.paired_source),"paired_selected_analysis":self.paired.as_ref().and_then(|d|d.report_at(self.selected).ok()),"paired_curve":self.paired_curve.as_ref().filter(|(m,_)|*m==self.metric).map(|(_,points)|serde_json::json!({"metric":self.metric.id(),"effect":self.effect.id(),"point_count":points.len(),"available_count":points.iter().filter(|p|self.effect.value(&p.contrasts).is_some()).count(),"selected_point":points.get(self.selected),"pane":self.paired_pane})),"scope":"Independent recorded view at capture request, possibly hidden; no live-world or camera change"}),
-        )
+        let mut metadata = serde_json::json!({"summary":r.summary,"metric":self.metric.id(),"unit":self.metric.unit(),"selected_observation":self.selected,"selected_row":row,"why":self.why_mode.then(||self.why.metadata(&row.habitat,row.simulation_time_s,"recorded_completed_interval")),"selected_value":self.metric.value(row),"comparison":self.comparison.as_ref().map(|b| {let pairs=habitat_comparison::pairs(r,b,self.metric,self.alignment);let pair=&pairs[self.selected.min(pairs.len()-1)];serde_json::json!({"summary":b.summary,"alignment":self.alignment,"selected_pair":pair,"selected_row":pair.b_index.map(|j|&b.rows[j]),"report":habitat_comparison::report(r,b,self.metric,self.alignment)})}),"sweep":self.sweep_manifest,"staged_geometry_thermal_plan":(self.experiment_mode && (self.sweep.parameter.geometry_or_thermal() || self.sweep.paired && self.sweep.secondary_parameter.geometry_or_thermal())).then(||serde_json::json!({"parameter":self.sweep.parameter.id(),"values_text":self.sweep.values,"paired":self.sweep.paired,"secondary_parameter":self.sweep.secondary_parameter.id(),"secondary_values_text":self.sweep.secondary_values,"samples":self.sweep.samples,"interval_hours":self.sweep.interval_hours,"new_output":self.sweep.output,"scope":"Editable staged inputs for a new experiment; completed recording inputs remain separate"})),"pressure":self.pressure_mode.then(||self.pressure.metadata(r,self.selected,&self.loaded_path)),"balance":self.balance_mode.then(||self.balance.metadata()),"paired_results_visible":self.factorial_mode && !self.pressure_mode && !self.figure_mode && !self.balance_mode,"graph_view":self.graph_metadata(),"graph_layout_visible":self.graph_mode,"figure":self.figure_mode.then(||serde_json::json!({"graph":self.graph_metadata(),"export":self.figure.metadata(),"paired_contrast":self.factorial_mode})),"replay":self.replay.metadata(),"paired_source":self.paired.as_ref().map(|_|&self.paired_source),"paired_selected_analysis":self.paired.as_ref().and_then(|d|d.report_at(self.selected).ok()),"paired_curve":self.paired_curve.as_ref().filter(|(m,_)|*m==self.metric).map(|(_,points)|serde_json::json!({"metric":self.metric.id(),"effect":self.effect.id(),"point_count":points.len(),"available_count":points.iter().filter(|p|self.effect.value(&p.contrasts).is_some()).count(),"selected_point":points.get(self.selected),"pane":self.paired_pane})),"scope":"Independent recorded view at capture request, possibly hidden; no live-world or camera change"});
+        if self.metric.is_heat() {
+            let recordings = if self.factorial_mode { self.paired.as_ref().map(|d| d.recordings.iter().collect::<Vec<_>>()).unwrap_or_else(|| vec![r]) } else { std::iter::once(r).chain(self.comparison.as_ref()).collect() };
+            metadata["heat_trajectory_context"] = cosmogon_sim::habitat_heat_trajectory::context(&recordings);
+        }
+        Some(metadata)
     }
 }
 fn value_text(value: Option<f64>) -> String {
@@ -384,6 +387,12 @@ fn value_text(value: Option<f64>) -> String {
             }
         })
         .unwrap_or_else(|| "unavailable".into())
+}
+fn heat_scope(ui: &mut egui::Ui, rows: &[&cosmogon_sim::habitat::Sample], unit: &str) {
+    if let Some(row) = rows.first() {
+        let context = format!("{}\n\nIndividual retained coverage:\n{}", cosmogon_sim::habitat_heat_trajectory::SCOPE, rows.iter().enumerate().map(|(i,row)| format!("{i}: {}",cosmogon_sim::habitat_heat_trajectory::label(row))).collect::<Vec<_>>().join("\n"));
+        ui.label(egui::RichText::new(format!("[{unit}] {}", cosmogon_sim::habitat_heat_trajectory::label(row))).small().color(MUTED)).on_hover_text(context);
+    }
 }
 fn ordinary_series(r:&Recording,b:Option<&Recording>,alignment:Alignment,metric:Metric)->Vec<Vec<super::habitat_graph::Datum>> {
     std::iter::once(r).chain(b).map(|s|s.rows.iter().enumerate().map(|(index,row)|super::habitat_graph::Datum {index,coordinate_s:alignment.coordinate(row.simulation_time_s,s.rows[0].simulation_time_s),value:metric.value(row)}).collect()).collect()
@@ -456,7 +465,11 @@ pub fn panel(
         study.sync_graph_layout();
         if let Some(recording)=&study.recording {
             let data=if study.factorial_mode {study.paired.as_ref().and_then(|d|d.curve(study.metric).ok()).map(|p|paired_series(&p,study.effect,study.alignment)).unwrap_or_default()}else{ordinary_series(recording,study.comparison.as_ref(),study.alignment,study.metric)};
-            study.graph.show(ui,&data,&mut study.selected,study.metric.unit(),100.,true);
+            if study.metric.is_heat() {
+                let rows = if study.factorial_mode { study.paired.as_ref().map(|d| d.recordings.iter().filter_map(|r| r.rows.get(study.selected)).collect::<Vec<_>>()).unwrap_or_default() } else { std::iter::once(recording).chain(study.comparison.as_ref()).filter_map(|r| r.rows.get(study.selected)).collect() };
+                heat_scope(ui, &rows, study.metric.unit());
+            }
+            study.graph.show(ui,&data,&mut study.selected,study.metric.unit(),if study.metric.is_heat(){90.}else{100.},true);
             let busy=study.task.is_some() || study.sweep_task.is_some() || study.comparison_task.is_some();
             if study.figure.controls(ui,busy) {let figure=study.prepare_figure();study.figure.start(figure);}
         }else{ui.label("Open an actual recording first.");}
@@ -536,6 +549,7 @@ pub fn panel(
         study.graph.layout.metric=study.metric.id().into();
         study.graph.layout.alignment=match study.alignment{Alignment::Elapsed=>"elapsed",Alignment::World=>"world"}.into();
         ui.label(format!("{} ({}) vs {}",study.metric.label(),study.metric.unit(),if study.alignment==Alignment::Elapsed{"elapsed time"}else{"world time since J2000"}));
+        if study.metric.is_heat() { heat_scope(ui, &std::iter::once(r).chain(study.comparison.as_ref()).filter_map(|r| r.rows.get(study.selected)).collect::<Vec<_>>(), study.metric.unit()); }
         study.graph.show(ui,&data,&mut study.selected,study.metric.unit(),120.,true);
         ui.add(
             egui::Slider::new(&mut study.selected, 0..=r.rows.len() - 1).text("Observation index"),
@@ -574,6 +588,10 @@ pub fn panel(
                 match pair.support {
                     "matched" => "Matched stored observation",
                     "no_exact_timestamp" => "No observation at this exact time",
+                    "different_heat_origin" => "Different heat origins; subtraction unavailable",
+                    "different_heat_completed_end" => "Different heat completion times; subtraction unavailable",
+                    "incomplete_heat_coverage" => "Excluded heat intervals; subtraction unavailable",
+                    "different_heat_execution" => "Different executed heat duration; subtraction unavailable",
                     "different_interval_support" =>
                         "Different completed intervals; subtraction unavailable",
                     _ => "One recorded value is unavailable",
@@ -741,6 +759,7 @@ fn paired_results(ui:&mut egui::Ui,study:&mut Study) {
         match design.curve(study.metric) {Ok(points)=>study.paired_curve=Some((study.metric,points)),Err(e)=>{ui.colored_label(ACCENT,e);return;}}
     }
     let points=&study.paired_curve.as_ref().expect("prepared curve").1;
+    if study.metric.is_heat() { heat_scope(ui, &design.recordings.iter().filter_map(|r| r.rows.get(study.selected)).collect::<Vec<_>>(), study.metric.unit()); }
     if study.paired_pane==0 {
         study.graph.layout.metric=study.metric.id().into();study.graph.layout.effect=study.effect.id().into();
         let data=paired_series(points,study.effect,study.alignment);
@@ -758,7 +777,7 @@ fn paired_results(ui:&mut egui::Ui,study:&mut Study) {
     else {egui::Grid::new("paired-contrasts").striped(true).show(ui,|ui| {
         for (label,value) in [("A change at B0",c.a_at_b0),("A change at B1",c.a_at_b1),("B change at A0",c.b_at_a0),("B change at A1",c.b_at_a1),("Average A change",c.average_a),("Average B change",c.average_b),("Difference of conditional A changes",c.difference_in_differences),("Standard AB effect (half that difference)",c.standard_ab_effect)] {ui.label(label);ui.strong(value_text(value));ui.end_row();}
     });}
-    if point.branch_support.iter().any(|s|*s!="matched") {ui.colored_label(ACCENT,"Contrast unavailable: missing value or mismatched interval support.");}
+    if point.branch_support.iter().any(|s|*s!="matched") {ui.colored_label(ACCENT,if study.metric.is_heat() {"Contrast unavailable: ledger origin, execution coverage or completed-time mismatch; branch values remain retained."} else {"Contrast unavailable: missing value or mismatched interval support."});}
     ui.label(egui::RichText::new("Stored model results · gaps remain unavailable · sources/export in Files & method").small().color(MUTED));
 }
 
@@ -918,6 +937,17 @@ fn experiment(
 mod tests {
     use super::*;
 
+    #[test]
+    fn selected_heat_figure_keeps_loaded_coverage_and_unopened_path_separate() {
+        let mut h=cosmogon_sim::habitat::Habitat::new(0,cosmogon_sim::habitat::Definition::at(cosmogon_sim::BodyRef {system:0,body:0},0.,0.),1000.).unwrap();
+        let first=cosmogon_sim::habitat::Sample {simulation_time_s:1000.,habitat:h.clone()};
+        h.step(1060.,cosmogon_sim::habitat::Environment::default()).unwrap();
+        let r=Recording {rows:vec![first,cosmogon_sim::habitat::Sample {simulation_time_s:1060.,habitat:h}],summary:serde_json::json!({"source":"actual loaded heat"})};
+        let mut study=Study {figure_mode:true,metric:Metric::HeatExcluded,..Default::default()};
+        study.commit(r.clone(),"loaded heat folder".into(),Some(1)).unwrap();study.path="unopened folder".into();
+        let f=study.prepare_figure().unwrap();assert_eq!(f.exact_samples,vec![r.rows]);assert_eq!(f.series[0].points[1].value,Some(60.));assert_eq!(f.series[0].points[1].support,"available_executed_subset");
+        let m=study.metadata().unwrap();assert_eq!(m["selected_value"],60.);assert_eq!(m["heat_trajectory_context"]["series"][0]["observations"][1]["coverage"]["environment_missing_seconds"],60.);
+    }
     #[test]
     fn balance_uses_actual_loaded_inputs_and_invalid_ranges_preserve_view() {
         let h=cosmogon_sim::habitat::Habitat::new(0,cosmogon_sim::habitat::Definition::at(cosmogon_sim::BodyRef{system:0,body:0},0.,0.),1000.).unwrap();let r=Recording{rows:vec![cosmogon_sim::habitat::Sample{simulation_time_s:1000.,habitat:h}],summary:serde_json::json!({"source":"actual"})};let mut study=Study{balance_mode:true,..Default::default()};study.commit(r.clone(),"actual-loaded".into(),None).unwrap();study.path="unopened-editable-path".into();

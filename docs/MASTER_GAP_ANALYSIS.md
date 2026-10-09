@@ -91,4 +91,6 @@ New work must meet the relevant definitions of done; partial implementations rem
 
 [Detailed graphics requirement](GRAPHICS_GOAL_SUPPLEMENT.md) is part of the continuing product goal. Preserve the original master document and add this requirement through the existing rendering/planet/civilization phases. Every visitable cosmic body needs rich animated close-up detail in Cosmogon's style; procedural activity is permitted, with honest data provenance. **Queued: cabin/research builds continue first**, as explicitly directed by the owner.
 
-29. **Selected cumulative heat trajectories (next, partial phase 9/16):** actual retained signed heat/storage curves, explicit execution coverage/origins, supported four-branch contrasts and protected shared native/CLI research figures. Preserve immutable existing metric catalogs and final analyses.
+29. **Selected cumulative heat trajectories (built, partial phase 9/16):** actual retained signed heat/storage curves, explicit execution coverage/origins, supported four-branch contrasts and protected shared native/CLI research figures. Preserve immutable existing metric catalogs and final analyses.
+
+30. **Finite crop-supply studies (next, partial phase 9/16):** explicit finite liquid/CO₂/nutrient-equivalent/lighting budgets, source-based recipe projections and daily support brackets over unchanged maintained-regime forecasts. Preserve legacy definitions and separate planning from physical greenhouse stocks/stress.
