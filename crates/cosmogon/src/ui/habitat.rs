@@ -395,7 +395,7 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
         Some("habitat-water") => 6,
         Some("habitat-breach"|"habitat-breach-settings"|"habitat-breach-model")=>10,
         Some("habitat-humidity"|"habitat-humidity-settings"|"habitat-humidity-model")=>9,
-        Some("habitat-figure"|"habitat-paired"|"habitat-paired-table"|"habitat-paired-files"|"habitat-paired-replay"|"habitat-graph-layout"|"habitat-recordings"|"habitat-recording-pressure"|"habitat-recording-pressure-change"|"habitat-recording-pressure-breach"|"habitat-recording-pressure-files"|"habitat-experiments"|"habitat-recording-why"|"habitat-recording-why-water"|"habitat-recording-why-heat"|"habitat-recording-why-air"|"habitat-recording-why-evidence") => 7,
+        Some("habitat-recording-balance"|"habitat-recording-balance-electricity"|"habitat-recording-balance-temperature"|"habitat-recording-balance-counters"|"habitat-recording-balance-files"|"habitat-figure"|"habitat-paired"|"habitat-paired-table"|"habitat-paired-files"|"habitat-paired-replay"|"habitat-graph-layout"|"habitat-recordings"|"habitat-recording-pressure"|"habitat-recording-pressure-change"|"habitat-recording-pressure-breach"|"habitat-recording-pressure-files"|"habitat-experiments"|"habitat-recording-why"|"habitat-recording-why-water"|"habitat-recording-why-heat"|"habitat-recording-why-air"|"habitat-recording-why-evidence") => 7,
         _ => 0,
     };
     form.breach_pane=match args.panel.as_deref(){Some("habitat-breach-settings")=>1,Some("habitat-breach-model")=>2,_=>0};
@@ -403,6 +403,10 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
     form.crop.pane=match args.panel.as_deref() {Some("greenhouse-inputs")=>1,Some("greenhouse-compare")=>2,Some("greenhouse-model")=>3,Some("greenhouse-files")=>4,_=>0};
     form.crop.graph=match args.panel.as_deref() {Some("greenhouse-water")=>3,Some("greenhouse-daily-water")=>4,_=>0};
     form.why.section=match args.panel.as_deref(){Some("habitat-why-water")=>1,Some("habitat-why-heat")=>2,Some("habitat-why-air")=>3,Some("habitat-why-evidence")=>4,_=>0};
+    form.recording.balance_mode=args.panel.as_deref().is_some_and(|p|p.starts_with("habitat-recording-balance")) || args.habitat_balance_output.is_some() || args.habitat_balance_from.is_some();
+    form.recording.balance.from=args.habitat_balance_from.unwrap_or(0);form.recording.balance.to=args.habitat_sample;
+    form.recording.balance.pane=match args.panel.as_deref(){Some("habitat-recording-balance-electricity")=>1,Some("habitat-recording-balance-temperature")=>2,Some("habitat-recording-balance-counters")=>3,Some("habitat-recording-balance-files")=>4,_=>0};
+    if let Some(output)=&args.habitat_balance_output {form.recording.balance.output=output.clone();form.recording.balance.launch=true;}
     form.recording.figure_mode=args.panel.as_deref()==Some("habitat-figure") || args.habitat_figure_output.is_some();
     if let Some(output)=&args.habitat_figure_output {form.recording.figure.output=output.clone();form.recording.figure.launch=true;}
     form.recording.pressure_mode=args.panel.as_deref().is_some_and(|p|p.starts_with("habitat-recording-pressure"));

@@ -38,6 +38,8 @@ pub struct Args {
     pub habitat_audio_export: Option<String>,
     pub habitat_recording: Option<String>,
     pub habitat_figure_output: Option<String>,
+    pub habitat_balance_output: Option<String>,
+    pub habitat_balance_from: Option<usize>,
     pub habitat_compare: Option<String>,
     pub habitat_alignment: Option<String>,
     pub habitat_sweep: Option<String>,
@@ -149,6 +151,8 @@ impl Args {
                 "--habitat-audio" => {let v=val();a.habitat_audio=Some(v.parse().unwrap_or(u64::MAX));},
                 "--habitat-audio-export" => a.habitat_audio_export=Some(val()),
                 "--habitat-alignment" => a.habitat_alignment=Some(val()),
+                "--habitat-balance-output" => a.habitat_balance_output=Some(val()),
+                "--habitat-balance-from" => a.habitat_balance_from=Some(val().parse().unwrap_or(usize::MAX)),
                 "--habitat-figure-output" => a.habitat_figure_output=Some(val()),
                 "--habitat-sweep" => a.habitat_sweep=Some(val()),
                 "--habitat-study-output" => a.habitat_study_output=Some(val()),
@@ -227,6 +231,11 @@ impl Args {
         if self.habitat_compare.is_some() && self.habitat_recording.is_none() {return Err("--habitat-compare requires --habitat-recording A".into());}
         if self.habitat_alignment.is_some() && self.habitat_compare.is_none() && self.habitat_sweep.is_none() {return Err("--habitat-alignment requires a comparison or sweep".into());}
         if let Some(a)=&self.habitat_alignment {cosmogon_sim::habitat_comparison::Alignment::parse(a)?;}
+        if self.habitat_balance_from.is_some() && self.habitat_recording.is_none() && self.habitat_sweep.is_none() {return Err("--habitat-balance-from requires recorded or sweep evidence".into());}
+        if self.habitat_balance_from.is_some_and(|n|n>=1024) {return Err("--habitat-balance-from must be between 0 and 1023".into());}
+        if self.habitat_balance_from.zip(self.habitat_sample).is_some_and(|(a,b)|a>b) {return Err("Choose ordered balance observations".into());}
+        if let Some(output)=&self.habitat_balance_output {if output.trim().is_empty() || self.habitat_recording.is_none() && self.habitat_sweep.is_none() {return Err("--habitat-balance-output requires recorded or sweep evidence and a nonempty new folder".into());}}
+        if self.habitat_balance_output.is_some() && self.habitat_figure_output.is_some() {return Err("Choose one automatic recorded export at a time".into());}
         if let Some(output)=&self.habitat_figure_output {
             if output.trim().is_empty() || self.habitat_recording.is_none() && self.habitat_sweep.is_none() {return Err("--habitat-figure-output requires a recording/sweep and a nonempty new folder".into());}
         }
@@ -255,6 +264,12 @@ impl Args {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn balance_export_needs_evidence_and_ordered_indices() {
+        for v in [vec!["--habitat-balance-output"],vec!["--habitat-balance-output","new"],vec!["--habitat-recording","x","--habitat-balance-output"," "],vec!["--habitat-recording","x","--habitat-balance-from","nan"],vec!["--habitat-recording","x","--habitat-balance-from","1024"],vec!["--habitat-recording","x","--habitat-balance-from","3","--habitat-sample","2"]] {assert!(Args::parse_from(v.into_iter().map(String::from)).validate_surface().is_err());}
+        assert!(Args::parse_from(["--habitat-recording","x","--habitat-balance-from","0","--habitat-balance-output","new"].into_iter().map(String::from)).validate_surface().is_ok());
+    }
     #[test]
     fn figure_launch_requires_recorded_context_and_nonempty_new_folder() {
         for v in [vec!["--habitat-figure-output"],vec!["--habitat-figure-output","new"],vec!["--habitat-recording","x","--habitat-figure-output"," "]] {assert!(Args::parse_from(v.into_iter().map(String::from)).validate_surface().is_err());}

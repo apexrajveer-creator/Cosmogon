@@ -83,7 +83,9 @@ New work must meet the relevant definitions of done; partial implementations rem
 
 26. **Recorded research figures (built, partial phase 16):** protected vector diagrams backed by exact original numbers, support/scale omissions, display definitions, full retained observations/source identity and paired method context. Share native/CLI plotting without smoothing or invented uncertainty. Improve small-signal range/tick clarity while preserving raw results.
 
-27. **Recorded habitat balances (next, partial phase 9/16):** exact endpoint stocks and retained cumulative electrical/crew counters, mass and electrical closure, all four independent paired branches, protected shared native/CLI exports. Do not integrate sparse sampled minute budgets into a complete history.
+27. **Recorded habitat balances (built, partial phase 9/16):** exact endpoint stocks and retained cumulative electrical/crew counters, mass and electrical closure, all four independent paired branches, protected shared native/CLI exports. Do not integrate sparse sampled minute budgets into a complete history.
+
+28. **Cumulative cabin heat accounting (next, partial phase 9/16):** retain actual signed heat transfers on every completed modeled interval, explicit coverage/legacy availability and shared native/CLI span explanations. Preserve existing thermal physics and expose residuals; never reconstruct a complete ledger from sparse minute samples.
 
 ## Owner graphics goal supplement (2026-10-09)
 

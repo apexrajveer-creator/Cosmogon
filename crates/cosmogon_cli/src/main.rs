@@ -25,6 +25,7 @@ struct Args {
     recording: Option<String>,
     observation: Option<usize>,
     reference_index: Option<usize>,
+    from_index: Option<usize>,
     reference: Option<String>,
     site: Option<String>,
     mars_terrain: Option<String>,
@@ -66,6 +67,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         recording: None,
         observation: None,
         reference_index: None,
+        from_index: None,
         reference: None,
         site: None,
         mars_terrain: None,
@@ -122,6 +124,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if a.cmd=="greenhouse-definition" && flag!="--output" {return Err(format!("{flag} is not a greenhouse-definition option"));}
         if a.cmd=="habitat-diagnose" && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
         if a.cmd=="habitat-verify" && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a habitat replay verification option"));}
+        if a.cmd=="habitat-balance" && !matches!(flag.as_str(),"--recording"|"--from-index"|"--observation"|"--output") {return Err(format!("{flag} is not a recorded balance option"));}
         if a.cmd=="habitat-figure" && !matches!(flag.as_str(),"--recording"|"--reference"|"--definition"|"--output") {return Err(format!("{flag} is not a recorded figure option"));}
         if a.cmd=="habitat-pressure" && !matches!(flag.as_str(),"--recording"|"--observation"|"--reference-index"|"--output") {return Err(format!("{flag} is not a recorded pressure option"));}
         if a.cmd=="habitat-inspect" && !matches!(flag.as_str(),"--recording"|"--observation"|"--output") {return Err(format!("{flag} is not a habitat inspection option"));}
@@ -148,7 +151,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--longitude" => { a.longitude = number(val()?, &flag)?; explicit_coordinates = true; },
             "--reference" => a.reference = Some(val()?),
             "--recording" => a.recording = Some(val()?),
-            "--observation" => {if !matches!(a.cmd.as_str(),"habitat-inspect"|"habitat-pressure") {return Err("--observation requires habitat-inspect or habitat-pressure".into());}let n=number::<usize>(val()?,&flag)?;if n>=1024 {return Err("Observation index must be between 0 and 1023".into());}a.observation=Some(n);},
+            "--observation" => {if !matches!(a.cmd.as_str(),"habitat-inspect"|"habitat-pressure"|"habitat-balance") {return Err("--observation requires habitat-inspect or habitat-pressure".into());}let n=number::<usize>(val()?,&flag)?;if n>=1024 {return Err("Observation index must be between 0 and 1023".into());}a.observation=Some(n);},
+            "--from-index" => {if a.cmd!="habitat-balance" {return Err("--from-index requires habitat-balance".into());} let n=number::<usize>(val()?,&flag)?;if n>=1024{return Err("Initial index must be between 0 and 1023".into());}a.from_index=Some(n);},
             "--reference-index" => {if a.cmd!="habitat-pressure" {return Err("--reference-index requires habitat-pressure".into());}let n=number::<usize>(val()?,&flag)?;if n>=1024 {return Err("Reference index must be between 0 and 1023".into());}a.reference_index=Some(n);},
             "--initial" => a.initial = Some(val()?),
             "--habitat-id" => {if !matches!(a.cmd.as_str(),"habitat"|"habitat-sweep"|"greenhouse"|"habitat-diagnose") {return Err("--habitat-id requires habitat, habitat-sweep, habitat-diagnose or greenhouse".into());}a.habitat_id=Some(number(val()?,&flag)?);},
@@ -203,6 +207,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     if a.cmd=="habitat-diagnose" && (a.initial.is_none() || a.habitat_id.is_none()) {return Err("habitat-diagnose requires --initial SAVE and explicit --habitat-id ID".into());}
     if a.cmd=="habitat-verify" && a.recording.is_none() {return Err("habitat-verify requires --recording COMPLETE_PAIRED_FOLDER".into());}
     if a.cmd=="habitat-pressure" && (a.recording.is_none() || a.observation.is_none()) {return Err("habitat-pressure requires --recording ORDINARY_BRANCH_FOLDER and --observation INDEX".into());}
+    if a.cmd=="habitat-balance" && a.recording.is_none() {return Err("habitat-balance requires --recording FOLDER".into());}
+    if a.cmd=="habitat-balance" && a.from_index.zip(a.observation).is_some_and(|(a,b)|a>b) {return Err("Choose ordered balance indices".into());}
     if a.cmd=="habitat-figure" && (a.recording.is_none() || a.definition.is_none() || a.output.is_none()) {return Err("habitat-figure requires --recording FOLDER --definition GRAPH_LAYOUT --output NEW_DIR".into());}
     if a.cmd=="habitat-inspect" && a.recording.is_none() {return Err("habitat-inspect requires --recording STUDY_FOLDER".into());}
     if a.cmd=="habitat" {
@@ -242,6 +248,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     Ok(a)
 }
 fn help() {
+    eprintln!("cosmogon-cli habitat-balance --recording FOLDER [--from-index N] [--observation N] [--output NEW_DIR]");
     eprintln!("cosmogon-cli habitat-figure --recording FOLDER --definition GRAPH_LAYOUT --output NEW_DIR [--reference ORDINARY_B]");
     eprintln!("cosmogon-cli habitat-sweep --initial SAVE --output NEW_DIR --parameter firm_power_w --from 0 --to 4000 --runs 3 [--samples 25 --interval-days 0.041666666666666664]\n  or --definition SWEEP_PLAN; optional --habitat-id ID\ncosmogon-cli habitat-compare --recording A --reference B [--measure water --alignment elapsed|world --output NEW_DIR]");
     eprintln!("cosmogon-cli habitat-diagnose --initial SAVE --habitat-id ID [--output NEW_DIR]   # explain completed power/water/heat");
@@ -347,6 +354,14 @@ fn main() {
             let inspected=habitat_inspect(&a);
             match inspected {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).unwrap()),Err(e)=>{eprintln!("Habitat inspection failed: {e}");std::process::exit(1);}}
         },
+        "habitat-balance" => {
+            let result=(||->Result<serde_json::Value,String>{
+                let b=cosmogon_sim::habitat_balance::Bundle::read(std::path::Path::new(a.recording.as_deref().expect("validated recording")),a.from_index,a.observation)?;
+                if let Some(output)=&a.output {b.export(std::path::Path::new(output))?;}
+                serde_json::to_value(b).map_err(|e|e.to_string())
+            })();
+            match result {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).unwrap()),Err(e)=>{eprintln!("Recorded balance failed: {e}");std::process::exit(1);}}
+        }
         "habitat-figure" => {
             let result=(|| {let layout=cosmogon_sim::habitat_graph::Layout::read(std::path::Path::new(a.definition.as_deref().expect("validated layout")))?;
                 let figure=cosmogon_sim::habitat_figure::Figure::read(std::path::Path::new(a.recording.as_deref().expect("validated recording")),a.reference.as_deref().map(std::path::Path::new),&layout)?;
@@ -805,6 +820,12 @@ mod argument_tests {
     use super::*;
     fn args(values: &[&str]) -> Result<Args, String> {
         parse_args(values.iter().map(|s| s.to_string()))
+    }
+
+    #[test]
+    fn balance_arguments_are_explicit_and_ordered() {
+        for v in [vec!["habitat-balance"],vec!["habitat-balance","--recording","x","--from-index","nan"],vec!["habitat-balance","--recording","x","--from-index","1024"],vec!["habitat-balance","--recording","x","--from-index","3","--observation","2"],vec!["habitat-balance","--recording","x","--samples","3"],vec!["habitat-balance","--recording","x","--reference","b"]] {assert!(args(&v).is_err());}
+        let a=args(&["habitat-balance","--recording","x","--from-index","2","--observation","3","--output","new"]).unwrap();assert_eq!(a.from_index,Some(2));assert_eq!(a.observation,Some(3));
     }
     #[test]
     fn figures_require_exact_layout_recording_and_new_output_and_refuse_ignored_flags() {

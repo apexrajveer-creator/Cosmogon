@@ -103,6 +103,8 @@ pub struct Study {
     paired_output: String,
     paired_source: String,
     paired_export: Option<Task<Result<(),String>>>,
+    pub balance_mode:bool,
+    pub balance:super::habitat_balance::View,
     pub figure_mode:bool,
     pub figure:super::habitat_figure::View,
     pub pressure_mode:bool,
@@ -161,7 +163,7 @@ impl Study {
         self.status = Some("Checking recorded sources, endpoints and observations…".into());
     }
     pub fn pending(&self) -> bool {
-        self.figure.pending() || self.pressure.pending() || self.replay.pending() || self.paired_export.is_some() || self.task.is_some()
+        self.balance.pending() || self.figure.pending() || self.pressure.pending() || self.replay.pending() || self.paired_export.is_some() || self.task.is_some()
             || self.comparison_task.is_some()
             || self.sweep_task.is_some()
             || self.launch.is_some()
@@ -254,6 +256,7 @@ impl Study {
             // Reopening a plan does not nominate its existing output for another write.
             self.sweep.output.clear();
         }
+        self.balance.reset();
         self.recording = Some(result.a);
         self.comparison = Some(result.b);
         self.selected = index;
@@ -274,6 +277,7 @@ impl Study {
         if selected >= r.rows.len() {
             return Err("Requested observation index is outside the recording".into());
         }
+        self.balance.reset();
         self.sweep_manifest = None;
         self.paired=None;self.paired_curve=None;self.replay.reset();
         self.factorial_mode = false;
@@ -285,7 +289,7 @@ impl Study {
         Ok(())
     }
     pub fn poll(&mut self) {
-        self.figure.poll();self.pressure.poll();self.why.poll();self.replay.poll();
+        self.balance.poll();self.figure.poll();self.pressure.poll();self.why.poll();self.replay.poll();
         if let Some(result)=self.paired_export.as_mut().and_then(|task|block_on(future::poll_once(task))) {
             self.paired_export=None;
             self.status=Some(match result {Ok(())=>"Protected paired trajectory analysis exported; observations are unchanged.".into(),Err(e)=>format!("Trajectory export failed: {e}. Recorded views are preserved.")});
@@ -315,6 +319,7 @@ impl Study {
             self.comparison_task = None;
             match result {
                 Ok(r) => {
+                    self.balance.reset();
                     self.sweep_manifest = None;
                     self.paired=None;self.paired_curve=None;self.replay.reset();
                     self.factorial_mode = false;
@@ -339,12 +344,22 @@ impl Study {
                 self.status=Some(format!("Sweep failed: {e}. Previous recorded views are preserved. A folder without completion manifest is incomplete."));
             }
         }
+        if (self.balance_mode || self.balance.launch) && self.launch.is_none() && self.task.is_none() && self.sweep_task.is_none() && self.comparison_task.is_none() {
+            if !self.balance.prepared {let b=self.prepare_balance();self.balance.set(b);}
+            if self.balance.launch {let source=if self.paired.is_some(){self.paired_source.clone()}else{self.loaded_path.clone()};self.balance.start(&source);}
+        }
         if self.figure.launch && self.launch.is_none() && self.task.is_none() && self.sweep_task.is_none() && self.comparison_task.is_none() {
             let figure=self.prepare_figure();self.figure.start(figure);
         }
         if self.replay.launch && self.paired.is_some() && self.task.is_none() && self.comparison_task.is_none() && self.sweep_task.is_none() {
             self.replay.start(self.paired_source.clone());
         }
+    }
+    fn prepare_balance(&self)->Result<cosmogon_sim::habitat_balance::Bundle,String> {
+        let r=self.recording.as_ref().ok_or("Open a recording or paired design first")?;
+        let end=self.balance.to.unwrap_or(r.rows.len().saturating_sub(1));
+        if let Some(d)=&self.paired {cosmogon_sim::habitat_balance::Bundle::paired(d,self.balance.from,end)}
+        else {cosmogon_sim::habitat_balance::Bundle::ordinary(r,self.balance.from,end)}
     }
     fn prepare_figure(&self)->Result<cosmogon_sim::habitat_figure::Figure,String> {
         let mut layout=self.graph.layout.clone();layout.metric=self.metric.id().into();layout.effect=self.effect.id().into();layout.alignment=match self.alignment {Alignment::Elapsed=>"elapsed",Alignment::World=>"world"}.into();
@@ -355,7 +370,7 @@ impl Study {
         let r = self.recording.as_ref()?;
         let row = &r.rows[self.selected.min(r.rows.len() - 1)];
         Some(
-            serde_json::json!({"summary":r.summary,"metric":self.metric.id(),"unit":self.metric.unit(),"selected_observation":self.selected,"selected_row":row,"why":self.why_mode.then(||self.why.metadata(&row.habitat,row.simulation_time_s,"recorded_completed_interval")),"selected_value":self.metric.value(row),"comparison":self.comparison.as_ref().map(|b| {let pairs=habitat_comparison::pairs(r,b,self.metric,self.alignment);let pair=&pairs[self.selected.min(pairs.len()-1)];serde_json::json!({"summary":b.summary,"alignment":self.alignment,"selected_pair":pair,"selected_row":pair.b_index.map(|j|&b.rows[j]),"report":habitat_comparison::report(r,b,self.metric,self.alignment)})}),"sweep":self.sweep_manifest,"staged_geometry_thermal_plan":(self.experiment_mode && (self.sweep.parameter.geometry_or_thermal() || self.sweep.paired && self.sweep.secondary_parameter.geometry_or_thermal())).then(||serde_json::json!({"parameter":self.sweep.parameter.id(),"values_text":self.sweep.values,"paired":self.sweep.paired,"secondary_parameter":self.sweep.secondary_parameter.id(),"secondary_values_text":self.sweep.secondary_values,"samples":self.sweep.samples,"interval_hours":self.sweep.interval_hours,"new_output":self.sweep.output,"scope":"Editable staged inputs for a new experiment; completed recording inputs remain separate"})),"pressure":self.pressure_mode.then(||self.pressure.metadata(r,self.selected,&self.loaded_path)),"paired_results_visible":self.factorial_mode && !self.pressure_mode && !self.figure_mode,"graph_view":self.graph_metadata(),"graph_layout_visible":self.graph_mode,"figure":self.figure_mode.then(||serde_json::json!({"graph":self.graph_metadata(),"export":self.figure.metadata(),"paired_contrast":self.factorial_mode})),"replay":self.replay.metadata(),"paired_source":self.paired.as_ref().map(|_|&self.paired_source),"paired_selected_analysis":self.paired.as_ref().and_then(|d|d.report_at(self.selected).ok()),"paired_curve":self.paired_curve.as_ref().filter(|(m,_)|*m==self.metric).map(|(_,points)|serde_json::json!({"metric":self.metric.id(),"effect":self.effect.id(),"point_count":points.len(),"available_count":points.iter().filter(|p|self.effect.value(&p.contrasts).is_some()).count(),"selected_point":points.get(self.selected),"pane":self.paired_pane})),"scope":"Independent recorded view at capture request, possibly hidden; no live-world or camera change"}),
+            serde_json::json!({"summary":r.summary,"metric":self.metric.id(),"unit":self.metric.unit(),"selected_observation":self.selected,"selected_row":row,"why":self.why_mode.then(||self.why.metadata(&row.habitat,row.simulation_time_s,"recorded_completed_interval")),"selected_value":self.metric.value(row),"comparison":self.comparison.as_ref().map(|b| {let pairs=habitat_comparison::pairs(r,b,self.metric,self.alignment);let pair=&pairs[self.selected.min(pairs.len()-1)];serde_json::json!({"summary":b.summary,"alignment":self.alignment,"selected_pair":pair,"selected_row":pair.b_index.map(|j|&b.rows[j]),"report":habitat_comparison::report(r,b,self.metric,self.alignment)})}),"sweep":self.sweep_manifest,"staged_geometry_thermal_plan":(self.experiment_mode && (self.sweep.parameter.geometry_or_thermal() || self.sweep.paired && self.sweep.secondary_parameter.geometry_or_thermal())).then(||serde_json::json!({"parameter":self.sweep.parameter.id(),"values_text":self.sweep.values,"paired":self.sweep.paired,"secondary_parameter":self.sweep.secondary_parameter.id(),"secondary_values_text":self.sweep.secondary_values,"samples":self.sweep.samples,"interval_hours":self.sweep.interval_hours,"new_output":self.sweep.output,"scope":"Editable staged inputs for a new experiment; completed recording inputs remain separate"})),"pressure":self.pressure_mode.then(||self.pressure.metadata(r,self.selected,&self.loaded_path)),"balance":self.balance_mode.then(||self.balance.metadata()),"paired_results_visible":self.factorial_mode && !self.pressure_mode && !self.figure_mode && !self.balance_mode,"graph_view":self.graph_metadata(),"graph_layout_visible":self.graph_mode,"figure":self.figure_mode.then(||serde_json::json!({"graph":self.graph_metadata(),"export":self.figure.metadata(),"paired_contrast":self.factorial_mode})),"replay":self.replay.metadata(),"paired_source":self.paired.as_ref().map(|_|&self.paired_source),"paired_selected_analysis":self.paired.as_ref().and_then(|d|d.report_at(self.selected).ok()),"paired_curve":self.paired_curve.as_ref().filter(|(m,_)|*m==self.metric).map(|(_,points)|serde_json::json!({"metric":self.metric.id(),"effect":self.effect.id(),"point_count":points.len(),"available_count":points.iter().filter(|p|self.effect.value(&p.contrasts).is_some()).count(),"selected_point":points.get(self.selected),"pane":self.paired_pane})),"scope":"Independent recorded view at capture request, possibly hidden; no live-world or camera change"}),
         )
     }
 }
@@ -393,9 +408,9 @@ pub fn panel(
         ui.selectable_value(&mut study.experiment_mode, true, "Run experiment");
     });
     if !study.experiment_mode {
-        let current=if study.figure_mode {5}else if study.pressure_mode {4}else if study.graph_mode {3}else if study.factorial_mode {2}else if study.why_mode {1}else{0};
+        let current=if study.balance_mode {6}else if study.figure_mode {5}else if study.pressure_mode {4}else if study.graph_mode {3}else if study.factorial_mode {2}else if study.why_mode {1}else{0};
         let mut chosen=current;
-        let labels=["Curves & comparison","WHY selected interval","Paired results","Graph layout","Pressure components","Research figure"];
+        let labels=["Curves & comparison","WHY selected interval","Paired results","Graph layout","Pressure components","Research figure","Cabin balances"];
         egui::ComboBox::from_id_salt("recorded-habitat-view").selected_text(labels[current]).show_ui(ui,|ui|{
             for (index,label) in labels.iter().enumerate() {
                 if index==2 && !study.sweep_manifest.as_ref().is_some_and(|m|m["factorial_analysis"].is_object()) {continue;}
@@ -404,12 +419,18 @@ pub fn panel(
             }
         });
         if chosen!=current {
+            study.balance_mode=chosen==6;
             study.figure_mode=chosen==5;
             study.pressure_mode=chosen==4;
             study.graph_mode=chosen==3;
             study.why_mode=chosen==1;
             if chosen<=2 {study.factorial_mode=chosen==2;}
         }
+    }
+    if study.balance_mode && !study.experiment_mode {
+        let source=if study.paired.is_some(){study.paired_source.clone()}else{study.loaded_path.clone()};let count=study.recording.as_ref().map_or(0,|r|r.rows.len());
+        ui.scope(|ui|{ui.spacing_mut().item_spacing.y=3.;study.balance.show(ui,&source,count,study.task.is_some() || study.sweep_task.is_some() || study.comparison_task.is_some());});
+        return;
     }
     if study.figure_mode && !study.experiment_mode {
         ui.scope(|ui| {
@@ -896,6 +917,15 @@ fn experiment(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn balance_uses_actual_loaded_inputs_and_invalid_ranges_preserve_view() {
+        let h=cosmogon_sim::habitat::Habitat::new(0,cosmogon_sim::habitat::Definition::at(cosmogon_sim::BodyRef{system:0,body:0},0.,0.),1000.).unwrap();let r=Recording{rows:vec![cosmogon_sim::habitat::Sample{simulation_time_s:1000.,habitat:h}],summary:serde_json::json!({"source":"actual"})};let mut study=Study{balance_mode:true,..Default::default()};study.commit(r.clone(),"actual-loaded".into(),None).unwrap();study.path="unopened-editable-path".into();
+        let b=study.prepare_balance().unwrap();assert_eq!(b.reports[0].initial,r.rows[0]);assert_eq!(b.reports[0].final_sample,*r.rows.last().unwrap());study.balance.set(Ok(b.clone()));
+        let first=study.metadata().unwrap();assert_eq!(first["balance"]["report"]["reports"][0]["recording"],r.summary);assert!(!first["paired_results_visible"].as_bool().unwrap());
+        study.balance.from=r.rows.len();assert!(study.prepare_balance().is_err());assert_eq!(study.recording.as_ref().unwrap().rows,r.rows);
+        study.balance.launch=true;study.recording=None;study.balance.reset();study.poll();assert!(!study.balance.pending());
+    }
     #[test]
     fn figure_request_freezes_actual_recording_layout_and_never_uses_unopened_paths() {
         let h=cosmogon_sim::habitat::Habitat::new(0,cosmogon_sim::habitat::Definition::at(cosmogon_sim::BodyRef {system:0,body:0},0.,0.),1000.).unwrap();

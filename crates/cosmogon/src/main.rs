@@ -62,6 +62,10 @@ fn main() -> bevy::app::AppExit {
             .map_err(|e|e.to_string()).and_then(|u|habitat_audio::export(&u,args.habitat_audio.expect("validated audio id"),std::path::Path::new(output)));
         return match result {Ok(())=>{println!("Saved habitat sound preview to {output}");AppExit::Success},Err(e)=>{eprintln!("Cannot export habitat sound: {e}");AppExit::error()}};
     }
+    if args.habitat_balance_output.as_ref().is_some_and(|p|std::path::Path::new(p.trim()).exists()) {eprintln!("Existing recorded balances are protected; choose a new folder");return AppExit::error();}
+    if args.habitat_balance_from.is_some() || args.habitat_balance_output.is_some() || args.panel.as_deref().is_some_and(|p|p.starts_with("habitat-recording-balance")) {
+        if let Some(path)=&args.habitat_recording {if let Err(e)=cosmogon_sim::habitat_balance::Bundle::read(std::path::Path::new(path),args.habitat_balance_from,args.habitat_sample){eprintln!("Cannot open recorded balance: {e}");return AppExit::error();}}
+    }
     if args.habitat_figure_output.as_ref().is_some_and(|p|std::path::Path::new(p.trim()).exists()) {eprintln!("Existing recorded figures are protected; choose a new folder");return AppExit::error();}
     if let Some(path)=&args.habitat_graph {if let Err(e)=ui::habitat_graph::Layout::read(std::path::Path::new(path)){eprintln!("Cannot open recorded graph layout: {e}");return AppExit::error();}}
     if let Some(index)=args.habitat_pressure_reference {

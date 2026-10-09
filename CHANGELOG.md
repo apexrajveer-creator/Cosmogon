@@ -1,3 +1,7 @@
+## Unreleased — recorded cabin balances
+
+- Add shared native/CLI exact endpoint stocks, cumulative model counters, mass/electrical identities and temperature references, all four independent paired branches and protected source-context JSON/CSV. Preserve original inputs, simulation laws/saves and golden `0xf2c4140a45ae509b`; never extrapolate sparse minute budgets into heat history.
+
 ## Unreleased — recorded research figures
 
 - Add shared native/CLI protected vector figures with original full-precision numbers, complete typed observations/source identity, paired method context and reusable strict graph layouts. Actual samples, unavailable gaps and positive-log omissions remain explicit; resolve small-signal bounds/ticks and capture native export inputs at request time. No smoothing, invented uncertainty, simulation law/save/dependency change; golden `0xf2c4140a45ae509b` remains unchanged.
@@ -265,3 +269,7 @@ First end-to-end vertical slice, shipped as a double-clickable macOS app.
 ## 0.1.0 — Prototype (2026-07)
 Original prototype; see docs/AUDIT.md.
 - Paired habitat trajectories: native selectable stored-time response/contrast tables, signed discrete effect curves with unavailable gaps, protected all-time JSON/40-column CSV export and explicit CLI observation inspection. Loaded design identity stays separate from editable folder text. Original final analyses, simulation laws, saves and golden fingerprint remain unchanged.
+
+### Recorded cabin balances (development)
+
+* Shared retained endpoint stock/electricity/temperature/counter reports, all four independent paired ledgers, actual source/method context and protected CSV/JSON exports. Native cached views and immutable workers preserve recordings/live state; sparse sampled heat/power budgets are not extrapolated. No simulation law/save/dependency/golden change.
