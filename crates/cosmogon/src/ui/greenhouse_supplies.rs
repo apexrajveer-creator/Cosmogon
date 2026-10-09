@@ -7,6 +7,7 @@ use cosmogon_sim::{
 };
 
 pub struct View {
+    pub chemistry: super::crop_chemistry::View,
     pub definition: Definition,
     pub result: Option<Bundle>,
     pub pane: usize,
@@ -23,6 +24,7 @@ pub struct View {
 impl Default for View {
     fn default() -> Self {
         Self {
+            chemistry: Default::default(),
             definition: Default::default(),
             result: None,
             pane: 0,
@@ -41,11 +43,23 @@ impl Default for View {
 impl View {
     pub fn import(&mut self, path: &std::path::Path) -> Result<(), String> {
         let b = Bundle::read(path)?;
+        self.chemistry.invalidate();
         self.definition = b.report.definition.clone();
         self.context = b.context.clone().map(|u| (u, b.manifest.habitat_id));
         self.result = Some(b.clone());
         self.loaded = Some(b);
         self.loaded_path = Some(path.display().to_string());
+        Ok(())
+    }
+    pub fn import_chemistry(&mut self, path: &std::path::Path) -> Result<(), String> {
+        let (b, r) = cosmogon_sim::crop_chemistry::read(path)?;
+        self.definition = b.report.definition.clone();
+        self.context = b.context.clone().map(|u| (u, b.manifest.habitat_id));
+        self.result = Some(b.clone());
+        self.loaded = Some(b);
+        self.loaded_path = Some(path.display().to_string());
+        self.chemistry.report = Some(r);
+        self.chemistry.status = None;
         Ok(())
     }
     fn refresh(&mut self) {
@@ -54,6 +68,7 @@ impl View {
             .as_ref()
             .is_none_or(|b| b.report.definition != self.definition)
         {
+            self.chemistry.invalidate();
             match Bundle::calculate(
                 &self.definition,
                 self.context.as_ref().map(|(u, id)| (u, *id)),
@@ -76,7 +91,7 @@ impl View {
             .export(std::path::Path::new(self.output.trim()))
     }
     pub fn metadata(&self) -> serde_json::Value {
-        serde_json::json!({"prepared_definition":self.definition,"report":self.result.as_ref().map(|b|&b.report),"manifest":self.result.as_ref().map(|b|&b.manifest),"loaded_source":self.loaded_path,"loaded_definition":self.loaded.as_ref().map(|b|&b.report.definition),"prepared_inputs_match_loaded":self.loaded.as_ref().map(|b|b.report.definition==self.definition),"unopened_path":self.import_path,"selected_day":self.selected_day,"resource":model::RESOURCES[self.resource.min(3)],"pane":self.pane,"export":{"path":self.output,"pending":self.launch},"status":self.status,"scope":model::LIMITS})
+        serde_json::json!({"prepared_definition":self.definition,"report":self.result.as_ref().map(|b|&b.report),"manifest":self.result.as_ref().map(|b|&b.manifest),"loaded_source":self.loaded_path,"loaded_definition":self.loaded.as_ref().map(|b|&b.report.definition),"prepared_inputs_match_loaded":self.loaded.as_ref().map(|b|b.report.definition==self.definition),"unopened_path":self.import_path,"selected_day":self.selected_day,"resource":model::RESOURCES[self.resource.min(3)],"pane":self.pane,"export":{"path":self.output,"pending":self.launch},"status":self.status,"scope":model::LIMITS,"chemistry":self.chemistry.metadata()})
     }
 }
 fn exact(ui: &mut egui::Ui, v: Option<f64>, unit: &str) {
@@ -187,6 +202,7 @@ pub fn panel(
             "Supplies",
             "Recipe & limits",
             "Study files",
+            "Chemistry",
         ]
         .iter()
         .enumerate()
@@ -242,6 +258,30 @@ pub fn panel(
             Ok(()) => "Supply study saved with exact numbers and frozen context".into(),
             Err(e) => e,
         });
+    }
+    if v.pane == 4 || v.chemistry.launch {
+        if let Some(b) = &v.result {
+            if let Some(path) = super::crop_chemistry::panel(
+                ui,
+                &mut v.chemistry,
+                b,
+                &mut v.selected_day,
+                v.loaded_path.as_deref(),
+            ) {
+                v.chemistry.status = Some(match v.import_chemistry(&path) {
+                    Ok(()) => {
+                        "Opened verified chemistry with original source and frozen context".into()
+                    }
+                    Err(e) => e,
+                });
+            }
+        }
+        if v.result.is_none() {
+            if let Some(status) = &v.status {
+                ui.colored_label(DANGER, status);
+            }
+        }
+        return;
     }
     if let Some(b) = &v.result {
         let r = &b.report;
@@ -378,6 +418,7 @@ pub fn panel(
                 }
                 if v.loaded.is_some() && ui.button("Restore opened study").clicked() {
                     if let Some(b) = v.loaded.clone() {
+                        v.chemistry.invalidate();
                         v.definition = b.report.definition.clone();
                         v.context = b.context.clone().map(|u| (u, b.manifest.habitat_id));
                         v.result = Some(b);
@@ -409,6 +450,50 @@ pub fn panel(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn chemistry_reopening_preserves_source_context_cache_and_refusal_state() {
+        let path =
+            std::env::temp_dir().join(format!("cosmogon-native-chemistry-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        let mut u = Universe::new(cosmogon_sim::UniverseSettings {
+            scenario: cosmogon_sim::Scenario::SolarSystemLab,
+            ..Default::default()
+        });
+        let b = Bundle::calculate(&Definition::default(), Some((&u, None))).unwrap();
+        cosmogon_sim::crop_chemistry::export(&b, &path).unwrap();
+        let mut v = View::default();
+        v.import_chemistry(&path).unwrap();
+        let original = v.metadata();
+        u.advance_by(60.);
+        v.chemistry.import_path = "unopened".into();
+        v.refresh();
+        assert_eq!(v.metadata()["report"], original["report"]);
+        assert_eq!(
+            v.metadata()["chemistry"]["report"],
+            original["chemistry"]["report"]
+        );
+        assert_eq!(v.metadata()["manifest"], original["manifest"]);
+        assert_eq!(v.metadata()["loaded_source"], original["loaded_source"]);
+        assert!(v.import_chemistry(&path.join("missing")).is_err());
+        assert_eq!(
+            v.metadata()["chemistry"]["report"],
+            original["chemistry"]["report"]
+        );
+        v.definition.crop.area_m2 *= 2.;
+        v.refresh();
+        assert!(v.chemistry.report.is_none());
+        v.chemistry.refresh(v.result.as_ref().unwrap());
+        assert_eq!(
+            v.chemistry.report.as_ref().unwrap().rows[30].conservative_oxygen_kg,
+            cosmogon_sim::crop_chemistry::calculate(&b).unwrap().rows[30].conservative_oxygen_kg
+                * 2.
+        );
+        assert_eq!(
+            v.metadata()["loaded_definition"],
+            original["loaded_definition"]
+        );
+        std::fs::remove_dir_all(path).unwrap();
+    }
     #[test]
     fn supply_study_retains_opened_inputs_frozen_context_and_independent_path() {
         let path = std::env::temp_dir().join(format!(

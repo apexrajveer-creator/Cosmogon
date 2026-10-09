@@ -26,6 +26,7 @@ mod habitat_balance;
 pub(crate) mod habitat_graph;
 mod greenhouse;
 mod greenhouse_supplies;
+mod crop_chemistry;
 pub use habitat::HabitatUi;
 pub(crate) use surface_study::Study;
 mod navigation;
@@ -262,12 +263,12 @@ fn init_ui_state(mut ui: ResMut<UiState>, args: Res<crate::args::Args>) {
         ui.surface_horizon = args.surface_horizon;
         ui.body_tab = BodyTab::Surface;
     }
-    if args.habitat_definition.is_some() || args.greenhouse_definition.is_some() || args.greenhouse_supplies.is_some() || args.habitat_sweep.is_some() || args.habitat_recording.is_some() {ui.habitat_open=true;}
+    if args.habitat_definition.is_some() || args.greenhouse_definition.is_some() || args.crop_chemistry.is_some() || args.greenhouse_supplies.is_some() || args.habitat_sweep.is_some() || args.habitat_recording.is_some() {ui.habitat_open=true;}
     match args.panel.as_deref() {
         Some("create") => ui.create_open = true,
         Some("physics") => ui.physics_open = true,
         Some("surface") => ui.body_tab = BodyTab::Surface,
-        Some("habitat-recording-balance-heat"|"habitat-recording-balance"|"habitat-recording-balance-electricity"|"habitat-recording-balance-temperature"|"habitat-recording-balance-counters"|"habitat-recording-balance-files"|"habitat-figure" | "habitat" | "habitat-controls" | "habitat-build" | "habitat-model" | "habitat-oxygen" | "habitat-water" | "habitat-humidity" | "habitat-humidity-settings" | "habitat-humidity-model" | "habitat-breach" | "habitat-breach-settings" | "habitat-breach-model" | "habitat-paired" | "habitat-paired-table" | "habitat-paired-files" | "habitat-paired-replay"|"habitat-graph-layout" | "habitat-recordings" | "habitat-recording-pressure" | "habitat-recording-pressure-change" | "habitat-recording-pressure-breach" | "habitat-recording-pressure-files" | "habitat-recording-why" | "habitat-recording-why-water" | "habitat-recording-why-heat" | "habitat-recording-why-air" | "habitat-recording-why-evidence" | "habitat-experiments" | "habitat-why" | "habitat-why-water" | "habitat-why-heat" | "habitat-why-air" | "habitat-why-evidence" | "greenhouse-supplies" | "greenhouse-supply-inputs" | "greenhouse-supply-model" | "greenhouse-supply-files" | "greenhouse" | "greenhouse-water" | "greenhouse-daily-water" | "greenhouse-inputs" | "greenhouse-compare" | "greenhouse-model" | "greenhouse-files") => ui.habitat_open = true,
+        Some("habitat-recording-balance-heat"|"habitat-recording-balance"|"habitat-recording-balance-electricity"|"habitat-recording-balance-temperature"|"habitat-recording-balance-counters"|"habitat-recording-balance-files"|"habitat-figure" | "habitat" | "habitat-controls" | "habitat-build" | "habitat-model" | "habitat-oxygen" | "habitat-water" | "habitat-humidity" | "habitat-humidity-settings" | "habitat-humidity-model" | "habitat-breach" | "habitat-breach-settings" | "habitat-breach-model" | "habitat-paired" | "habitat-paired-table" | "habitat-paired-files" | "habitat-paired-replay"|"habitat-graph-layout" | "habitat-recordings" | "habitat-recording-pressure" | "habitat-recording-pressure-change" | "habitat-recording-pressure-breach" | "habitat-recording-pressure-files" | "habitat-recording-why" | "habitat-recording-why-water" | "habitat-recording-why-heat" | "habitat-recording-why-air" | "habitat-recording-why-evidence" | "habitat-experiments" | "habitat-why" | "habitat-why-water" | "habitat-why-heat" | "habitat-why-air" | "habitat-why-evidence" | "greenhouse-chemistry" | "greenhouse-chemistry-model" | "greenhouse-chemistry-files" | "greenhouse-supplies" | "greenhouse-supply-inputs" | "greenhouse-supply-model" | "greenhouse-supply-files" | "greenhouse" | "greenhouse-water" | "greenhouse-daily-water" | "greenhouse-inputs" | "greenhouse-compare" | "greenhouse-model" | "greenhouse-files") => ui.habitat_open = true,
         Some("section" | "section-map") => ui.surface_study_open = true,
         Some("alerts") => ui.alerts_open = true,
         Some("sound"|"habitat-sound"|"habitat-sound-export") => { ui.alerts_open = true; ui.alerts_tab = 1; }

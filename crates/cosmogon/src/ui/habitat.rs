@@ -394,7 +394,7 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
         Some("habitat-controls") => 1,
         Some("habitat-build") => 2,
         Some("habitat-model") => 3,
-        Some("greenhouse-supplies"|"greenhouse-supply-inputs"|"greenhouse-supply-model"|"greenhouse-supply-files"|"greenhouse"|"greenhouse-water"|"greenhouse-daily-water"|"greenhouse-inputs"|"greenhouse-compare"|"greenhouse-model"|"greenhouse-files") => 4,
+        Some("greenhouse-chemistry"|"greenhouse-chemistry-model"|"greenhouse-chemistry-files"|"greenhouse-supplies"|"greenhouse-supply-inputs"|"greenhouse-supply-model"|"greenhouse-supply-files"|"greenhouse"|"greenhouse-water"|"greenhouse-daily-water"|"greenhouse-inputs"|"greenhouse-compare"|"greenhouse-model"|"greenhouse-files") => 4,
         Some("habitat-oxygen") => 5,
         Some("habitat-water") => 6,
         Some("habitat-breach"|"habitat-breach-settings"|"habitat-breach-model")=>10,
@@ -405,8 +405,11 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
     form.breach_pane=match args.panel.as_deref(){Some("habitat-breach-settings")=>1,Some("habitat-breach-model")=>2,_=>0};
     form.moisture_pane=match args.panel.as_deref(){Some("habitat-humidity-settings")=>1,Some("habitat-humidity-model")=>2,_=>0};
     form.crop.pane=match args.panel.as_deref() {Some("greenhouse-inputs")=>1,Some("greenhouse-compare")=>2,Some("greenhouse-model")=>3,Some("greenhouse-files")=>4,_=>0};
-    if args.panel.as_deref().is_some_and(|p|p.starts_with("greenhouse-suppl")){form.crop.pane=5;}
+    if args.panel.as_deref().is_some_and(|p|p.starts_with("greenhouse-suppl") || p.starts_with("greenhouse-chemistry")){form.crop.pane=5;}
     form.crop.supplies.pane=match args.panel.as_deref(){Some("greenhouse-supply-inputs")=>1,Some("greenhouse-supply-model")=>2,Some("greenhouse-supply-files")=>3,_=>0};
+    if args.panel.as_deref().is_some_and(|p|p.starts_with("greenhouse-chemistry")) || args.crop_chemistry.is_some() || args.crop_chemistry_output.is_some() {form.tab=4;form.crop.pane=5;form.crop.supplies.pane=4;}
+    form.crop.supplies.chemistry.pane=match args.panel.as_deref(){Some("greenhouse-chemistry-model")=>1,Some("greenhouse-chemistry-files")=>2,_=>0};
+    if let Some(p)=&args.crop_chemistry_output {form.crop.supplies.chemistry.output=p.clone();form.crop.supplies.chemistry.launch=true;}
     form.crop.supplies.selected_day=args.greenhouse_supply_day.unwrap_or(30);
     form.crop.supplies.resource=args.greenhouse_supply_resource.as_deref().and_then(|r|cosmogon_sim::greenhouse_supplies::RESOURCES.iter().position(|k|*k==r)).unwrap_or(0);
     if let Some(p)=&args.greenhouse_supply_output {form.crop.supplies.output=p.clone();form.crop.supplies.launch=true;}
@@ -441,6 +444,7 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
         match cosmogon_sim::habitat_sweep::Plan::read(std::path::Path::new(path)) {Ok(plan)=>{if form.recording.figure_mode {form.recording.factorial_mode=plan.secondary.is_some();} form.recording.launch=Some(super::habitat_recordings::Launch {plan,id:args.habitat_study_id,output:args.habitat_study_output.clone().unwrap_or_default(),sample:args.habitat_sample,initial_path:args.load.clone()});},Err(e)=>form.recording.status=Some(e)}
     }
     form.recording.sync_graph_layout();
+    if let Some(path)=&args.crop_chemistry {form.tab=4;form.crop.pane=5;form.crop.supplies.pane=4;if let Err(e)=form.crop.supplies.import_chemistry(std::path::Path::new(path)){error!("Cannot open crop chemistry: {e}");form.crop.supplies.status=Some(e);exit.write(bevy::app::AppExit::error());}}
     if let Some(path)=&args.greenhouse_supplies {form.tab=4;form.crop.pane=5;if let Err(e)=form.crop.supplies.import(std::path::Path::new(path)){error!("Cannot open crop supply study: {e}");form.crop.supplies.status=Some(e);exit.write(bevy::app::AppExit::error());}}
     if let Some(path)=&args.greenhouse_definition {form.tab=4;if let Err(e)=form.crop.import(std::path::Path::new(path)) {error!("Cannot open greenhouse definition at startup: {e}");form.crop.status=Some(e);exit.write(bevy::app::AppExit::error());}}
 }

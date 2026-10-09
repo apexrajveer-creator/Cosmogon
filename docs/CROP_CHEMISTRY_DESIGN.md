@@ -1,0 +1,23 @@
+# Conservative crop material chemistry: preimplementation design
+
+Next connected phase9/16 build after finite supply studies. The retained source recipe has a -0.01 kg/kg inedible mass residual; do not directly couple rounded projections to physical habitat inventory. Build separately pinned conservative CHON material balances, clear ordinary-source versus engineered-surrogate comparisons, native evidence and protected full-precision CLI/shared reports. This advances the chemical prerequisite for later finite greenhouse transfer; it must not quietly change the completed recipe study or original MEC forecast.
+
+## Primary evidence and engineering assumptions
+
+Volk and Cullingford 1992 NASA 19930004806, printed p528 Table2 (six-page PDF SHA256 98498e499f097489c294032611e2532ef70765d11c9b32e41c912945810fdfc5, visually inspected), tabulates CO2, metabolic H2O, HNO3 and O2 balances from constant dry composition. Some inedible composition was assumed. It motivates elemental bookkeeping but the rounded values are not exactly conservative.
+
+CIAAW Abridged Standard Atomic Weights 2024, https://ciaaw.org/abridged-atomic-weights.htm, verified 2026-10-09: H1.0080, C12.011, N14.007, O15.999 (with published variations; nominal values do not define source or biological uncertainty). Retain page/source/version and explicit fixed selected atomic weights. Derive the four compound molar masses from one consistent set, rather than silently mixing old habitat molecular constants. These values are a separate chemistry basis and do not change existing reaction or pressure constants.
+
+Engineering surrogate: for exactly 1 kg separate edible/inedible dry matter, keep published rounded CO2/metabolic-water/HNO3 input ratios. Assuming all C, H and N enter CHON-only surrogate dry biomass and only O2 is an output gas, calculate C/H/N input mass from molecular composition, infer dry O mass as 1 kg minus those masses, then derive O2 from the remaining oxygen input. Require all inferred components and gas outputs finite/nonnegative; expose CHON-only/no-ash limitation. Inedible derived O2 is about1.31 kg/kg, differing explicitly from published1.32; this is an assumption required by conservative closure, not a corrected source measurement or a new validated crop recipe.
+
+This surrogate is not measured tissue composition, full nutrient chemistry or actual physiology. P/K/S/trace elements, ash, root exudates, uptake species, acid-base/ionic balance, salt/solution masses and growth stress are absent. HNO3-equivalent is bookkeeping, not a literal fertilizer recommendation. Do not credit outputs to habitat stores until a separate installed finite process exists with supported maintained conditions, conservation, heat/humidity/power allocations, crop state and actual harvest handling.
+
+## Integrated mechanism
+
+Add a pure optional chemistry study around a validated original supply bundle/definition. Preserve every original definition, report, recipe coefficient, forecast, source residual and support bracket. New distinct model/version reports compound molecular masses, per-pool inferred dry elemental composition, input/output element amounts, full mass/element residuals, published-versus-derived O2 and actual-age source-driven edible/inedible projections. Include original frozen context independently from live world/unopened path. No automatic migration or changed original report fields.
+
+Do not discard tiny residuals or normalize ratios to hide differences. Per-pool and combined closure use independently derived elemental bookkeeping and direct numerical inputs/outputs. At zero production quantities are genuine zeros; absent transpiration remains absent, vapor is independently retained and never creates reaction water/oxygen. Existing finite supply support is retained as maintained-input feasibility, not a predicted crop-state guarantee.
+
+Native chemistry view with source/model/equation evidence, selected actual age, published-versus-conservative values and full elemental table shares CLI protected JSON/CSV/source exports and strict bounded reopening. Capture actual small/zero/scaled/legacy/source/loaded-context views. Meaningful tests independently count C/H/O/N atoms, verify per-pool/combined mass closure, zero/scale/precision, altered-source/pin refusal, immutable original bundles and unsupported input states. Then all required release/package/capture/normal-run checks. No Universe state/default/golden/dependency/graphics change.
+
+Physical greenhouse installation and the broad master directive remain incomplete. After this chemical primitive, choose the finite installed process as the next connected build; do not endlessly add report layers instead of building the physical connection.

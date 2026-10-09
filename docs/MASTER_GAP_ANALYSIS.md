@@ -95,4 +95,6 @@ New work must meet the relevant definitions of done; partial implementations rem
 
 30. **Finite crop-supply studies (built, partial phase 9/16):** explicit finite liquid/CO₂/nutrient-equivalent/lighting budgets, source-based recipe projections and daily support brackets over unchanged maintained-regime forecasts. Preserve legacy definitions and separate planning from physical greenhouse stocks/stress.
 
-31. **Conservative crop material chemistry (next, partial phase 9/16):** separately pinned CHON surrogate material balances, explicit published-versus-derived oxygen and complete elemental residuals before any physical greenhouse stock transfer. Preserve original forecasts, finite supply studies and context; no measured tissue or full nutrient chemistry claim.
+31. **Conservative crop material chemistry (built, partial phase 9/16):** separately pinned CHON surrogate material balances, explicit published-versus-derived oxygen and complete elemental residuals before any physical greenhouse stock transfer. Preserve original forecasts, finite supply studies and context; no measured tissue or full nutrient chemistry claim.
+
+32. **Finite installed crop process (next, partial phase 9):** actual optional crop state, finite material/power allocation, explicit chemical/phase/thermal exchanges and harvest stores, ordinary native controls/recordings and conservative source-pinned replay. Preserve absent legacy state; do not credit unconstrained source forecasts or imply calibrated crop physiology.

@@ -281,3 +281,5 @@ Original prototype; see docs/AUDIT.md.
 Selected cumulative cabin heat curves add eleven signed energy paths/storage, signed path/residual sums and executed/excluded time; protected native/CLI figures retain origin/coverage and four actual branch responses. Incomplete/different-origin comparisons stay unsupported. Existing recorded catalogs/analyses, physical laws, state/saves and golden unchanged.
 
 Added separate source-pinned finite crop-supply feasibility studies: explicit liquid/CO₂/HNO₃-equivalent/lighting budgets, daily support brackets over unchanged maintained forecasts, retained source rounding residual, shared native/CLI numerical exports and verified frozen-context reopening. No physical crop or habitat stock credits, simulation/save change or golden re-pin.
+
+Added separate conservative CHON crop material studies with pinned CIAAW nominal weights, original recipe/forecast retention, explicit inferred dry composition and oxygen differences, native element tables and strict protected JSON/CSV/source reopening. No simulation/save/golden/dependency/graphics change.

@@ -39,6 +39,7 @@ pub mod habitat_factorial;
 pub mod habitat_replay;
 pub mod greenhouse;
 pub mod greenhouse_supplies;
+pub mod crop_chemistry;
 pub mod history;
 pub mod impact;
 pub mod intervene;

@@ -167,3 +167,5 @@ Controlled geometry/thermal plans select `Plan::metrics` and conditionally retai
 Explicit heat metrics in `habitat_recording` share actual retained ledger counters. `habitat_heat_trajectory` owns origin/coverage support and selected export context; `habitat_figure` and native recording views retain the same original samples. Immutable aggregate metric catalogs are unchanged.
 
 Finite crop supply studies use `greenhouse_supplies` around the exact original maintained forecast, with independent source-pinned recipe demands, explicit user budgets, daily support brackets and protected frozen context. Native/CLI imports verify complete numeric/source agreement. This does not couple crops to habitat state; see [FINITE_CROP_SUPPLIES](docs/FINITE_CROP_SUPPLIES.md).
+
+Conservative crop chemistry is a separate pure `crop_chemistry` source-validated CHON surrogate, cached native view and protected CLI/native bundle around unchanged supply evidence. It does not change Universe state or grant crop outputs to habitat stores; [scope](docs/CROP_CHEMISTRY.md).

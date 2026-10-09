@@ -122,7 +122,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         };
         if matches!(a.cmd.as_str(),"greenhouse"|"greenhouse-supplies") && !matches!(flag.as_str(),"--definition"|"--output"|"--initial"|"--habitat-id") {return Err(format!("{flag} is not a greenhouse planning option"));}
         if matches!(a.cmd.as_str(),"greenhouse-definition"|"greenhouse-supply-definition") && flag!="--output" {return Err(format!("{flag} is not a greenhouse-definition option"));}
-        if a.cmd=="greenhouse-supply-inspect" && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a crop supply inspection option"));}
+        if matches!(a.cmd.as_str(),"crop-chemistry"|"crop-chemistry-inspect"|"greenhouse-supply-inspect") && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a crop supply/chemistry inspection option"));}
         if a.cmd=="habitat-diagnose" && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
         if a.cmd=="habitat-verify" && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a habitat replay verification option"));}
         if a.cmd=="habitat-balance" && !matches!(flag.as_str(),"--recording"|"--from-index"|"--observation"|"--output") {return Err(format!("{flag} is not a recorded balance option"));}
@@ -211,7 +211,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     if a.cmd=="habitat-balance" && a.recording.is_none() {return Err("habitat-balance requires --recording FOLDER".into());}
     if a.cmd=="habitat-balance" && a.from_index.zip(a.observation).is_some_and(|(a,b)|a>b) {return Err("Choose ordered balance indices".into());}
     if a.cmd=="habitat-figure" && (a.recording.is_none() || a.definition.is_none() || a.output.is_none()) {return Err("habitat-figure requires --recording FOLDER --definition GRAPH_LAYOUT --output NEW_DIR".into());}
-    if a.cmd=="greenhouse-supply-inspect" && a.recording.is_none() {return Err("greenhouse-supply-inspect requires --recording STUDY_FOLDER".into());}
+    if matches!(a.cmd.as_str(),"crop-chemistry"|"crop-chemistry-inspect"|"greenhouse-supply-inspect") && a.recording.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err(format!("{} requires --recording FILE_OR_FOLDER",a.cmd));}
     if a.cmd=="habitat-inspect" && a.recording.is_none() {return Err("habitat-inspect requires --recording STUDY_FOLDER".into());}
     if a.cmd=="habitat" {
         if a.definition.is_none() && a.initial.is_none() {return Err("habitat requires --definition FILE or --initial saved world".into());}
@@ -261,6 +261,8 @@ fn help() {
   surface --target Mars          Sample authoritative MOLA height and source-cell coverage JSON
   section [--output NEW_DIR]      Calculate/export a source-supported MOLA terrain section
   sites                          Print historical landing references, sources and registration limits
+  crop-chemistry --recording SUPPLY_FILE_OR_FOLDER [--output NEW_DIR]  Conservative CHON surrogate
+  crop-chemistry-inspect --recording CHEMISTRY_FOLDER [--output NEW_DIR]  Verify exact chemistry evidence
   greenhouse-supply-definition [--output NEW_FILE]  Emit explicit finite crop supply inputs
   greenhouse-supplies [--definition FILE --initial SAVE --habitat-id N --output NEW_DIR]  Daily resource support
   greenhouse-supply-inspect --recording STUDY_FOLDER [--output NEW_DIR]  Verify and reopen exact supply study
@@ -355,6 +357,14 @@ fn greenhouse_supplies(a:&Args)->Result<(),String> {
     println!("{}",serde_json::to_string_pretty(&serde_json::json!({"report":b.report,"manifest":b.manifest})).map_err(|e|e.to_string())?);Ok(())
 }
 
+fn crop_chemistry(a:&Args)->Result<(),String> {
+    use cosmogon_sim::{crop_chemistry as chemistry,greenhouse_supplies::Bundle};
+    let path=std::path::Path::new(a.recording.as_deref().ok_or("Choose an original supply study or verified chemistry folder")?);
+    let (b,r)=if a.cmd=="crop-chemistry-inspect" {chemistry::read(path)?}else{let b=Bundle::read(path)?;let r=chemistry::calculate(&b)?;(b,r)};
+    if let Some(p)=&a.output {chemistry::export(&b,std::path::Path::new(p))?;}
+    println!("{}",serde_json::to_string_pretty(&r).map_err(|e|e.to_string())?);Ok(())
+}
+
 fn main() {
     let a = match parse_args(std::env::args().skip(1)) {
         Ok(a) => a,
@@ -365,6 +375,7 @@ fn main() {
     };
     match a.cmd.as_str() {
         "help" => help(),
+        "crop-chemistry"|"crop-chemistry-inspect" => {if let Err(e)=crop_chemistry(&a) {eprintln!("Crop chemistry failed: {e}");std::process::exit(1);}},
         "greenhouse-supply-definition" => {if let Err(e)=greenhouse_supply_definition(&a) {eprintln!("Crop supply definition failed: {e}");std::process::exit(1);}},
         "greenhouse-supplies"|"greenhouse-supply-inspect" => {if let Err(e)=greenhouse_supplies(&a) {eprintln!("Crop supply study failed: {e}");std::process::exit(1);}},
         "greenhouse-definition" => {if let Err(e)=greenhouse_definition(&a) {eprintln!("Greenhouse definition failed: {e}");std::process::exit(1);}},
@@ -846,6 +857,15 @@ mod argument_tests {
         parse_args(values.iter().map(|s| s.to_string()))
     }
 
+    #[test]
+    fn crop_chemistry_requires_explicit_source_and_refuses_ignored_arguments() {
+        for cmd in ["crop-chemistry","crop-chemistry-inspect"] {
+            assert!(args(&[cmd]).is_err());
+            assert!(args(&[cmd,"--recording",""]).is_err());
+            for flag in ["--initial","--definition","--samples","--scenario","--habitat-id"] {assert!(args(&[cmd,"--recording","x",flag,"1"]).is_err());}
+            assert!(args(&[cmd,"--recording","x","--output","y"]).is_ok());
+        }
+    }
     #[test]
     fn balance_arguments_are_explicit_and_ordered() {
         for v in [vec!["habitat-balance"],vec!["habitat-balance","--recording","x","--from-index","nan"],vec!["habitat-balance","--recording","x","--from-index","1024"],vec!["habitat-balance","--recording","x","--from-index","3","--observation","2"],vec!["habitat-balance","--recording","x","--samples","3"],vec!["habitat-balance","--recording","x","--reference","b"]] {assert!(args(&v).is_err());}

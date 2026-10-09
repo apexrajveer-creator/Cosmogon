@@ -52,6 +52,8 @@ pub struct Args {
     pub habitat_sample: Option<usize>,
     pub habitat_pressure_reference:Option<usize>,
     pub greenhouse_definition: Option<String>,
+    pub crop_chemistry: Option<String>,
+    pub crop_chemistry_output: Option<String>,
     pub greenhouse_supplies: Option<String>,
     pub greenhouse_supply_output: Option<String>,
     pub greenhouse_supply_day: Option<usize>,
@@ -168,6 +170,8 @@ impl Args {
                 "--habitat-verify" => a.habitat_verify=true,
                 "--habitat-pressure-reference" => {a.habitat_pressure_reference=Some(val().parse().unwrap_or(usize::MAX));},
                 "--habitat-sample" => {let v=val();a.habitat_sample=Some(v.parse().unwrap_or(usize::MAX));},
+                "--crop-chemistry" => a.crop_chemistry=Some(val()),
+                "--crop-chemistry-output" => a.crop_chemistry_output=Some(val()),
                 "--greenhouse-supplies" => a.greenhouse_supplies=Some(val()),
                 "--greenhouse-supply-output" => a.greenhouse_supply_output=Some(val()),
                 "--greenhouse-supply-day" => a.greenhouse_supply_day=Some(val().parse().unwrap_or(usize::MAX)),
@@ -211,17 +215,22 @@ impl Args {
                 f => eprintln!("ignoring unknown argument {f}"),
             }
         }
-        if (a.input_bindings.is_some() || a.camera_path.is_some() || a.habitat_recording.is_some() || a.greenhouse_definition.is_some() || a.greenhouse_supplies.is_some() || a.habitat_definition.is_some() || a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
+        if (a.input_bindings.is_some() || a.camera_path.is_some() || a.habitat_recording.is_some() || a.greenhouse_definition.is_some() || a.crop_chemistry.is_some() || a.greenhouse_supplies.is_some() || a.habitat_definition.is_some() || a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
             a.new = Some(Scenario::SolarSystemLab);
         }
         a
     }
 
     fn validate_surface(&self) -> Result<(), String> {
+        if self.crop_chemistry.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Choose a verified crop chemistry folder".into());}
+        if self.crop_chemistry_output.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Choose a nonempty new chemistry output folder".into());}
+        if self.crop_chemistry_output.is_some() && self.crop_chemistry.is_none() && self.greenhouse_supplies.is_none() {return Err("Chemistry export requires --crop-chemistry FOLDER or --greenhouse-supplies FILE_OR_FOLDER".into());}
+        if self.crop_chemistry_output.is_some() && self.greenhouse_supply_output.is_some() {return Err("Choose one supply or chemistry export".into());}
+        if self.crop_chemistry.is_some() && (self.greenhouse_supplies.is_some() || self.greenhouse_definition.is_some() || self.habitat_definition.is_some() || self.habitat_recording.is_some() || self.habitat_sweep.is_some() || self.habitat_audio_export.is_some() || self.greenhouse_supply_output.is_some()) {return Err("Choose one chemistry, supply, forecast, habitat or offline export launch".into());}
         if self.greenhouse_supplies.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Choose a crop supply definition or study folder".into());}
         if self.greenhouse_supply_day.is_some_and(|n|n>30) {return Err("Crop supply age must be an integer day from 0 to 30".into());}
         if self.greenhouse_supply_resource.as_deref().is_some_and(|r|!cosmogon_sim::greenhouse_supplies::RESOURCES.contains(&r)) {return Err("Choose liquid_water, carbon_dioxide, nutrient_hno3_equivalent or lighting_energy".into());}
-        if (self.greenhouse_supply_output.is_some() || self.greenhouse_supply_day.is_some() || self.greenhouse_supply_resource.is_some()) && self.greenhouse_supplies.is_none() {return Err("Crop supply export/age/resource requires --greenhouse-supplies FILE_OR_FOLDER".into());}
+        if (self.greenhouse_supply_output.is_some() || self.greenhouse_supply_day.is_some() || self.greenhouse_supply_resource.is_some()) && self.greenhouse_supplies.is_none() && self.crop_chemistry.is_none() {return Err("Crop supply export/age/resource requires --greenhouse-supplies FILE_OR_FOLDER".into());}
         if self.greenhouse_supply_output.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Choose a nonempty new crop supply output folder".into());}
         if self.greenhouse_supplies.is_some() && (self.greenhouse_definition.is_some() || self.habitat_definition.is_some() || self.habitat_recording.is_some() || self.habitat_sweep.is_some() || self.habitat_audio_export.is_some()) {return Err("Choose one crop supply, crop forecast, habitat or offline export launch".into());}
         if self.input_bindings.as_deref()==Some("") {return Err("Choose an input-bindings file".into());}
@@ -279,6 +288,12 @@ impl Args {
 mod tests {
     use super::*;
 
+    #[test]
+    fn crop_chemistry_requires_one_explicit_valid_launch() {
+        for v in [vec!["--crop-chemistry-output","x"],vec!["--crop-chemistry","x","--greenhouse-supplies","y"],vec!["--crop-chemistry","x","--habitat-recording","y"],vec!["--crop-chemistry","x","--greenhouse-supply-output","y"],vec!["--greenhouse-supplies","x","--crop-chemistry-output","a","--greenhouse-supply-output","b"],vec!["--crop-chemistry","x","--greenhouse-supply-day","31"]] {assert!(Args::parse_from(v.into_iter().map(String::from)).validate_surface().is_err());}
+        assert!(Args::parse_from(["--crop-chemistry","x","--greenhouse-supply-day","12","--crop-chemistry-output","y"].into_iter().map(String::from)).validate_surface().is_ok());
+        assert!(Args::parse_from(["--greenhouse-supplies","x","--crop-chemistry-output","y"].into_iter().map(String::from)).validate_surface().is_ok());
+    }
     #[test]
     fn crop_supply_launch_refuses_incompatible_or_unbounded_requests() {
         for v in [vec!["--greenhouse-supply-output","x"],vec!["--greenhouse-supplies","x","--greenhouse-supply-day","31"],vec!["--greenhouse-supplies","x","--greenhouse-supply-day","nan"],vec!["--greenhouse-supplies","x","--greenhouse-supply-resource","unknown"],vec!["--greenhouse-supplies","x","--greenhouse-definition","y"],vec!["--greenhouse-supplies","x","--habitat-recording","y"]] {assert!(Args::parse_from(v.into_iter().map(String::from)).validate_surface().is_err());}
