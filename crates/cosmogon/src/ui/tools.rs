@@ -58,6 +58,7 @@ pub enum Cmd {
     OpenPerformance,
     OpenTerrainSection,
     OpenHabitat,
+    OpenVehicle,
     OpenCamera(usize),
     OpenAlerts(usize),
     Save,
@@ -416,6 +417,7 @@ pub fn tool_windows(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, m
             add("Sound: mix, audio modes and quiet settings".into(), Act::Command(Cmd::OpenAlerts(1)));
             add("Notifications: category routing and thresholds".into(), Act::Command(Cmd::OpenAlerts(2)));
             add("Habitat engineering: build, configure, inspect and export".into(), Act::Command(Cmd::OpenHabitat));
+            add("Supply vehicle design".into(), Act::Command(Cmd::OpenVehicle));
             add("Performance: frame times and export report".into(), Act::Command(Cmd::OpenPerformance));
             add("Mars terrain section: numeric topography and source export".into(),Act::Command(Cmd::OpenTerrainSection));
             add("Save sandbox".into(), Act::Command(Cmd::Save));
@@ -561,6 +563,7 @@ pub fn run_command(c: Cmd, s: &mut UiState, sim: &mut Sim, settings: &mut UserSe
         Cmd::OpenResearch(tab) => s.research_requested = Some(tab),
         Cmd::OpenPerformance => s.performance_open = true,
         Cmd::OpenHabitat => s.habitat_open = true,
+        Cmd::OpenVehicle => s.vehicle_open = true,
         Cmd::OpenTerrainSection => s.surface_study_open = true,
         Cmd::OpenCamera(tab) => { s.camera_open = true; s.camera_tab = tab; }
         Cmd::OpenAlerts(tab) => { s.alerts_open = true; s.alerts_tab = tab; }

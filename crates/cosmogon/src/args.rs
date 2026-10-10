@@ -34,6 +34,10 @@ pub struct Args {
     pub mars_terrain: Option<String>,
     pub terrain_section: Option<String>,
     pub habitat_definition: Option<String>,
+    pub vehicle_plan:Option<String>,
+    pub vehicle_recording:Option<String>,
+    pub vehicle_output:Option<String>,
+    pub vehicle_observation:Option<usize>,
     pub habitat_audio: Option<u64>,
     pub habitat_audio_export: Option<String>,
     pub habitat_recording: Option<String>,
@@ -183,6 +187,10 @@ impl Args {
                 "--greenhouse-supply-day" => a.greenhouse_supply_day=Some(val().parse().unwrap_or(usize::MAX)),
                 "--greenhouse-supply-resource" => a.greenhouse_supply_resource=Some(val()),
                 "--greenhouse-definition" => a.greenhouse_definition=Some(val()),
+                "--vehicle-plan" => a.vehicle_plan=Some(val()),
+                "--vehicle-recording" => a.vehicle_recording=Some(val()),
+                "--vehicle-output" => a.vehicle_output=Some(val()),
+                "--vehicle-observation" => a.vehicle_observation=Some(val().parse().unwrap_or(usize::MAX)),
                 "--habitat-definition" => a.habitat_definition=Some(val()),
                 "--terrain-section" => a.terrain_section = Some(val()),
                 "--mars-terrain" => a.mars_terrain = Some(val()),
@@ -221,13 +229,23 @@ impl Args {
                 f => eprintln!("ignoring unknown argument {f}"),
             }
         }
-        if (a.input_bindings.is_some() || a.camera_path.is_some() || a.habitat_recording.is_some() || a.greenhouse_definition.is_some() || a.crop_chemistry.is_some() || a.greenhouse_supplies.is_some() || a.habitat_definition.is_some() || a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
+        if (a.vehicle_plan.is_some() || a.vehicle_recording.is_some() || a.panel.as_deref().is_some_and(|p|p.starts_with("vehicle")) || a.input_bindings.is_some() || a.camera_path.is_some() || a.habitat_recording.is_some() || a.greenhouse_definition.is_some() || a.crop_chemistry.is_some() || a.greenhouse_supplies.is_some() || a.habitat_definition.is_some() || a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
             a.new = Some(Scenario::SolarSystemLab);
         }
         a
     }
 
     fn validate_surface(&self) -> Result<(), String> {
+        for (value,label) in [(&self.vehicle_plan,"vehicle plan"),(&self.vehicle_recording,"vehicle recording"),(&self.vehicle_output,"new vehicle output")] {
+            if value.as_deref().is_some_and(|s|s.trim().is_empty()){return Err(format!("Choose a nonempty {label} path"));}
+        }
+        let vehicle=self.vehicle_plan.is_some() || self.vehicle_recording.is_some();
+        if self.vehicle_plan.is_some() && self.vehicle_recording.is_some(){return Err("Choose one vehicle plan or complete recording".into());}
+        if (self.vehicle_output.is_some() || self.vehicle_observation.is_some()) && !vehicle {return Err("Vehicle output/observation requires an explicit --vehicle-plan or --vehicle-recording".into());}
+        if self.vehicle_observation.is_some_and(|n|n>=8192){return Err("Vehicle observation must be an integer from 0 to 8191 inside the actual plan".into());}
+        if vehicle && (self.menu.is_some() || self.habitat_audio_export.is_some() || self.habitat_definition.is_some() || self.habitat_sweep.is_some() || self.habitat_recording.is_some() || self.greenhouse_definition.is_some() || self.crop_chemistry.is_some() || self.greenhouse_supplies.is_some() || self.research_recording.is_some() || self.research_export.is_some() || self.research_batch.is_some() || self.terrain_section.is_some()) {return Err("Choose one vehicle, cabin, research or offline export workspace launch".into());}
+        if self.panel.as_deref().is_some_and(|p|p.starts_with("vehicle")) && (self.habitat_audio_export.is_some() || self.menu.is_some()){return Err("Vehicle panels require a native observing launch".into());}
+
         if self.crop_chemistry.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Choose a verified crop chemistry folder".into());}
         if self.crop_chemistry_output.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Choose a nonempty new chemistry output folder".into());}
         if self.crop_chemistry_output.is_some() && self.crop_chemistry.is_none() && self.greenhouse_supplies.is_none() {return Err("Chemistry export requires --crop-chemistry FOLDER or --greenhouse-supplies FILE_OR_FOLDER".into());}
@@ -409,6 +427,13 @@ mod tests {
         for v in [vec!["--habitat-compare","b"],vec!["--habitat-alignment","world"],vec!["--habitat-recording","a","--habitat-compare","b","--habitat-alignment","nearest"],vec!["--habitat-sweep","p"],vec!["--habitat-sweep","p","--load","s","--habitat-study-output","o","--habitat-recording","a"],vec!["--habitat-study-id","0"],vec!["--habitat-sweep","p","--load","s","--habitat-study-output","o","--habitat-study-id","bad"]] {assert!(Args::parse_from(v.into_iter().map(String::from)).validate_surface().is_err());}
         assert!(Args::parse_from(["--habitat-recording","a","--habitat-compare","b","--habitat-alignment","world"].into_iter().map(String::from)).validate_surface().is_ok());
         assert!(Args::parse_from(["--habitat-sweep","p","--load","s","--habitat-study-output","o","--habitat-sample","24"].into_iter().map(String::from)).validate_surface().is_ok());
+    }
+
+    #[test]
+    fn vehicle_launches_reject_ignored_inputs_and_use_actual_index_bounds() {
+        for flags in [vec!["--vehicle-plan",""],vec!["--vehicle-recording",""],vec!["--vehicle-output","new"],vec!["--vehicle-observation","3"],vec!["--vehicle-plan","p","--vehicle-recording","r"],vec!["--vehicle-plan","p","--vehicle-observation","NaN"],vec!["--vehicle-plan","p","--vehicle-observation","8192"],vec!["--vehicle-plan","p","--vehicle-output",""],vec!["--vehicle-plan","p","--habitat-recording","r"],vec!["--vehicle-plan","p","--greenhouse-definition","g"],vec!["--vehicle-plan","p","--research-export","r"],vec!["--vehicle-plan","p","--menu","new"],vec!["--panel","vehicle","--menu","new"]] {assert!(Args::parse_from(flags.into_iter().map(String::from)).validate_surface().is_err());}
+        let a=Args::parse_from(["--vehicle-recording","r","--vehicle-output","new","--vehicle-observation","3"].into_iter().map(String::from));assert!(a.validate_surface().is_ok());assert!(matches!(a.new,Some(Scenario::SolarSystemLab)));assert_eq!(a.vehicle_observation,Some(3));
+        assert!(Args::parse_from(["--vehicle-plan","p","--load","s"].into_iter().map(String::from)).new.is_none());
     }
 
 }

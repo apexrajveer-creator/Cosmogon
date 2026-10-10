@@ -110,3 +110,6 @@ failure logs/results, and final check logs. The source instructions and evidence
 generated binaries and captures are not tracked.
 
 Frozen habitat starting-world selection: [verification](FROZEN_HABITAT_ORIGINS_VALIDATION.md), 435 passed plus one existing ignored, 39 cases, seven inspected packaged layouts and a 48-second normal run. Original and request-time live results independently reproduce; solver/saves/golden/graphics stay unchanged.
+
+
+Finite supply-vehicle checkpoint (2026-10-10): **446 passed plus one existing ignored**, 59 distinct cases, seven inspected packaged layouts, six required checks and a 48-second normal packaged run. [Full evidence and limits](SUPPLY_VEHICLE_VALIDATION.md). No world/save/source/golden or graphics change; flight/delivery and the full directive remain incomplete.

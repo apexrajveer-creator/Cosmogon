@@ -94,6 +94,8 @@ The connected [complete saved single-setting designs](docs/SAVED_SINGLE_HABITAT_
 
 The connected [frozen habitat study origins](docs/FROZEN_HABITAT_ORIGINS.md) build explicitly chooses the pinned original common world or actual request-time live state, preserves finite stores/clocks and original results, and adds cached frozen preflight plus shared protected reruns. Checks: 435 passed plus one existing ignored, 39 distinct cases, seven inspected packaged layouts and a 48-second normal run; [verification](docs/FROZEN_HABITAT_ORIGINS_VALIDATION.md). Solver/saves/catalogs, source constants, golden and graphics remain unchanged. The next connected build begins finite supply-vehicle design/propulsion and mass budgets before world flight and actual delivery; calibration, phase 9/10 and the full directive remain incomplete.
 
+The connected [finite supply-vehicle designer](docs/SUPPLY_VEHICLE.md) adds authored dry/tank/propellant/payload budgets, finite retained cabin-consumable cargo, source-based constant-Isp burns, actual cutoff/acceleration/vector results and exact protected native/CLI recordings. Checks: 446 passed plus one existing ignored, 59 distinct cases, seven inspected packaged layouts and a 48-second normal run; [verification](docs/SUPPLY_VEHICLE_VALIDATION.md). No live world/save/source/golden/graphics change or supply grant. Physical world-relative vehicle dynamics and actual delivery follow; calibration, full spacecraft hardware, phase 9/10 and the master directive remain incomplete.
+
 The owner's [graphics goal supplement](docs/GRAPHICS_GOAL_SUPPLEMENT.md), added 2026-10-09, requires very detailed animated close-up presentation for every visitable cosmic body, including applicable natural activity, terrain, water, weather, buildings and civilizations in our style. It is queued within the continuing directive; continue cabin research first. It does not require present-day observation accuracy and does not authorize presenting procedural activity as measured data.
 
 ## Where things stand (2026-10-05)
@@ -144,6 +146,7 @@ Map of the 1.0 features (start here when changing one):
 | Finite outward cabin breach | `breach.rs`, `habitat.rs` | `ui/habitat_breach.rs`; native/CLI studies, WHY and recordings |
 | Controlled geometry/thermal studies | `habitat_sweep.rs`, `habitat_factorial.rs` | `ui/habitat_recordings.rs`; restored controls, native/CLI studies and pressure catalogs |
 | Recorded cabin pressure explanations | `habitat_pressure.rs` | `ui/habitat_pressure.rs`; CLI `habitat-pressure` and protected component/term evidence |
+| Supply vehicle design / finite propulsion bench | `supply_vehicle.rs` | `ui/vehicle.rs`; CLI vehicle definition/study/inspect |
 | Habitat WHY / diagnostics exports | `habitat_diagnostics.rs` | `ui/habitat_why.rs`, `ui/habitat_recordings.rs`; CLI `habitat-diagnose` |
 | Habitat equipment listening / WAV | completed `habitat.rs` budgets | `habitat_audio.rs`, `audio.rs`, `ui/alerts.rs` |
 | Sound modes/mixer | — | `audio.rs`, `ui/alerts.rs` (synthesised; no audio files) |

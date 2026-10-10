@@ -126,7 +126,10 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if matches!(a.cmd.as_str(),"greenhouse-definition"|"greenhouse-supply-definition") && flag!="--output" {return Err(format!("{flag} is not a greenhouse-definition option"));}
         if matches!(a.cmd.as_str(),"crop-chemistry"|"crop-chemistry-inspect"|"greenhouse-supply-inspect") && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a crop supply/chemistry inspection option"));}
         if matches!(a.cmd.as_str(),"habitat-diagnose"|"habitat-crop-harvest") && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
-        if a.cmd=="habitat-rerun" && !matches!(flag.as_str(),"--recording"|"--definition"|"--output"){return Err(format!("{flag} is not a saved-origin habitat rerun option"));}
+        if a.cmd=="vehicle-definition" && flag!="--output" {return Err(format!("{flag} is not a vehicle-definition option"));}
+        if a.cmd=="vehicle-study" && !matches!(flag.as_str(),"--definition"|"--output") {return Err(format!("{flag} is not a finite vehicle study option"));}
+        if a.cmd=="vehicle-inspect" && flag!="--recording" {return Err(format!("{flag} is not a vehicle recording inspection option"));}
+    if a.cmd=="habitat-rerun" && !matches!(flag.as_str(),"--recording"|"--definition"|"--output"){return Err(format!("{flag} is not a saved-origin habitat rerun option"));}
         if a.cmd=="habitat-verify" && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a habitat replay verification option"));}
         if a.cmd=="habitat-balance" && !matches!(flag.as_str(),"--recording"|"--from-index"|"--observation"|"--output") {return Err(format!("{flag} is not a recorded balance option"));}
         if a.cmd=="habitat-figure" && !matches!(flag.as_str(),"--recording"|"--reference"|"--definition"|"--output"|"--branches") {return Err(format!("{flag} is not a recorded figure option"));}
@@ -197,6 +200,9 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             unknown => return Err(format!("Unknown flag {unknown}; use --help")),
         }
     }
+        if a.cmd=="vehicle-inspect" && a.recording.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err("vehicle-inspect requires --recording COMPLETE_DIR".into());}
+    if matches!(a.cmd.as_str(),"vehicle-definition"|"vehicle-study") && a.output.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Vehicle output requires a nonempty new file/folder".into());}
+    if a.cmd=="vehicle-study" && a.definition.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Choose a nonempty vehicle plan file".into());}
     if matches!(a.cmd.as_str(),"habitat"|"habitat-definition"|"habitat-crop-definition") && a.initial.is_some() && (explicit_scenario || explicit_seed) {return Err("Choose saved --initial world or new --scenario/--seed, not both".into());}
     if matches!(a.cmd.as_str(),"greenhouse"|"greenhouse-supplies") && a.habitat_id.is_some() && a.initial.is_none() {return Err("Greenhouse habitat context requires --initial saved world".into());}
     if a.cmd=="habitat-sweep" {
@@ -256,6 +262,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     Ok(a)
 }
 fn help() {
+    eprintln!("cosmogon-cli vehicle-definition [--output NEW_FILE]   # explicit assumed finite vehicle and burn plan\ncosmogon-cli vehicle-study [--definition PLAN --output NEW_DIR]   # ideal free-space finite propulsion, no launch/delivery\ncosmogon-cli vehicle-inspect --recording COMPLETE_DIR   # exact independent numeric/source replay");
     eprintln!("cosmogon-cli habitat-rerun --recording COMPLETE_DESIGN --output NEW_DIR [--definition NEW_TYPED_PLAN]   # exact original common starting world");
     eprintln!("cosmogon-cli habitat-balance --recording FOLDER [--from-index N] [--observation N] [--output NEW_DIR]");
     eprintln!("cosmogon-cli habitat-figure --recording FOLDER --definition GRAPH_LAYOUT --output NEW_DIR [--reference ORDINARY_B]");
@@ -416,6 +423,19 @@ fn main() {
                 } else {cosmogon_sim::habitat_figure::Figure::read(recording,a.reference.as_deref().map(std::path::Path::new),&layout)?};
                 figure.export(std::path::Path::new(a.output.as_deref().expect("validated output")))})();
             match result {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).unwrap()),Err(e)=>{eprintln!("Recorded figure failed: {e}");std::process::exit(1);}}
+        },
+        "vehicle-definition" => {
+            let plan=cosmogon_sim::supply_vehicle::Plan::example();
+            if let Some(path)=&a.output {if let Err(e)=plan.write(std::path::Path::new(path)){eprintln!("Vehicle definition failed: {e}");std::process::exit(1);}}
+            println!("{}",serde_json::to_string_pretty(&plan).expect("finite validated example"));
+        },
+        "vehicle-study" | "vehicle-inspect" => {
+            let result=(||->Result<serde_json::Value,String>{
+                if a.cmd=="vehicle-inspect" {return cosmogon_sim::supply_vehicle::read_recording(std::path::Path::new(a.recording.as_deref().expect("validated recording")));}
+                let plan=if let Some(path)=&a.definition {cosmogon_sim::supply_vehicle::Plan::read(std::path::Path::new(path))?}else{cosmogon_sim::supply_vehicle::Plan::example()};
+                if let Some(output)=&a.output {plan.export(std::path::Path::new(output))}else{plan.summary()}
+            })();
+            match result {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).expect("finite validated result")),Err(e)=>{eprintln!("Vehicle study failed: {e}");std::process::exit(1);}}
         },
         "habitat-rerun" => {if let Err(e)=habitat_rerun(&a){eprintln!("Saved-origin rerun failed: {e}");std::process::exit(1);}},
         "habitat-sweep" => {if let Err(e)=habitat_sweep(&a) {eprintln!("Habitat sweep failed: {e}");std::process::exit(1);}},
@@ -902,6 +922,11 @@ mod argument_tests {
         parse_args(values.iter().map(|s| s.to_string()))
     }
 
+    #[test]
+    fn vehicle_commands_refuse_missing_recordings_and_unrelated_world_controls() {
+        for v in [vec!["vehicle-inspect"],vec!["vehicle-inspect","--recording"," "],vec!["vehicle-study","--initial","s"],vec!["vehicle-study","--samples","5"],vec!["vehicle-definition","--seed","2"],vec!["vehicle-study","--output"," "],vec!["vehicle-inspect","--recording","x","--output","y"]] {assert!(args(&v).is_err());}
+        assert!(args(&["vehicle-study","--definition","plan","--output","new"]).is_ok());assert!(args(&["vehicle-definition","--output","new"]).is_ok());assert!(args(&["vehicle-inspect","--recording","study"]).is_ok());
+    }
     #[test]
     fn saved_origin_reruns_refuse_ignored_or_incomplete_inputs() {
         for v in [vec!["habitat-rerun"],vec!["habitat-rerun","--recording","x"],vec!["habitat-rerun","--recording","x","--output"," "],vec!["habitat-rerun","--recording","x","--output","new","--initial","other"],vec!["habitat-rerun","--recording","x","--output","new","--samples","2"]] {assert!(args(&v).is_err());}

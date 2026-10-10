@@ -1,3 +1,8 @@
+## Unreleased — finite supply-vehicle design and propulsion
+
+- Shared authored dry/tank/propellant/payload and finite cabin-consumable cargo design, deterministic constant-effective-Isp burns, exact fuel cutoff and actual mass/impulse/vector-capability observations. Add stable deterministic `dln1p` and expose raw numerical residuals.
+- Native designer and CLI protected complete plans/24-column CSV/JSON/source exports, strict independent reopening and request-time controls without live world or supply grants. Save laws/catalogs/source constants, graphics and golden `0xf2c4140a45ae509b` remain unchanged; physical flight/delivery and phase 10 remain incomplete.
+
 ## Unreleased — frozen habitat study origins
 
 - Explicit original-saved/current-live starting-world selection, cached frozen preflight, exact finite stores/clocks/source pins and immutable request-time context for new single/paired experiments.

@@ -227,3 +227,6 @@ Controlled installed crop experiment controls and exact saved response catalogs:
 Complete saved single-setting studies retain every branch and support selected comparisons, exact figures and independent whole-design replay: [guide](docs/SAVED_SINGLE_HABITAT_DESIGNS.md). CLI `--branches A,B` selects single-design figure inputs; native `--habitat-branches A,B` selects actual retained branches.
 
 Complete single/paired study reruns now explicitly choose the original saved or current live starting world; CLI `habitat-rerun` reuses the original with optional new typed settings. [Guide](docs/FROZEN_HABITAT_ORIGINS.md). Source-pinned request-time checks protect previous results and require a fresh output.
+
+
+Native View → Supply vehicle design authors finite hardware/propellant/cargo budgets and actual ideal burn observations. CLI `vehicle-definition`, `vehicle-study`, `vehicle-inspect` share protected exact numeric/source evidence. [Guide](docs/SUPPLY_VEHICLE.md), [verification](docs/SUPPLY_VEHICLE_VALIDATION.md). No gravitational flight, landing or habitat delivery yet; those build on the same finite mechanism.

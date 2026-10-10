@@ -18,6 +18,8 @@ pub trait DMath: Sized {
     fn datan2(self, x: Self) -> Self;
     fn dexp(self) -> Self;
     fn dln(self) -> Self;
+    /// Stable logarithm of 1+x for small finite mass ratios.
+    fn dln1p(self) -> Self;
     fn dlog10(self) -> Self;
     fn dpowf(self, e: Self) -> Self;
     fn dcbrt(self) -> Self;
@@ -63,6 +65,10 @@ impl DMath for f64 {
     #[inline]
     fn dln(self) -> f64 {
         libm::log(self)
+    }
+    #[inline]
+    fn dln1p(self) -> f64 {
+        libm::log1p(self)
     }
     #[inline]
     fn dlog10(self) -> f64 {
