@@ -69,8 +69,11 @@ pub fn pair_at(
         "unavailable_value"
     } else if metric.is_heat() {
         br.map_or("unavailable_value", |br| {
-            crate::habitat_heat_trajectory::support(ar, br, alignment, ta, tb)
+            let heat = crate::habitat_heat_trajectory::support(ar, br, alignment, ta, tb);
+            if heat == "matched" && metric.has_crop_context() { crate::habitat_crop_trajectory::support(ar, br, alignment, ta, tb) } else { heat }
         })
+    } else if metric.is_crop() {
+        br.map_or("unavailable_value", |br| crate::habitat_crop_trajectory::support(ar, br, alignment, ta, tb))
     } else {
         "matched"
     };
@@ -109,6 +112,7 @@ pub fn report(
     if metric.is_heat() {
         report["heat_trajectory_context"] = crate::habitat_heat_trajectory::context(&[a, b]);
     }
+    if metric.has_crop_context() { report["crop_trajectory_context"] = crate::habitat_crop_trajectory::context(&[a,b]); }
     report
 }
 pub fn export(

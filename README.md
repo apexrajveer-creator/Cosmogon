@@ -148,3 +148,5 @@ Crop research adds [finite supply studies](docs/FINITE_CROP_SUPPLIES.md): explic
 [Conservative crop chemistry](docs/CROP_CHEMISTRY.md) exposes explicit CHON-only surrogate composition, published-versus-derived oxygen, elemental residuals and protected exact evidence. Physical greenhouse coupling remains incomplete.
 
 Finite installed crop engineering, actual material/electric/heat evidence and explicit model limits: [FINITE_GREENHOUSE](docs/FINITE_GREENHOUSE.md).
+
+Actual installed crop recordings support selected resource/production/energy graphs, exact-time comparisons and protected research figures; [recorded crop guide](docs/RECORDED_CROP_TRAJECTORIES.md). Supported source progress remains separate from biological age.

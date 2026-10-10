@@ -177,7 +177,7 @@ mod tests {
             Metric::for_habitat(&legacy.rows[0].habitat).collect::<Vec<_>>()
         );
         assert!(Metric::for_habitat(&r.rows[0].habitat).all(|m| !m.is_heat()));
-        for m in Metric::ALL.into_iter().filter(|m| m.is_heat()) {
+        for m in Metric::ALL.into_iter().filter(|m| m.is_heat() && !m.has_crop_context()) {
             assert_eq!(Metric::parse(m.id()).unwrap(), m);
             assert_eq!(m.value(&legacy.rows[3]), None);
             assert_eq!(m.value(&r.rows[0]), Some(0.));

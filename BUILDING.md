@@ -219,3 +219,5 @@ Crop supplies: `cosmogon-cli greenhouse-supply-definition`, `greenhouse-supplies
 Crop chemistry uses `crop-chemistry` / `crop-chemistry-inspect` and native `--panel greenhouse-chemistry[-model|-files]`, with original `--greenhouse-supplies` or verified `--crop-chemistry` source and protected `--crop-chemistry-output`; [commands and units](docs/CROP_CHEMISTRY.md).
 
 Finite installed crop setup, strict CLI harvest and packaged `habitat-crop` panels: [FINITE_GREENHOUSE](docs/FINITE_GREENHOUSE.md). Crop state uses explicit optional source pins; legacy saves/CSV catalogs remain available.
+
+Recorded actual crop trajectories use explicit `crop_progress`, dry stock, feed/product/electricity and optional signed heat-debit selections in ordinary/paired graphs and protected figures. Saved aggregate catalogs remain unchanged. See [guide](docs/RECORDED_CROP_TRAJECTORIES.md).

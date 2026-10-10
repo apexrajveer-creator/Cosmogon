@@ -174,6 +174,7 @@ impl Recording {
             }
         }
         if uses_crop {
+            crate::habitat_crop_trajectory::validate_series(&rows)?;
             if m["crop_source"]!=crate::crop_process::source() || m["crop_model_descriptor"]!=serde_json::to_value(crate::research::PhysicsModelRegistry::get("finite-crop")).map_err(|e|e.to_string())? {return Err("Crop source/model mismatch".into());}
             if read(&path.join("crop.csv"),16*1024*1024)?!=crate::crop_process::samples_csv(&rows) {return Err("Actual crop CSV disagrees with saved observations".into());}
         } else if !m["crop_source"].is_null() || !m["crop_model_descriptor"].is_null() {return Err("Recording declares unused crop process".into());}
@@ -307,9 +308,24 @@ pub enum Metric {
     HeatResidual,
     HeatExecuted,
     HeatExcluded,
+    CropProgress,
+    CropNutrient,
+    CropStandingEdible,
+    CropStandingInedible,
+    CropHarvestedEdible,
+    CropHarvestedInedible,
+    CropCo2,
+    CropMetabolicWater,
+    CropVapor,
+    CropOxygen,
+    CropLight,
+    CropAuxiliary,
+    CropChemical,
+    HeatCropChemical,
+    HeatCropVapor,
 }
 impl Metric {
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 52] = [
         Self::Water,
         Self::OxygenReserve,
         Self::Hydrogen,
@@ -347,13 +363,28 @@ impl Metric {
         Self::HeatResidual,
         Self::HeatExecuted,
         Self::HeatExcluded,
+        Self::CropProgress,
+        Self::CropNutrient,
+        Self::CropStandingEdible,
+        Self::CropStandingInedible,
+        Self::CropHarvestedEdible,
+        Self::CropHarvestedInedible,
+        Self::CropCo2,
+        Self::CropMetabolicWater,
+        Self::CropVapor,
+        Self::CropOxygen,
+        Self::CropLight,
+        Self::CropAuxiliary,
+        Self::CropChemical,
+        Self::HeatCropChemical,
+        Self::HeatCropVapor,
     ];
     /// Saved catalog identity is immutable, including existing heat-enabled designs.
-    /// New heat metrics are explicit selections, never silently added to aggregate analyses.
+    /// New heat/crop metrics are explicit selections, never silently added to aggregate analyses.
     pub fn for_habitat(h: &habitat::Habitat) -> impl Iterator<Item = Self> {
         let used = h.uses_breach();
         Self::ALL.into_iter().filter(move |m| {
-            !m.is_heat()
+            !m.is_heat() && !m.is_crop()
                 && (used
                     || !matches!(
                         m,
@@ -363,6 +394,33 @@ impl Metric {
                             | Self::BreachCooling
                     ))
         })
+    }
+    /// Explicit selections keep existing saved metric catalogs unchanged.
+    pub fn is_crop(self) -> bool {
+        matches!(self, Self::CropProgress | Self::CropNutrient | Self::CropStandingEdible | Self::CropStandingInedible | Self::CropHarvestedEdible | Self::CropHarvestedInedible | Self::CropCo2 | Self::CropMetabolicWater | Self::CropVapor | Self::CropOxygen | Self::CropLight | Self::CropAuxiliary | Self::CropChemical)
+    }
+    pub fn has_crop_context(self) -> bool {
+        self.is_crop() || matches!(self, Self::HeatCropChemical | Self::HeatCropVapor)
+    }
+    fn crop_value(self, row: &Sample) -> Option<f64> {
+        let c = crate::habitat_crop_trajectory::retained(row)?;
+        let value = match self {
+            Self::CropProgress => c.source_progress_days,
+            Self::CropNutrient => c.nutrient_equivalent_kg,
+            Self::CropStandingEdible => c.standing_dry_kg[0],
+            Self::CropStandingInedible => c.standing_dry_kg[1],
+            Self::CropHarvestedEdible => c.harvested_dry_kg[0],
+            Self::CropHarvestedInedible => c.harvested_dry_kg[1],
+            Self::CropCo2 => c.co2_consumed_kg,
+            Self::CropMetabolicWater => c.metabolic_water_consumed_kg,
+            Self::CropVapor => c.vapor_generated_kg,
+            Self::CropOxygen => c.oxygen_generated_kg,
+            Self::CropLight => c.light_electric_j,
+            Self::CropAuxiliary => c.auxiliary_electric_j,
+            Self::CropChemical => c.chemical_energy_j(),
+            _ => return None,
+        };
+        value.is_finite().then_some(value)
     }
     pub fn is_heat(self) -> bool {
         matches!(
@@ -382,12 +440,16 @@ impl Metric {
                 | Self::HeatResidual
                 | Self::HeatExecuted
                 | Self::HeatExcluded
+                | Self::HeatCropChemical
+                | Self::HeatCropVapor
         )
     }
     fn heat_value(self, row: &Sample) -> Option<f64> {
         let ledger = row.habitat.heat.as_ref()?;
         ledger.validate(row.habitat.last_time).ok()?;
         let value = match self {
+            Self::HeatCropChemical => ledger.crop_storage_debits_j?[0],
+            Self::HeatCropVapor => ledger.crop_storage_debits_j?[1],
             Self::HeatBus => ledger.terms_j[0],
             Self::HeatBattery => ledger.terms_j[1],
             Self::HeatMetabolic => ledger.terms_j[2],
@@ -411,6 +473,21 @@ impl Metric {
     }
     pub fn id(self) -> &'static str {
         match self {
+            Self::CropProgress => "crop_progress",
+            Self::CropNutrient => "crop_nutrient",
+            Self::CropStandingEdible => "crop_standing_edible",
+            Self::CropStandingInedible => "crop_standing_inedible",
+            Self::CropHarvestedEdible => "crop_harvested_edible",
+            Self::CropHarvestedInedible => "crop_harvested_inedible",
+            Self::CropCo2 => "crop_co2",
+            Self::CropMetabolicWater => "crop_metabolic_water",
+            Self::CropVapor => "crop_vapor",
+            Self::CropOxygen => "crop_oxygen",
+            Self::CropLight => "crop_light",
+            Self::CropAuxiliary => "crop_auxiliary",
+            Self::CropChemical => "crop_chemical",
+            Self::HeatCropChemical => "heat_crop_chemical",
+            Self::HeatCropVapor => "heat_crop_vapor",
             Self::HeatBus => "heat_bus",
             Self::HeatBattery => "heat_battery",
             Self::HeatMetabolic => "heat_metabolic",
@@ -459,6 +536,21 @@ impl Metric {
     }
     pub fn label(self) -> &'static str {
         match self {
+            Self::CropProgress => "Supported crop reference progress",
+            Self::CropNutrient => "Retained crop nutrient-equivalent",
+            Self::CropStandingEdible => "Standing edible dry crop",
+            Self::CropStandingInedible => "Standing inedible dry crop",
+            Self::CropHarvestedEdible => "Harvested edible dry crop",
+            Self::CropHarvestedInedible => "Harvested inedible dry crop",
+            Self::CropCo2 => "Cumulative crop CO₂ consumed",
+            Self::CropMetabolicWater => "Cumulative crop metabolic water consumed",
+            Self::CropVapor => "Cumulative crop vapor generated",
+            Self::CropOxygen => "Cumulative surrogate crop oxygen",
+            Self::CropLight => "Cumulative crop lighting electricity",
+            Self::CropAuxiliary => "Cumulative crop auxiliary electricity",
+            Self::CropChemical => "Retained dry crop chemical storage",
+            Self::HeatCropChemical => "Cumulative crop chemical storage debit",
+            Self::HeatCropVapor => "Cumulative crop vapor storage debit",
             Self::HeatBus => "Cumulative bus heat",
             Self::HeatBattery => "Cumulative conversion heat",
             Self::HeatMetabolic => "Cumulative metabolic heat",
@@ -508,6 +600,8 @@ impl Metric {
             };
         }
         match self {
+            Self::CropProgress => "days",
+            Self::CropLight | Self::CropAuxiliary | Self::CropChemical => "J",
             Self::Temperature => "K",
             Self::OxygenPressure | Self::Co2Pressure | Self::TotalPressure => "Pa",
             Self::Battery => "kWh",
@@ -531,6 +625,7 @@ impl Metric {
         )
     }
     pub fn value(self, row: &Sample) -> Option<f64> {
+        if self.is_crop() { return self.crop_value(row); }
         if self.is_heat() {
             return self.heat_value(row);
         }
@@ -597,7 +692,22 @@ impl Metric {
             Self::ElectrolysisOxygen => b.electrolysis.as_ref()?.oxygen_generated_kg,
             Self::SabatierWater => b.sabatier.as_ref()?.water_generated_kg,
             Self::SabatierHeat => b.sabatier.as_ref()?.reaction_heat_j / 1000.0,
-            Self::HeatBus
+            Self::CropProgress
+            | Self::CropNutrient
+            | Self::CropStandingEdible
+            | Self::CropStandingInedible
+            | Self::CropHarvestedEdible
+            | Self::CropHarvestedInedible
+            | Self::CropCo2
+            | Self::CropMetabolicWater
+            | Self::CropVapor
+            | Self::CropOxygen
+            | Self::CropLight
+            | Self::CropAuxiliary
+            | Self::CropChemical
+            | Self::HeatCropChemical
+            | Self::HeatCropVapor
+            | Self::HeatBus
             | Self::HeatBattery
             | Self::HeatMetabolic
             | Self::HeatElectrolysis

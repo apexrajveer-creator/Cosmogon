@@ -374,6 +374,10 @@ impl Study {
             let recordings = if self.factorial_mode { self.paired.as_ref().map(|d| d.recordings.iter().collect::<Vec<_>>()).unwrap_or_else(|| vec![r]) } else { std::iter::once(r).chain(self.comparison.as_ref()).collect() };
             metadata["heat_trajectory_context"] = cosmogon_sim::habitat_heat_trajectory::context(&recordings);
         }
+        if self.metric.has_crop_context() {
+            let recordings = if self.factorial_mode { self.paired.as_ref().map(|d| d.recordings.iter().collect::<Vec<_>>()).unwrap_or_else(|| vec![r]) } else { std::iter::once(r).chain(self.comparison.as_ref()).collect() };
+            metadata["crop_trajectory_context"] = cosmogon_sim::habitat_crop_trajectory::context(&recordings);
+        }
         Some(metadata)
     }
 }
@@ -387,6 +391,14 @@ fn value_text(value: Option<f64>) -> String {
             }
         })
         .unwrap_or_else(|| "unavailable".into())
+}
+fn crop_scope(ui: &mut egui::Ui, rows: &[&cosmogon_sim::habitat::Sample]) {
+    if let Some(row) = rows.first() {
+        let context = format!("{}\n\nRetained observations:\n{}",cosmogon_sim::habitat_crop_trajectory::SCOPE,rows.iter().enumerate().map(|(i,r)|format!("{i}: {}",cosmogon_sim::habitat_crop_trajectory::label(r))).collect::<Vec<_>>().join("\n"));
+        let prefix=if rows.len()==4 {"A0/B0: "}else if rows.len()==2 {"A: "}else{""};
+        ui.label(egui::RichText::new(format!("{prefix}{}",cosmogon_sim::habitat_crop_trajectory::label(row))).small().color(MUTED)).on_hover_text(context);
+        ui.label(egui::RichText::new("Reference progress is not biological age; dry harvest supplies no crew diet.").small().color(MUTED));
+    }
 }
 fn heat_scope(ui: &mut egui::Ui, rows: &[&cosmogon_sim::habitat::Sample], unit: &str) {
     if let Some(row) = rows.first() {
@@ -448,7 +460,7 @@ pub fn panel(
         ui.add(egui::Label::new(egui::RichText::new(format!("Loaded source: {source}")).small().color(MUTED)).truncate()).on_hover_text(source);
         if study.paired.is_some() {ui.checkbox(&mut study.factorial_mode,"Paired contrast (all four branches)");}
         ui.horizontal_wrapped(|ui| {
-            egui::ComboBox::from_id_salt("figure-metric").selected_text(study.metric.label()).show_ui(ui,|ui|{for m in Metric::ALL {ui.selectable_value(&mut study.metric,m,m.label());}});
+            egui::ComboBox::from_id_salt("figure-metric").selected_text(format!("{} ({})",study.metric.label(),study.metric.unit())).show_ui(ui,|ui|{for m in Metric::ALL {ui.selectable_value(&mut study.metric,m,m.label());}});
             if study.factorial_mode {egui::ComboBox::from_id_salt("figure-effect").selected_text(study.effect.label()).show_ui(ui,|ui|{for e in Effect::ALL {ui.selectable_value(&mut study.effect,e,e.label());}});}
         });
         ui.horizontal_wrapped(|ui| {
@@ -469,7 +481,11 @@ pub fn panel(
                 let rows = if study.factorial_mode { study.paired.as_ref().map(|d| d.recordings.iter().filter_map(|r| r.rows.get(study.selected)).collect::<Vec<_>>()).unwrap_or_default() } else { std::iter::once(recording).chain(study.comparison.as_ref()).filter_map(|r| r.rows.get(study.selected)).collect() };
                 heat_scope(ui, &rows, study.metric.unit());
             }
-            study.graph.show(ui,&data,&mut study.selected,study.metric.unit(),if study.metric.is_heat(){90.}else{100.},true);
+            if study.metric.has_crop_context() {
+                let rows: Vec<_> = if study.factorial_mode { study.paired.as_ref().map(|d| d.recordings.iter().filter_map(|r| r.rows.get(study.selected)).collect()).unwrap_or_default() } else { std::iter::once(recording).chain(study.comparison.as_ref()).filter_map(|r| r.rows.get(study.selected)).collect() };
+                crop_scope(ui,&rows);
+            }
+            study.graph.show(ui,&data,&mut study.selected,study.metric.unit(),if study.metric.is_heat() || study.metric.is_crop(){90.}else{100.},true);
             let busy=study.task.is_some() || study.sweep_task.is_some() || study.comparison_task.is_some();
             if study.figure.controls(ui,busy) {let figure=study.prepare_figure();study.figure.start(figure);}
         }else{ui.label("Open an actual recording first.");}
@@ -483,7 +499,7 @@ pub fn panel(
     study.sync_graph_layout();
     if study.graph_mode && !study.experiment_mode {
         ui.horizontal_wrapped(|ui|{
-            egui::ComboBox::from_id_salt("layout-metric").selected_text(study.metric.label()).show_ui(ui,|ui|{for metric in Metric::ALL {ui.selectable_value(&mut study.metric,metric,metric.label());}});
+            egui::ComboBox::from_id_salt("layout-metric").selected_text(format!("{} ({})",study.metric.label(),study.metric.unit())).show_ui(ui,|ui|{for metric in Metric::ALL {ui.selectable_value(&mut study.metric,metric,metric.label());}});
             if study.paired.is_some(){egui::ComboBox::from_id_salt("layout-effect").selected_text(study.effect.label()).show_ui(ui,|ui|{for effect in Effect::ALL {ui.selectable_value(&mut study.effect,effect,effect.label());}});}
             ui.selectable_value(&mut study.alignment,Alignment::Elapsed,"Elapsed time");ui.selectable_value(&mut study.alignment,Alignment::World,"World time");
         });
@@ -526,7 +542,7 @@ pub fn panel(
             r.rows.len()
         ));
         egui::ComboBox::from_id_salt("habitat-recording-metric")
-            .selected_text(study.metric.label())
+            .selected_text(format!("{} ({})",study.metric.label(),study.metric.unit()))
             .show_ui(ui, |ui| {
                 for metric in Metric::ALL {
                     ui.selectable_value(&mut study.metric, metric, metric.label());
@@ -550,6 +566,7 @@ pub fn panel(
         study.graph.layout.alignment=match study.alignment{Alignment::Elapsed=>"elapsed",Alignment::World=>"world"}.into();
         ui.label(format!("{} ({}) vs {}",study.metric.label(),study.metric.unit(),if study.alignment==Alignment::Elapsed{"elapsed time"}else{"world time since J2000"}));
         if study.metric.is_heat() { heat_scope(ui, &std::iter::once(r).chain(study.comparison.as_ref()).filter_map(|r| r.rows.get(study.selected)).collect::<Vec<_>>(), study.metric.unit()); }
+        if study.metric.has_crop_context() {crop_scope(ui,&std::iter::once(r).chain(study.comparison.as_ref()).filter_map(|r|r.rows.get(study.selected)).collect::<Vec<_>>());}
         study.graph.show(ui,&data,&mut study.selected,study.metric.unit(),120.,true);
         ui.add(
             egui::Slider::new(&mut study.selected, 0..=r.rows.len() - 1).text("Observation index"),
@@ -752,7 +769,7 @@ fn paired_results(ui:&mut egui::Ui,study:&mut Study) {
         if let Some(status)=&study.status {ui.colored_label(ACCENT,status);}return;
     }
     ui.horizontal_wrapped(|ui| {
-        egui::ComboBox::from_id_salt("paired-response-metric").selected_text(study.metric.label()).show_ui(ui,|ui| {for metric in Metric::ALL {ui.selectable_value(&mut study.metric,metric,metric.label());}});
+        egui::ComboBox::from_id_salt("paired-response-metric").selected_text(format!("{} ({})",study.metric.label(),study.metric.unit())).show_ui(ui,|ui| {for metric in Metric::ALL {ui.selectable_value(&mut study.metric,metric,metric.label());}});
         if study.paired_pane==0 {egui::ComboBox::from_id_salt("paired-effect").selected_text(study.effect.label()).show_ui(ui,|ui|{for e in Effect::ALL {ui.selectable_value(&mut study.effect,e,e.label());}});}
     });
     if study.paired_curve.as_ref().is_none_or(|(m,_)|*m!=study.metric) {
@@ -760,6 +777,7 @@ fn paired_results(ui:&mut egui::Ui,study:&mut Study) {
     }
     let points=&study.paired_curve.as_ref().expect("prepared curve").1;
     if study.metric.is_heat() { heat_scope(ui, &design.recordings.iter().filter_map(|r| r.rows.get(study.selected)).collect::<Vec<_>>(), study.metric.unit()); }
+    if study.metric.has_crop_context() {crop_scope(ui,&design.recordings.iter().filter_map(|r|r.rows.get(study.selected)).collect::<Vec<_>>());}
     if study.paired_pane==0 {
         study.graph.layout.metric=study.metric.id().into();study.graph.layout.effect=study.effect.id().into();
         let data=paired_series(points,study.effect,study.alignment);
@@ -777,7 +795,7 @@ fn paired_results(ui:&mut egui::Ui,study:&mut Study) {
     else {egui::Grid::new("paired-contrasts").striped(true).show(ui,|ui| {
         for (label,value) in [("A change at B0",c.a_at_b0),("A change at B1",c.a_at_b1),("B change at A0",c.b_at_a0),("B change at A1",c.b_at_a1),("Average A change",c.average_a),("Average B change",c.average_b),("Difference of conditional A changes",c.difference_in_differences),("Standard AB effect (half that difference)",c.standard_ab_effect)] {ui.label(label);ui.strong(value_text(value));ui.end_row();}
     });}
-    if point.branch_support.iter().any(|s|*s!="matched") {ui.colored_label(ACCENT,if study.metric.is_heat() {"Contrast unavailable: ledger origin, execution coverage or completed-time mismatch; branch values remain retained."} else {"Contrast unavailable: missing value or mismatched interval support."});}
+    if point.branch_support.iter().any(|s|*s!="matched") {ui.colored_label(ACCENT,if study.metric.is_heat() {"Contrast unavailable: ledger origin, execution coverage or completed-time mismatch; branch values remain retained."} else if study.metric.is_crop() {"Contrast unavailable: crop origin, completed-time or availability mismatch; branch values remain retained."} else {"Contrast unavailable: missing value or mismatched interval support."});}
     ui.label(egui::RichText::new("Stored model results · gaps remain unavailable · sources/export in Files & method").small().color(MUTED));
 }
 
@@ -937,6 +955,21 @@ fn experiment(
 mod tests {
     use super::*;
 
+    #[test]
+    fn actual_crop_figure_and_metadata_keep_loaded_source_when_drafts_change() {
+        let d=cosmogon_sim::crop_process::definition_at(cosmogon_sim::BodyRef{system:0,body:0},0.,0.);
+        let mut h=cosmogon_sim::habitat::Habitat::new(0,d,1000.).unwrap();
+        let first=cosmogon_sim::habitat::Sample{simulation_time_s:1000.,habitat:h.clone()};
+        h.step(1060.,cosmogon_sim::habitat::Environment{irradiance_w_m2:Some(0.),exterior_temperature_k:Some(210.)}).unwrap();
+        let r=Recording{rows:vec![first,cosmogon_sim::habitat::Sample{simulation_time_s:1060.,habitat:h}],summary:serde_json::json!({"source":"actual installed crop"})};
+        let mut study=Study{figure_mode:true,metric:Metric::CropProgress,..Default::default()};
+        study.commit(r.clone(),"loaded crop folder".into(),Some(1)).unwrap();study.path="unopened crop folder".into();
+        let f=study.prepare_figure().unwrap();assert_eq!(f.exact_samples,vec![r.rows]);assert_eq!(f.series[0].points[1].value,Some(0.));
+        assert_eq!(f.crop_trajectory_context.as_ref().unwrap()["series"][0]["observations"][1]["retained_crop"]["current_crop_configuration"]["assume_maintained_conditions"],false);
+        let m=study.metadata().unwrap();assert_eq!(m["selected_value"],0.);assert_eq!(m["crop_trajectory_context"]["series"][0]["observations"][1]["retained_crop"]["origin_world_time_s"],1000.);
+        study.metric=Metric::HeatCropVapor;assert!(study.prepare_figure().unwrap().crop_trajectory_context.is_some());
+        study.metric=Metric::Water;assert!(study.metadata().unwrap().get("crop_trajectory_context").is_none());
+    }
     #[test]
     fn selected_heat_figure_keeps_loaded_coverage_and_unopened_path_separate() {
         let mut h=cosmogon_sim::habitat::Habitat::new(0,cosmogon_sim::habitat::Definition::at(cosmogon_sim::BodyRef {system:0,body:0},0.,0.),1000.).unwrap();

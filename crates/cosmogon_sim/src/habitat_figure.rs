@@ -40,6 +40,8 @@ pub struct Figure {
     pub configuration_assumptions: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub heat_trajectory_context: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crop_trajectory_context: Option<Value>,
     pub limits: &'static str,
 }
 impl Figure {
@@ -110,6 +112,7 @@ impl Figure {
             heat_trajectory_context: metric
                 .is_heat()
                 .then(|| crate::habitat_heat_trajectory::context(&recordings)),
+            crop_trajectory_context: metric.has_crop_context().then(|| crate::habitat_crop_trajectory::context(&recordings)),
             limits: LIMITS,
         })
     }
@@ -141,7 +144,7 @@ impl Figure {
                 value: effect.value(&p.contrasts),
                 support: if effect.value(&p.contrasts).is_some() {
                     "matched"
-                } else if metric.is_heat() {
+                } else if metric.is_heat() || metric.is_crop() {
                     p.branch_support
                         .iter()
                         .copied()
@@ -173,6 +176,7 @@ impl Figure {
             heat_trajectory_context: metric.is_heat().then(|| {
                 crate::habitat_heat_trajectory::context(&d.recordings.iter().collect::<Vec<_>>())
             }),
+            crop_trajectory_context: metric.has_crop_context().then(|| crate::habitat_crop_trajectory::context(&d.recordings.iter().collect::<Vec<_>>())),
             limits: LIMITS,
         })
     }
@@ -267,8 +271,11 @@ impl Figure {
         if self.heat_trajectory_context.is_some() {
             out.push_str(&xml(crate::habitat_heat_trajectory::SCOPE));
         }
+        if self.crop_trajectory_context.is_some() { out.push_str(&xml(crate::habitat_crop_trajectory::SCOPE)); }
         out.push_str("</desc>");
-        let _=write!(out,"<metadata>{}</metadata>",xml(&json!({"format":self.format,"schema_version":self.schema_version,"layout":self.layout,"mode":self.mode,"source_summaries":self.source_summaries,"full_inputs":"figure.json","numeric_values":"points.csv","heat_trajectory_context":self.heat_trajectory_context}).to_string()));
+        let mut metadata=json!({"format":self.format,"schema_version":self.schema_version,"layout":self.layout,"mode":self.mode,"source_summaries":self.source_summaries,"full_inputs":"figure.json","numeric_values":"points.csv","heat_trajectory_context":self.heat_trajectory_context});
+        if let Some(c)=&self.crop_trajectory_context {metadata["crop_trajectory_context"]=c.clone();}
+        let _=write!(out,"<metadata>{}</metadata>",xml(&metadata.to_string()));
         out.push_str("<rect width=\"1000\" height=\"720\" fill=\"white\"/><g font-family=\"sans-serif\" fill=\"#18212c\">");
         text(&mut out, 110., 38., 24., "start", self.metric);
         text(
@@ -435,6 +442,8 @@ impl Figure {
             "start",
             if self.heat_trajectory_context.is_some() {
                 "Cumulative from ledger origin; executed subset only. Coverage/origins: figure.json."
+            } else if self.crop_trajectory_context.is_some() {
+                "Finite reference crop; progress is not biological age. Assumptions: figure.json."
             } else {
                 "Markers: stored samples. Lines: visual guides; gaps remain unavailable."
             },

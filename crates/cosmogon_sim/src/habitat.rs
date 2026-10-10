@@ -1288,7 +1288,7 @@ pub fn export(
     if h.heat.is_some() {manifest["heat_accounting_source"]=crate::habitat_heat::source();manifest["heat_accounting_model_descriptor"]=serde_json::to_value(crate::research::PhysicsModelRegistry::get("habitat-heat")).map_err(|e|e.to_string())?;}
     if h.uses_crop() {manifest["crop_source"]=crate::crop_process::source();manifest["crop_model_descriptor"]=serde_json::to_value(crate::research::PhysicsModelRegistry::get("finite-crop")).map_err(|e|e.to_string())?;}
     let mut data=vec![("definition.json",serde_json::to_vec_pretty(&h.definition).map_err(|e|e.to_string())?),("report.json",serde_json::to_vec_pretty(&h.report()).map_err(|e|e.to_string())?),("samples.json",serde_json::to_vec_pretty(rows).map_err(|e|e.to_string())?),("samples.csv",csv.into_bytes()),("initial.cosmo",crate::save::to_json(initial,"Habitat study initial world").map_err(|e|e.to_string())?.into_bytes()),("final.cosmo",crate::save::to_json(final_world,"Habitat study final world").map_err(|e|e.to_string())?.into_bytes()),("manifest.json",serde_json::to_vec_pretty(&manifest).map_err(|e|e.to_string())?)];
-    if h.uses_crop() {data.push(("crop.csv",crate::crop_process::samples_csv(rows).into_bytes()));}
+    if h.uses_crop() {data.insert(data.len()-1,("crop.csv",crate::crop_process::samples_csv(rows).into_bytes()));}
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }

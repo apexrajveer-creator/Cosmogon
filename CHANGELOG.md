@@ -1,3 +1,7 @@
+## Unreleased — recorded actual crop trajectories
+
+- Add explicit retained crop progress/stocks/material/electric/chemical curves, signed heat debit selections, aligned-origin/completed-time comparisons and protected source-context research figures through existing native/CLI tools. Keep actual zeros distinct from absent state, disclose ideal chamber/source progress limits and preserve immutable saved catalogs, old analyses, solver/save state and golden `0xf2c4140a45ae509b`. Write optional crop CSV before habitat completion manifest. No graphics/dependency or calibrated biology claim.
+
 ## Unreleased — finite installed crop process
 
 - Connect explicit originally installed finite crop state to real model water/CO₂/nutrient feeds, bounded oxygen/dry stores, allocated source lighting and chemical/vapor heat storage. Add native setup/controls/harvest, exact save pins, protected actual crop CSV/reopening and ordinary undoable harvest without crew diet credit or hidden replanting. Ideal maintained conditions and chemical energy remain user assumptions; source progress is not biological age. Absent legacy state and golden `0xf2c4140a45ae509b` stay unchanged; enabled habitat state/fingerprints deliberately change. No shader/graphics/dependency changes or calibrated biology claim.
