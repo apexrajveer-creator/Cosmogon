@@ -267,14 +267,31 @@ impl Default for GeographicStart {
         }
     }
 }
+pub const CONTACT_START_MODEL: &str = "cosmogon-geographic-contact-start/1";
 impl GeographicStart {
+    pub fn contact_example() -> Self {Self {model:CONTACT_START_MODEL.into(),..Self::default()}}
+    pub fn absolute(&self,world:&Universe,target:BodyRef)->Result<KinematicState,String> {
+        self.validate()?;
+        let frame=SurfaceFrame::at(world,target,world.time)?;
+        let radius=frame.radius_m+self.spherical_altitude_m;
+        if radius<=0. || !radius.is_finite() {return Err("Geographic contact radius must remain positive".into());}
+        let (up,east,north)=enu(self.latitude_deg.to_radians(),self.longitude_east_deg.to_radians());
+        frame.to_inertial(&KinematicState {position_m:up*radius,velocity_m_s:east*self.east_velocity_m_s+north*self.north_velocity_m_s+up*self.up_velocity_m_s})
+    }
+    pub fn contact_flight(&self,world:&Universe,target:BodyRef,plan:Plan,hardware:crate::vehicle_contact_dynamics::Hardware)->Result<Definition,String> {
+        let absolute=self.absolute(world,target)?;
+        let centre=world.systems[target.system as usize].body_state(target.body as usize,world.time);
+        let result=Definition {model:crate::world_vehicle::CONTACT_MODEL.into(),frame:crate::world_vehicle::FRAME.into(),parent:target,plan,
+            initial_relative_position_m:absolute.position_m-centre.pos,initial_relative_velocity_m_s:absolute.velocity_m_s-centre.vel,contact:Some(hardware)};
+        Flight::new(world.next_vehicle_id,result.clone(),world)?;Ok(result)
+    }
     pub fn validate(&self) -> Result<(), String> {
-        if self.model != MODEL {
+        if self.model != MODEL && self.model != CONTACT_START_MODEL {
             return Err("Unsupported geographic arrival model".into());
         }
         crate::planet::mola::validate_coordinates(self.latitude_deg, self.longitude_east_deg)?;
         if !self.spherical_altitude_m.is_finite()
-            || !(0.001..=1e12).contains(&self.spherical_altitude_m)
+            || self.spherical_altitude_m.abs()>1e12 || self.model==MODEL && self.spherical_altitude_m<0.001
             || [
                 self.east_velocity_m_s,
                 self.north_velocity_m_s,
@@ -295,6 +312,7 @@ impl GeographicStart {
         target: BodyRef,
         plan: Plan,
     ) -> Result<Definition, String> {
+        if self.model!=MODEL {return Err("Contact geographic starts require explicit terrain contact hardware".into());}
         self.validate()?;
         let frame = SurfaceFrame::at(world, target, world.time)?;
         let lat = self.latitude_deg.to_radians();
@@ -315,6 +333,7 @@ impl GeographicStart {
             plan,
             initial_relative_position_m: absolute.position_m - centre.pos,
             initial_relative_velocity_m_s: absolute.velocity_m_s - centre.vel,
+            contact: None,
         };
         result.validate(world)?;
         // The ordinary creation path also checks other contact sources.
@@ -580,11 +599,13 @@ mod tests {
         let delta = (after - before + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
             - std::f64::consts::PI;
         assert!((delta / 2. - f.spin_rate_rad_s).abs() < 1e-10);
-        let mut start = GeographicStart::default();
-        start.latitude_deg = 20.;
-        start.longitude_east_deg = 130.;
-        start.east_velocity_m_s = 12.;
-        start.north_velocity_m_s = -5.;
+        let start = GeographicStart {
+            latitude_deg: 20.,
+            longitude_east_deg: 130.,
+            east_velocity_m_s: 12.,
+            north_velocity_m_s: -5.,
+            ..Default::default()
+        };
         let craft = Flight::new(0, start.flight(&u, r, Plan::example()).unwrap(), &u).unwrap();
         let reading = Approach::live(&u, &craft, r).unwrap();
         assert!((reading.latitude_deg - 20.).abs() < 1e-7);

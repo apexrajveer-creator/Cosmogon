@@ -133,6 +133,10 @@ pub fn data_versions(u: &Universe) -> std::collections::BTreeMap<String, String>
         m.insert("cosmogon-finite-world-vehicle".into(),crate::world_vehicle::MODEL.into());
         m.insert("cosmogon-supply-vehicle-reference".into(),crate::supply_vehicle::MODEL.into());
     }
+    if u.vehicles.iter().any(|v| v.contact.is_some()) || u.edits.iter().any(|r| matches!(&r.edit, crate::sandbox::Edit::CreateVehicle {definition} if definition.contact.is_some())) {
+        m.insert("cosmogon-finite-terrain-contact".into(),crate::vehicle_contact::MODEL.into());
+        m.insert("cosmogon-world-vehicle-contact-capability".into(),crate::world_vehicle::CONTACT_MODEL.into());
+    }
     m
 }
 
@@ -185,7 +189,7 @@ pub fn from_json(s: &str) -> Result<Universe, SaveError> {
             if h.id>=u.next_habitat_id || !ids.insert(h.id) || u.systems.get(h.definition.body.system as usize).and_then(|s|s.bodies.get(h.definition.body.body as usize)).is_none() {return Err(SaveError::Model("Duplicate habitat identifier or invalid world reference".into()));}
         }
     }
-    for (id,model) in [("cosmogon-finite-world-vehicle",crate::world_vehicle::MODEL),("cosmogon-supply-vehicle-reference",crate::supply_vehicle::MODEL)] {
+    for (id,model) in [("cosmogon-finite-world-vehicle",crate::world_vehicle::MODEL),("cosmogon-supply-vehicle-reference",crate::supply_vehicle::MODEL),("cosmogon-finite-terrain-contact",crate::vehicle_contact::MODEL),("cosmogon-world-vehicle-contact-capability",crate::world_vehicle::CONTACT_MODEL)] {
         if (expected.contains_key(id) || terrain_versions.get(id).is_some()) && terrain_versions.get(id).and_then(Value::as_str) != Some(model) {
             return Err(SaveError::Vehicle(format!("Missing or mismatched {id} model pin")));
         }

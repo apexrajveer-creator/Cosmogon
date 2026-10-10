@@ -248,7 +248,7 @@ impl FlightUi {
             )
             .strong(),
         );
-        ui.label(egui::RichText::new("First spherical contact is not a safe landing. Cargo remains aboard; no habitat supply grant.").small().color(ACCENT));
+        ui.label(egui::RichText::new("Contact does not establish safe landing. Cargo remains aboard; no habitat supply grant.").small().color(ACCENT));
         match pane {
             4 => self.live(ui, sim, plan, now),
             5 => self.recorded(ui, &sim.universe),
@@ -329,12 +329,20 @@ impl FlightUi {
             ui.label("Create a finite live craft or reopen a complete flight recording to observe approach.");
         }
         ui.collapsing("Geographic initial conditions",|ui| {
-            ui.label("Explicit authored starting position and ground-relative east/north/up velocity. No surface launch, landing or stock loading is implied.");
+            let mut contact=self.geographic_start.model==cosmogon_sim::vehicle_arrival::CONTACT_START_MODEL;
+            if ui.checkbox(&mut contact,"Stage geographic conditions with terrain contact hardware").changed() {self.geographic_start.model=if contact {cosmogon_sim::vehicle_arrival::CONTACT_START_MODEL} else {cosmogon_sim::vehicle_arrival::MODEL}.into();}
+            ui.label("Explicit authored ground-relative start. Contact mode permits signed height relative to the spherical base; actual terrain and feet must clear. No surface launch, safe landing or stock loading is implied.");
             for (label,value) in [("North latitude (°)",&mut self.geographic_start.latitude_deg),("East longitude (°)",&mut self.geographic_start.longitude_east_deg),("Above spherical radius (m)",&mut self.geographic_start.spherical_altitude_m),("East velocity (m/s)",&mut self.geographic_start.east_velocity_m_s),("North velocity (m/s)",&mut self.geographic_start.north_velocity_m_s),("Up velocity (m/s)",&mut self.geographic_start.up_velocity_m_s)] {
                 ui.horizontal(|ui|{ui.label(label);ui.add(egui::DragValue::new(value).speed(0.1).max_decimals(9));});
             }
             let target=match sim.selected {Some(Target::Body(r))=>Some(r),_=>None};
-            let candidate=target.ok_or_else(||"Select a solid starting body".to_string()).and_then(|r|self.geographic_start.flight(&sim.universe,r,plan.clone()));
+            let candidate=target.ok_or_else(||"Select a solid starting body".to_string()).and_then(|r| {
+                if contact {
+                    let pose=self.geographic_start.absolute(&sim.universe,r)?;
+                    let hardware=if let Some(h)=self.draft.as_ref().filter(|d|d.parent==r).and_then(|d|d.contact.clone()) {h} else {cosmogon_sim::vehicle_contact_dynamics::Hardware::example(&sim.universe,r,pose.position_m)?};
+                    self.geographic_start.contact_flight(&sim.universe,r,plan.clone(),hardware)
+                } else {self.geographic_start.flight(&sim.universe,r,plan.clone())}
+            });
             if let Err(reason)=&candidate {ui.colored_label(ACCENT,reason);}
             if ui.add_enabled(candidate.is_ok(),egui::Button::new("Stage these geographic conditions for a recorded study")).clicked() {
                 self.draft=candidate.as_ref().ok().cloned();self.status=Some(format!("Geographic vectors staged at world {:.6} s; reuse this paused world for the same longitude, or explicitly recompute before creation.",sim.universe.time));
@@ -420,7 +428,18 @@ impl FlightUi {
                     }
                 });
             }
-            let valid = d.validate(&sim.universe);
+            let mut terrain_contact=d.contact.is_some();
+            if ui.checkbox(&mut terrain_contact,"Use terrain and rigid-body contact model").changed() {
+                if terrain_contact {
+                    let centre=sim.universe.systems.get(d.parent.system as usize).and_then(|s|s.bodies.get(d.parent.body as usize).map(|_|s.body_state(d.parent.body as usize,sim.universe.time).pos));
+                    match centre.ok_or_else(||"Starting body is unavailable".to_string()).and_then(|p|cosmogon_sim::vehicle_contact_dynamics::Hardware::example(&sim.universe,d.parent,p+d.initial_relative_position_m)) {
+                        Ok(h)=>{d.contact=Some(h);d.model=cosmogon_sim::world_vehicle::CONTACT_MODEL.into();},
+                        Err(e)=>self.status=Some(e),
+                    }
+                } else {d.contact=None;d.model=cosmogon_sim::world_vehicle::MODEL.into();}
+            }
+            if let Some(h)=&mut d.contact {hardware_controls(ui,h);}
+            let valid = Flight::new(0,d.clone(),&sim.universe);
             if let Err(e) = &valid {
                 ui.colored_label(ACCENT, e);
             }
@@ -559,6 +578,9 @@ impl FlightUi {
                 ui.selectable_value(&mut self.metric, i, *label);
             }
         });
+        if bundle.study.flight.contact.is_some() {ui.horizontal_wrapped(|ui| {
+            for (index,label) in [(4,"Loaded feet"),(5,"Current elastic energy"),(6,"Cumulative contact dissipation"),(7,"Body angular speed"),(8,"Cumulative contact residual")] {ui.selectable_value(&mut self.metric,index,label);}
+        });} else if self.metric>3 {self.metric=0;}
         plot(ui, bundle, self.metric, self.selected_row);
         ui.collapsing("Retained source and clock support",|ui|{
             ui.add(egui::Label::new(format!("Source: {} · origin {}",self.source,bundle.manifest["origin_fingerprint"])).wrap());
@@ -633,7 +655,7 @@ impl FlightUi {
         ui.separator();
         ui.strong("Model and source limits");
         ui.label("Newtonian test particle; primary star, companion and present-body gravity. Fixed task and source-sampling approximations are retained in every manifest.");
-        ui.label("No atmosphere/entry heating, attitude, staging, terrain landing, docking or cargo transfer. Created cargo is an explicit initial condition. Gravity/frame changes stop unresolved flight with a retained reason.");
+        ui.label("Original flight uses spherical contact. Explicit terrain mode adds authored rigid-body/gear dynamics; it does not establish safe landing or attachment. No atmosphere/entry heating, staging, docking or cargo transfer. Created cargo is an explicit initial condition; source edits stop unresolved flight.");
         for (title, url) in [
             (
                 "NASA Glenn gravity",
@@ -652,7 +674,7 @@ impl FlightUi {
         }
         ui.collapsing("Complete model context", |ui| {
             ui.add(
-                egui::Label::new(serde_json::to_string_pretty(&recording::context()).unwrap())
+                egui::Label::new(serde_json::to_string_pretty(&self.result.as_ref().map(|b|recording::context_for(&b.study.flight)).or_else(||self.draft.as_ref().map(recording::context_for)).unwrap_or_else(recording::context)).unwrap())
                     .wrap(),
             );
         });
@@ -665,6 +687,30 @@ impl FlightUi {
             });
         }
     }
+}
+fn hardware_controls(ui:&mut egui::Ui,h:&mut cosmogon_sim::vehicle_contact_dynamics::Hardware) {
+    ui.collapsing("Contact hardware assumptions",|ui| {
+        ui.label("Editable authored mechanics. Inertia scales with retained mass; symmetric fuel removal carries co-rotating angular momentum. Central thrust uses inertial command axes.");
+        for (label,v) in [("Gyration radii (m)",&mut h.gyration_radii_m),("Initial body angular velocity (rad/s)",&mut h.initial_angular_velocity_body_rad_s)] {
+            ui.label(label);ui.horizontal_wrapped(|ui| {for (axis,value) in [("X",&mut v.x),("Y",&mut v.y),("Z",&mut v.z)] {ui.label(axis);ui.add(egui::DragValue::new(value).speed(0.01).max_decimals(9));}});
+        }
+        ui.label("Unit Hamilton orientation (body axes to inertial axes; X Y Z W)");
+        ui.horizontal_wrapped(|ui| {for value in &mut h.initial_orientation_xyzw {ui.add(egui::DragValue::new(value).speed(0.001).max_decimals(9));}});
+        if ui.button("Normalize authored orientation").clicked() {
+            let norm=h.initial_orientation_xyzw.iter().map(|v|v*v).sum::<f64>().sqrt();
+            if norm.is_finite() && norm>0. {for v in &mut h.initial_orientation_xyzw {*v/=norm;}}
+        }
+        for (label,value) in [("Spherical hull radius (m)",&mut h.hull_radius_m),("Terrain normal probe (m)",&mut h.normal_probe_m),("Maximum step (s)",&mut h.maximum_step_s)] {
+            ui.horizontal_wrapped(|ui| {ui.label(label);ui.add(egui::DragValue::new(value).speed(0.001).max_decimals(9));});
+        }
+        for (index,foot) in h.feet.iter_mut().enumerate() {ui.collapsing(format!("Foot {}",index+1),|ui| {
+            ui.label("Body offset (m)");ui.horizontal_wrapped(|ui| {for (axis,value) in [("X",&mut foot.offset_body_m.x),("Y",&mut foot.offset_body_m.y),("Z",&mut foot.offset_body_m.z)] {ui.label(axis);ui.add(egui::DragValue::new(value).speed(0.01));}});
+            for (label,value) in [("Stiffness (N/m)",&mut foot.response.stiffness_n_m),("Damping (N·s/m)",&mut foot.response.damping_n_s_m),("Maximum stroke (m)",&mut foot.response.maximum_stroke_m),("Resultant load limit (N)",&mut foot.response.maximum_load_n),("Sliding friction coefficient",&mut foot.response.sliding_friction),("Slip smoothing speed (m/s)",&mut foot.response.slip_speed_scale_m_s)] {
+                ui.horizontal_wrapped(|ui| {ui.label(label);ui.add(egui::DragValue::new(value).speed(0.01).max_decimals(9));});
+            }
+        });}
+        ui.label("Static friction, attachment, entry/heating and physical cargo delivery are still unavailable. Study work is bounded; use a short recording first.");
+    });
 }
 fn arrival_readings(ui: &mut egui::Ui, r: &Approach) {
     ui.label(format!(
@@ -739,6 +785,20 @@ fn readings(ui: &mut egui::Ui, f: &Flight, world_time: f64) {
         "Powered {:.9} s · fuel-limited command {:.9} s",
         p.powered_duration_s, p.fuel_limited_duration_s
     ));
+    if let Some(r)=&f.contact {
+        let count=r.feet.iter().filter(|foot|foot.response.normal_load_n>0.).count();
+        ui.strong(format!("Terrain contact · {count}/{} loaded feet · orientation and motion are integrated",r.feet.len()));
+        ui.label(format!("Peak compression {:.6} m · peak resultant load {:.3} N",r.last_work.maximum_compression_m,r.last_work.maximum_resultant_load_n));
+        ui.label(format!("Body angular speed {:.6} rad/s · {} resolved substeps in {:.6} s",r.angular_velocity_body_rad_s.length(),r.last_work.substeps,r.last_work.duration_s));
+        ui.label(format!("Contact balance residual {:.6} J · accumulated {:.6} J",r.last_work.contact_balance_residual_j,r.cumulative_work.contact_balance_residual_j));
+        ui.label("Authored finite gear response with sliding friction. No static attachment, safe landing certification or cargo delivery.");
+        ui.collapsing("Per-foot forces, rotating terrain and full work evidence",|ui| {
+            for (i,foot) in r.feet.iter().enumerate() {
+                ui.label(format!("Foot {} · gap {:.6} m · compression {:.6} m · normal {:.3} N · slope {:.3}°",i+1,foot.surface.tangent_gap_m,foot.response.compression_m,foot.response.normal_load_n,foot.surface.slope_rad.to_degrees()));
+            }
+            ui.add(egui::Label::new(serde_json::to_string_pretty(r).unwrap()).wrap());
+        });
+    }
     ui.collapsing("Position, velocity and complete numeric readings",|ui|{
         ui.label(format!("System-local position [{:.6}, {:.6}, {:.6}] m",f.position_m.x,f.position_m.y,f.position_m.z));
         ui.label(format!("System-frame velocity [{:.9}, {:.9}, {:.9}] m/s",f.velocity_m_s.x,f.velocity_m_s.y,f.velocity_m_s.z));
@@ -756,7 +816,12 @@ fn plot(ui: &mut egui::Ui, b: &Bundle, metric: usize, selected: usize) {
             0 => r.flight.propulsion.propellant_kg,
             1 => r.flight.velocity_m_s.length(),
             2 => r.flight.propulsion.cumulative_ideal_delta_v_m_s,
-            _ => r.flight.position_m.x - b.rows[0].flight.position_m.x,
+            3 => r.flight.position_m.x - b.rows[0].flight.position_m.x,
+            4 => r.flight.contact.as_ref().map(|s|s.feet.iter().filter(|f|f.response.normal_load_n>0.).count() as f64).unwrap_or(0.),
+            5 => r.flight.contact.as_ref().map(|s|s.feet.iter().map(|f|f.response.stored_elastic_energy_j).sum()).unwrap_or(0.),
+            6 => r.flight.contact.as_ref().map(|s|s.cumulative_work.normal_dissipation_j+s.cumulative_work.sliding_dissipation_j).unwrap_or(0.),
+            7 => r.flight.contact.as_ref().map(|s|s.angular_velocity_body_rad_s.length()).unwrap_or(0.),
+            _ => r.flight.contact.as_ref().map(|s|s.cumulative_work.contact_balance_residual_j).unwrap_or(0.),
         })
         .collect::<Vec<_>>();
     let min = values.iter().copied().fold(f64::INFINITY, f64::min);
@@ -793,13 +858,7 @@ fn plot(ui: &mut egui::Ui, b: &Bundle, metric: usize, selected: usize) {
         .circle_filled(points[selected], 3., egui::Color32::WHITE);
     ui.label(format!(
         "World elapsed 0–{duration:.6} s · raw range {min:.9}–{max:.9} {}",
-        if metric == 0 {
-            "kg"
-        } else if metric == 3 {
-            "m"
-        } else {
-            "m/s"
-        }
+        match metric {0=>"kg",3=>"m",4=>"feet",5|6|8=>"J",7=>"rad/s",_=>"m/s"}
     ));
 }
 pub fn preflight(args: &crate::args::Args) -> Result<(), String> {
@@ -888,6 +947,26 @@ mod tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
+    }
+    #[test]
+    fn contact_worker_pins_hardware_and_exports_exact_new_numeric_evidence() {
+        AsyncComputeTaskPool::get_or_init(bevy::tasks::TaskPool::new);
+        let (world,d)=setup();
+        let centre=world.systems[0].body_state(d.parent.body as usize,world.time).pos;
+        let h=cosmogon_sim::vehicle_contact_dynamics::Hardware::example(&world,d.parent,centre+d.initial_relative_position_m).unwrap();
+        let d=d.with_contact(&world,h).unwrap();
+        let mut form=FlightUi {draft:Some(d.clone()),samples:3,interval_s:1.,..Default::default()};
+        form.start(&world,false);form.draft.as_mut().unwrap().contact.as_mut().unwrap().hull_radius_m=1.;
+        finish(&mut form);
+        let original=form.result.as_ref().unwrap().clone();assert_eq!(original.study.flight,d);
+        assert_eq!(form.draft.as_ref().unwrap().contact.as_ref().unwrap().hull_radius_m,1.);
+        assert_eq!(original.rows.last().unwrap().flight.last_time_s,world.time+2.);
+        assert!(original.rows.last().unwrap().flight.contact.as_ref().unwrap().cumulative_work.substeps>0);
+        let path=std::env::temp_dir().join(format!("cosmogon-native-contact-{}",std::process::id()));let _=std::fs::remove_dir_all(&path);
+        original.export(&path).unwrap();assert!(path.join("contact.csv").exists());
+        assert_eq!(Bundle::read(&path).unwrap().manifest,original.manifest);
+        std::fs::write(path.join("contact.csv"),"changed").unwrap();assert!(Bundle::read(&path).is_err());
+        std::fs::remove_dir_all(path).unwrap();
     }
     #[test]
     fn arrival_worker_freezes_exact_source_keeps_drafts_and_preflights_protected_output() {

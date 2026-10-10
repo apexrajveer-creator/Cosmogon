@@ -119,3 +119,5 @@ Physical finite world-flight checkpoint (2026-10-10): **467 passed plus one exis
 
 
 Rotating vehicle arrival checkpoint (2026-10-10): **479 passed plus one existing ignored**, 50 distinct cases, six inspected packaged layouts, six required checks and a 48.312429-second ordinary packaged run. [Evidence and limits](VEHICLE_ARRIVAL_VALIDATION.md). Exact prior flight/propulsion evidence, world/save/physics and golden remain unchanged; landing/delivery, graphics and the full directive remain incomplete.
+
+Terrain and rigid-body contact checkpoint (2026-10-10): **492 passed plus one existing ignored**, 57 cases, six inspected packaged captures and a 48.261886-second live-contact run. [Evidence and limits](VEHICLE_CONTACT_VALIDATION.md). Separate enabled-state pins; legacy golden/records unchanged. Static support, physical delivery, graphics and the master directive remain incomplete.

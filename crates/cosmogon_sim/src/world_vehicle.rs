@@ -9,6 +9,7 @@ use cosmogon_core::dmath::DMath;
 use serde::{Deserialize, Serialize};
 
 pub const MODEL: &str = "cosmogon-finite-world-vehicle/1";
+pub const CONTACT_MODEL: &str = "cosmogon-finite-world-vehicle/2";
 pub const FRAME: &str = "system-local-inertial-simulation-axes";
 pub(crate) const SUBSTEP_S: f64 = 0.25;
 pub(crate) const TASK: usize = 5;
@@ -26,8 +27,15 @@ pub struct Definition {
     pub initial_relative_position_m: Vec3d,
     /// Added to the body's actual inertial translational velocity; not body-fixed velocity.
     pub initial_relative_velocity_m_s: Vec3d,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contact: Option<crate::vehicle_contact_dynamics::Hardware>,
 }
 impl Definition {
+    pub fn with_contact(mut self, world:&Universe, hardware:crate::vehicle_contact_dynamics::Hardware)->Result<Self,String> {
+        self.model=CONTACT_MODEL.into();self.contact=Some(hardware);
+        Flight::new(world.next_vehicle_id,self.clone(),world)?;
+        Ok(self)
+    }
     pub fn circular_example(u: &Universe, parent: BodyRef, plan: Plan) -> Result<Self, String> {
         let body = u
             .systems
@@ -42,14 +50,16 @@ impl Definition {
             plan,
             initial_relative_position_m: Vec3d::new(r, 0., 0.),
             initial_relative_velocity_m_s: Vec3d::new(0., (G * body.mass / r).sqrt(), 0.),
+            contact: None,
         };
         d.validate(u)?;
         Ok(d)
     }
     pub fn validate_structure(&self) -> Result<(), String> {
-        if self.model != MODEL || self.frame != FRAME {
+        if self.frame != FRAME || !matches!((self.model.as_str(), &self.contact), (MODEL, None) | (CONTACT_MODEL, Some(_))) {
             return Err("Unsupported finite flight model or reference frame".into());
         }
+        if let Some(h) = &self.contact { h.validate()?; }
         self.plan.validate()?;
         if !finite(self.initial_relative_position_m)
             || self.initial_relative_position_m.length() > 1e15
@@ -85,7 +95,7 @@ impl Definition {
         }
         if !finite(self.initial_relative_position_m)
             || self.initial_relative_position_m.length() > 1e15
-            || self.initial_relative_position_m.length() <= body.radius
+            || self.contact.is_none() && self.initial_relative_position_m.length() <= body.radius
         {
             return Err("Choose a finite initial position outside the starting body's spherical boundary, within 1e15 m".into());
         }
@@ -154,6 +164,8 @@ pub struct Flight {
     /// Actual source parameters at the retained craft clock; terminal values are historical.
     pub last_sources: Vec<GravitySample>,
     pub(crate) edit_cursor: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contact: Option<crate::vehicle_contact_dynamics::RigidState>,
 }
 impl Flight {
     pub fn new(id: u64, d: Definition, u: &Universe) -> Result<Self, String> {
@@ -168,7 +180,7 @@ impl Flight {
             || velocity.length() > 1e6
             || sources
                 .iter()
-                .any(|b| (position - b.position_m).length() <= b.radius_m)
+                .any(|b| !(d.contact.is_some() && b.source == Source::Body(d.parent.body)) && (position - b.position_m).length() <= b.radius_m)
         {
             return Err(
                 "Initial craft state is invalid or inside a modeled spherical contact boundary"
@@ -177,6 +189,7 @@ impl Flight {
         }
         supported_motion(position, velocity)?;
         let propulsion = State::new(&d.plan.definition)?;
+        let contact = d.contact.as_ref().map(|h| crate::vehicle_contact_dynamics::RigidState::new(u, d.parent, position, velocity, h)).transpose()?;
         Ok(Self {
             id,
             definition: d,
@@ -189,12 +202,21 @@ impl Flight {
             phase: Phase::Flying,
             last_sources: source_samples(&sources),
             edit_cursor: u.edits.len() as u64,
+            contact,
         })
     }
     /// Validate retained state without reinterpreting original authored conditions
     /// against a body whose mass, radius or existence may have changed since launch.
     pub(crate) fn validate_saved(&self, u: &Universe) -> Result<(), String> {
         self.definition.validate_structure()?;
+        if self.contact.is_some() && matches!(self.phase,Phase::Impact {..}) {
+            return Err("Terrain contact cannot reinterpret a version-1 spherical terminal impact".into());
+        }
+        match (&self.definition.contact, &self.contact) {
+            (None, None) => {},
+            (Some(h), Some(state)) => state.validate(h, self)?,
+            _ => return Err("Flight contact hardware/state model mismatch".into()),
+        }
         let system = u
             .systems
             .get(self.definition.parent.system as usize)
@@ -351,6 +373,7 @@ impl Flight {
     }
     /// One scheduled macro interval. External callers cannot skip unresolved flight.
     pub(crate) fn advance_system(&mut self, system: &StarSystem, to: f64) -> Result<(), String> {
+        if self.contact.is_some() { return Err("Terrain flight requires the complete modeled world".into()); }
         if self.phase != Phase::Flying {
             return Ok(());
         }
@@ -636,7 +659,8 @@ impl Universe {
         }
     }
     pub(crate) fn step_vehicles(&mut self, time: f64) {
-        for flight in &mut self.vehicles {
+        for index in 0..self.vehicles.len() {
+            let mut flight = self.vehicles[index].clone();
             if flight.phase != Phase::Flying {
                 continue;
             }
@@ -664,9 +688,14 @@ impl Universe {
                                 ..
                             }
                     )
+                    || flight.contact.is_some() && matches!(e,
+                        crate::sandbox::Edit::SetMarsTerrain { .. }
+                        | crate::sandbox::Edit::SetProperty { property: crate::sandbox::BodyProperty::RotationPeriod(_) | crate::sandbox::BodyProperty::AxialTilt(_), .. })
                 });
             let result = if discontinuity {
                 Err("A gravity/frame edit occurred after the last resolved craft state; event-time source discontinuity integration is not supported".into())
+            } else if flight.contact.is_some() {
+                crate::vehicle_contact_dynamics::advance(&mut flight, self, time)
             } else {
                 self.systems
                     .get(flight.definition.parent.system as usize)
@@ -690,18 +719,19 @@ impl Universe {
                     }, system:Some(flight.definition.parent.system), body:Some(flight.definition.parent.body), civ:None,
                 });
             }
+            self.vehicles[index] = flight;
         }
     }
 }
 
 #[derive(Clone, Debug)]
-struct Attractor {
-    source: Source,
-    position_m: Vec3d,
-    mu: f64,
-    radius_m: f64,
+pub(crate) struct Attractor {
+    pub(crate) source: Source,
+    pub(crate) position_m: Vec3d,
+    pub(crate) mu: f64,
+    pub(crate) radius_m: f64,
 }
-fn gravity_sources(system: &StarSystem, time: f64) -> Result<Vec<Attractor>, String> {
+pub(crate) fn gravity_sources(system: &StarSystem, time: f64) -> Result<Vec<Attractor>, String> {
     let mut out = vec![Attractor {
         source: Source::Star,
         position_m: system.star_local_position(time),
@@ -754,7 +784,7 @@ fn gravity(position: Vec3d, sources: &[Attractor]) -> Result<Vec3d, String> {
     }
     Ok(acceleration)
 }
-fn active_command(plan: &Plan, elapsed: f64) -> (Command, f64) {
+pub(crate) fn active_command(plan: &Plan, elapsed: f64) -> (Command, f64) {
     let mut end = 0.;
     for c in &plan.commands {
         end += c.duration_s;
@@ -818,7 +848,7 @@ fn integrate(
     }
     Ok((p, velocity, propulsion, interval))
 }
-fn drift(
+pub(crate) fn drift(
     d: &crate::supply_vehicle::Definition,
     state: &State,
     position: Vec3d,
@@ -862,7 +892,7 @@ fn gravity_contact(
     }
     Ok(acceleration)
 }
-fn exhaustion_time(fuel: f64, rate: f64) -> f64 {
+pub(crate) fn exhaustion_time(fuel: f64, rate: f64) -> f64 {
     let mut t = fuel / rate;
     // Round the computed cutoff upward only until represented consumption reaches
     // the held inventory. Avoid leaving an unadvanceable positive one-ulp residue.

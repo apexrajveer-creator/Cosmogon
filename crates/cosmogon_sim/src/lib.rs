@@ -81,3 +81,6 @@ pub mod world_vehicle_recording;
 pub mod vehicle_arrival;
 
 pub mod vehicle_arrival_recording;
+
+pub mod vehicle_contact;
+pub mod vehicle_contact_dynamics;

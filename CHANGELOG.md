@@ -1,3 +1,9 @@
+## Unreleased — finite terrain and rigid-body vehicle response
+
+- Add explicit version-2 contact hardware, actual rotating modeled-terrain feet, finite unilateral force/stroke/load/sliding friction and coupled centre/Euler-quaternion motion. Retain authored inertia/exhaust assumptions and actual contact/translation/rotation work and angular-momentum residuals; structural/source/precision/work failures stop at the prior supported state.
+- Native typed hardware/geographic controls, actual live/recorded contact readings/curves, separately pinned saves and protected full-world/contact CSV replay. Explicit signed contact starts support below-spherical-base MOLA terrain; original positive geographic starts, spherical impacts and version-1 flight/approach exports retain their semantics.
+- Enabled contact state/fingerprints deliberately change under separate capability/model pins. Absent legacy state and golden `0xf2c4140a45ae509b` are unchanged. Static friction, footprint stability/attachment, safe landing, physical cargo transfer, entry/hardware calibration and the full directive remain incomplete. Graphics remain queued; no shader, asset or dependency changes.
+
 ## Unreleased — rotating vehicle arrival
 
 - Add rotating spacecraft approach frames, derivative-aware geographic initial conditions and original-branch approach recordings with native/CLI exact evidence, finite mass/energy, historical contact frames and explicit pole/terrain support. World/save/physics/old flight formats and golden are unchanged; terrain touchdown/gear response, delivery and graphics remain incomplete.

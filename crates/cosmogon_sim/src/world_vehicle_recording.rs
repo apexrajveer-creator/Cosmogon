@@ -60,13 +60,10 @@ impl Study {
             );
         }
         let duration = (self.samples - 1) as f64 * self.interval_s;
-        let active = initial
-            .vehicles
-            .iter()
-            .filter(|v| v.phase == Phase::Flying)
-            .count()
-            + 1;
-        if duration > 86400. || duration * 4. * active as f64 > 2_000_000. {
+        let work_per_second = initial.vehicles.iter().filter(|v| v.phase==Phase::Flying)
+            .map(|v| if v.contact.is_some() {3.*crate::vehicle_contact_dynamics::MAX_STEPS_PER_SECOND as f64} else {4.}).sum::<f64>()
+            + if self.flight.contact.is_some() {3.*crate::vehicle_contact_dynamics::MAX_STEPS_PER_SECOND as f64} else {4.};
+        if duration > 86400. || duration * work_per_second > 2_000_000. {
             return Err("World flight study exceeds one day or two million nominal fleet substeps; shorten the span".into());
         }
         let mut previous = initial.time;
@@ -92,7 +89,7 @@ impl Study {
             .filter(|b| b.exists())
             .count()
             + 2;
-        if duration * 4. * active as f64 * sources as f64 > 20_000_000. {
+        if duration * work_per_second * sources as f64 > 20_000_000. {
             return Err("World flight study exceeds twenty million nominal gravity-source visits; shorten the span or active fleet".into());
         }
         let candidate = preview
@@ -116,7 +113,7 @@ impl Study {
         self.validate(initial)?;
         let files=[("definition.json",serde_json::to_vec_pretty(self).map_err(|e|e.to_string())?),
             ("origin.cosmo",recorded_save(initial,"Flight setup origin")?),
-            ("manifest.json",serde_json::to_vec_pretty(&json!({"format":"cosmogon-world-flight-setup","schema_version":1,"complete":true,"study":self,"initial_state_fingerprint":research::state_fingerprint(initial)?,"data_versions":save::data_versions(initial),"source_context":context(),"files":["definition.json","origin.cosmo"]})).map_err(|e|e.to_string())?)];
+            ("manifest.json",serde_json::to_vec_pretty(&json!({"format":"cosmogon-world-flight-setup","schema_version":1,"complete":true,"study":self,"initial_state_fingerprint":research::state_fingerprint(initial)?,"data_versions":save::data_versions(initial),"source_context":context_for(&self.flight),"files":["definition.json","origin.cosmo"]})).map_err(|e|e.to_string())?)];
         if files
             .iter()
             .any(|(_, bytes)| bytes.len() as u64 > MAX_BYTES)
@@ -198,15 +195,16 @@ impl Bundle {
             });
         }
         world.validate_vehicle_state()?;
-        let manifest = json!({"format":"cosmogon-world-vehicle-recording","schema_version":1,"complete":true,
-            "study":study,"model":world_vehicle::MODEL,"propulsion_model":supply_vehicle::MODEL,"frame":world_vehicle::FRAME,
+        let mut manifest = json!({"format":"cosmogon-world-vehicle-recording","schema_version":1,"complete":true,
+            "study":study,"model":study.flight.model,"propulsion_model":supply_vehicle::MODEL,"frame":world_vehicle::FRAME,
             "origin_fingerprint":research::state_fingerprint(initial)?,"final_fingerprint":research::state_fingerprint(&world)?,
             "origin_data_versions":save::data_versions(initial),"final_data_versions":save::data_versions(&world),
-            "vehicle_id":id,"observations":rows.len(),"source_context":context(),
+            "vehicle_id":id,"observations":rows.len(),"source_context":context_for(&study.flight),
             "fingerprint_scope":"FNV-1a canonical full state identity; not cryptographic integrity",
             "files":["definition.json","origin.cosmo","observations.json","trajectories.csv","final.cosmo"],
             "summary":{"final_flight":rows.last().map(|r|&r.flight),"retained_cargo":study.flight.plan.definition.cargo,
                 "mass_residual_kg":study.flight.plan.definition.initial_propellant_kg-rows.last().unwrap().flight.propulsion.propellant_kg-rows.last().unwrap().flight.propulsion.exhausted_propellant_kg}});
+        if study.flight.contact.is_some() {manifest["files"].as_array_mut().unwrap().push(json!("contact.csv"));}
         Ok(Self {
             study,
             origin: initial.clone(),
@@ -224,7 +222,7 @@ impl Bundle {
         {
             return Err("Flight bundle differs from its actual independent world replay".into());
         }
-        let files = [
+        let mut files = vec![
             (
                 "definition.json",
                 serde_json::to_vec_pretty(&self.study).map_err(|e| e.to_string())?,
@@ -247,6 +245,10 @@ impl Bundle {
                 serde_json::to_vec_pretty(&self.manifest).map_err(|e| e.to_string())?,
             ),
         ];
+        if self.study.flight.contact.is_some() {
+            let index=files.len()-1;
+            files.insert(index,("contact.csv",contact_csv(&self.rows).into_bytes()));
+        }
         if files
             .iter()
             .any(|(_, bytes)| bytes.len() as u64 > MAX_BYTES)
@@ -301,6 +303,9 @@ impl Bundle {
             != trajectory_csv(&replay.rows)
         {
             return Err("Stored flight CSV differs from its exact numerical observations".into());
+        }
+        if study.flight.contact.is_some() && crate::habitat_recording::read(&path.join("contact.csv"),MAX_BYTES)?!=contact_csv(&replay.rows) {
+            return Err("Stored contact CSV differs from exact actual foot/work observations".into());
         }
         let final_world = save::from_json(&crate::habitat_recording::read(
             &path.join("final.cosmo"),
@@ -424,6 +429,39 @@ pub fn trajectory_csv(rows: &[Observation]) -> String {
         csv.push('\n');
     }
     csv
+}
+/// Per-foot actual numeric evidence with both world and retained craft clocks.
+/// The ordinary v1 CSV remains byte-identical; only contact-capable bundles add this file.
+pub fn contact_csv(rows:&[Observation])->String {
+    let base="world_time_s,craft_time_s,foot_index,compression_m,compression_rate_m_s,normal_load_n,elastic_energy_j,normal_dissipation_w,sliding_dissipation_w,gap_m,slope_rad,force_x_n,force_y_n,force_z_n,torque_x_n_m,torque_y_n_m,torque_z_n_m,position_x_m,position_y_m,position_z_m,velocity_x_m_s,velocity_y_m_s,velocity_z_m_s,normal_x,normal_y,normal_z,orientation_x,orientation_y,orientation_z,orientation_w,body_omega_x_rad_s,body_omega_y_rad_s,body_omega_z_rad_s";
+    fn numbers(value:&Value,prefix:&str,out:&mut Vec<(String,String)>) {
+        if let Some(object)=value.as_object() {for (name,item) in object {numbers(item,&format!("{prefix}{name}_"),out);}}
+        else if value.is_number() {out.push((prefix.trim_end_matches('_').into(),value.to_string()));}
+    }
+    let mut schema=vec![];numbers(&serde_json::to_value(crate::vehicle_contact_dynamics::Work::default()).unwrap(),"cumulative_",&mut schema);
+    let mut output=format!("{base},{}\n",schema.iter().map(|(name,_)|name.as_str()).collect::<Vec<_>>().join(","));
+    for row in rows {if let Some(state)=&row.flight.contact {
+        let mut work=vec![];numbers(&serde_json::to_value(&state.cumulative_work).unwrap(),"cumulative_",&mut work);
+        for (index,foot) in state.feet.iter().enumerate() {
+            let r=&foot.response;let n=foot.surface.outward_normal;let p=foot.position_m;let v=foot.velocity_m_s;let f=r.force_n;let t=foot.torque_about_centre_n_m;let q=state.orientation_xyzw;let w=state.angular_velocity_body_rad_s;
+            let mut values=vec![row.world_time_s.to_string(),row.flight.last_time_s.to_string(),index.to_string()];
+            values.extend([r.compression_m,r.compression_rate_m_s,r.normal_load_n,r.stored_elastic_energy_j,r.normal_dissipation_w,r.sliding_dissipation_w,foot.surface.tangent_gap_m,foot.surface.slope_rad,f.x,f.y,f.z,t.x,t.y,t.z,p.x,p.y,p.z,v.x,v.y,v.z,n.x,n.y,n.z,q[0],q[1],q[2],q[3],w.x,w.y,w.z].iter().map(ToString::to_string));
+            values.extend(work.iter().map(|(_,value)|value.clone()));output.push_str(&values.join(","));output.push('\n');
+        }
+    }}
+    output
+}
+pub fn context_for(definition: &Definition) -> Value {
+    if definition.contact.is_none() { return context(); }
+    let mut result=context();
+    let contact=crate::vehicle_contact_dynamics::context();
+    result["model"]=json!(world_vehicle::CONTACT_MODEL);
+    result["operator"]=contact["operator"].clone();
+    result["contact"]=contact["response"].clone();
+    result["limits"]=contact["limits"].clone();
+    result["contact_capability"]=contact;
+    result["gravity"]=json!("Existing Newtonian test-particle sources; target point-mass field evaluated outside modeled terrain even where overview relief lies below the spherical base. Other-source hull intersections are unsupported, conservatively refused.");
+    result
 }
 pub fn context() -> Value {
     json!({"model":world_vehicle::MODEL,"frame":world_vehicle::FRAME,
