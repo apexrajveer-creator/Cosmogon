@@ -1,3 +1,8 @@
+## Unreleased — persistent foot shear foundation
+
+- Add a separately versioned finite tangential spring/slider, objective terrain-frame history transport, retained plastic slip/unloading release/numerical dissipation and structural refusals. Eight component tests cover static force, independent supported-mass equilibrium, changing directions, separation, objective motion and refinement; all 500 release workspace tests plus one existing ignored pass.
+- This mechanical component is not yet enabled in world flight. Existing flight/contact/save semantics, absent legacy state and golden remain unchanged. Actual multi-foot coupling, stability, attachment and delivery remain in progress; packaged terrain evidence remains the preceding 492-test checkpoint. Graphics remain queued.
+
 ## Unreleased — finite terrain and rigid-body vehicle response
 
 - Add explicit version-2 contact hardware, actual rotating modeled-terrain feet, finite unilateral force/stroke/load/sliding friction and coupled centre/Euler-quaternion motion. Retain authored inertia/exhaust assumptions and actual contact/translation/rotation work and angular-momentum residuals; structural/source/precision/work failures stop at the prior supported state.
