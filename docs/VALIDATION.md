@@ -113,3 +113,6 @@ Frozen habitat starting-world selection: [verification](FROZEN_HABITAT_ORIGINS_V
 
 
 Finite supply-vehicle checkpoint (2026-10-10): **446 passed plus one existing ignored**, 59 distinct cases, seven inspected packaged layouts, six required checks and a 48-second normal packaged run. [Full evidence and limits](SUPPLY_VEHICLE_VALIDATION.md). No world/save/source/golden or graphics change; flight/delivery and the full directive remain incomplete.
+
+
+Physical finite world-flight checkpoint (2026-10-10): **467 passed plus one existing ignored**, 63 distinct cases, nine inspected packaged layouts, six required checks and a 48.296151-second ordinary packaged run. [Evidence and limits](WORLD_VEHICLE_FLIGHT_VALIDATION.md). Enabled craft state changes with model pins; absent legacy golden remains `0xf2c4140a45ae509b`. Landing, delivery, graphics and the full directive remain incomplete.

@@ -17,6 +17,8 @@ technology through causes, not timers.
 | **Guided tours for a first look** | **Rival nations on the real Earth, 4000 CE** |
 | ![Tour](docs/images/guided_tour.jpg) | ![Nations](docs/images/nations_real_earth.jpg) |
 
+The development branch adds [physical finite spacecraft flight](docs/WORLD_VEHICLE_FLIGHT.md): actual world gravity and held propellant/cargo, ordinary edits/saves, explicit first contacts and pinned full-world research recordings. Contact is not a safe landing or habitat delivery; these systems remain in development.
+
 ## Download
 Get the latest **macOS `.dmg`** or **Windows `.exe`** from
 [GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases). Nothing else needs to be installed.

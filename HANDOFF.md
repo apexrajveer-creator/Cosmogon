@@ -98,6 +98,8 @@ The connected [finite supply-vehicle designer](docs/SUPPLY_VEHICLE.md) adds auth
 
 The owner's [graphics goal supplement](docs/GRAPHICS_GOAL_SUPPLEMENT.md), added 2026-10-09, requires very detailed animated close-up presentation for every visitable cosmic body, including applicable natural activity, terrain, water, weather, buildings and civilizations in our style. It is queued within the continuing directive; continue cabin research first. It does not require present-day observation accuracy and does not authorize presenting procedural activity as measured data.
 
+The connected [physical finite world-flight](docs/WORLD_VEHICLE_FLIGHT.md) build adds authoritative optional spacecraft, actual finite burn/gravity evolution, separate craft/world clocks, swept spherical contact, protected complete world recordings and shared native/CLI exact replay. Ordinary create/remove/undo/saves retain actual cargo; contact is not landing or delivery. Checks: **467 passed plus one existing ignored**, 63 cases, nine inspected packaged layouts and a 48-second normal run; [verification](docs/WORLD_VEHICLE_FLIGHT_VALIDATION.md). Enabled state has model pins; absent legacy worlds keep golden `0xf2c4140a45ae509b`. Terminal task parking uses the actual due clock, and fixed habitat task reservation preserves scheduler indices. Next: rotating surface-relative approach/contact response, then finite physically co-located delivery. Graphics stay queued; phase 10 and the directive remain incomplete.
+
 ## Where things stand (2026-10-05)
 * **Released: 1.0.0** ("The whole universe"), tag `v1.0.0`, published on
   [GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases) with macOS, Windows and Linux builds.

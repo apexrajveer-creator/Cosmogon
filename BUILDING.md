@@ -230,3 +230,8 @@ Complete single/paired study reruns now explicitly choose the original saved or 
 
 
 Native View → Supply vehicle design authors finite hardware/propellant/cargo budgets and actual ideal burn observations. CLI `vehicle-definition`, `vehicle-study`, `vehicle-inspect` share protected exact numeric/source evidence. [Guide](docs/SUPPLY_VEHICLE.md), [verification](docs/SUPPLY_VEHICLE_VALIDATION.md). No gravitational flight, landing or habitat delivery yet; those build on the same finite mechanism.
+
+
+## Physical finite spacecraft flight
+
+Native View → Supply vehicles · design & flight includes live craft creation/removal and independent recorded branches. `--panel vehicle-flight|vehicle-flight-results|vehicle-flight-files` opens those panes. `--flight-definition STUDY --flight-origin WORLD`, or `--flight-recording COMPLETE_DIR`, supports protected output and actual row selection through `--flight-output NEW_DIR --flight-observation INDEX`. CLI `flight-definition`, `flight-study` and `flight-inspect` use the same actual world runner. [Guide and commands](docs/WORLD_VEHICLE_FLIGHT.md). Launch conditions are authored; spherical contact is not terrain landing or physical cargo delivery. Previous `--vehicle-*` flags still address the separate propulsion bench.

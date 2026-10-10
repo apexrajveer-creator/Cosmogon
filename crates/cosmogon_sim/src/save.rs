@@ -44,6 +44,8 @@ pub enum SaveError {
     Dataset(String),
     #[error("unsupported or invalid habitat model: {0}")]
     Model(String),
+    #[error("unsupported or invalid finite vehicle model: {0}")]
+    Vehicle(String),
     #[error("migration failed: {0}")]
     Migration(String),
     #[error("i/o error: {0}")]
@@ -127,6 +129,10 @@ pub fn data_versions(u: &Universe) -> std::collections::BTreeMap<String, String>
     if u.habitats.iter().any(crate::habitat::Habitat::uses_sabatier) {m.insert("cosmogon-sabatier".into(),crate::sabatier::MODEL.into());}
     if u.habitats.iter().any(|h|h.heat.is_some()) {m.insert("cosmogon-cabin-heat-accounting".into(),crate::habitat_heat::MODEL.into());}
     if u.habitats.iter().any(crate::habitat::Habitat::uses_breach) {m.insert("cosmogon-cabin-breach".into(),crate::breach::MODEL.into());}
+    if !u.vehicles.is_empty() || u.next_vehicle_id > 0 {
+        m.insert("cosmogon-finite-world-vehicle".into(),crate::world_vehicle::MODEL.into());
+        m.insert("cosmogon-supply-vehicle-reference".into(),crate::supply_vehicle::MODEL.into());
+    }
     m
 }
 
@@ -179,6 +185,12 @@ pub fn from_json(s: &str) -> Result<Universe, SaveError> {
             if h.id>=u.next_habitat_id || !ids.insert(h.id) || u.systems.get(h.definition.body.system as usize).and_then(|s|s.bodies.get(h.definition.body.body as usize)).is_none() {return Err(SaveError::Model("Duplicate habitat identifier or invalid world reference".into()));}
         }
     }
+    for (id,model) in [("cosmogon-finite-world-vehicle",crate::world_vehicle::MODEL),("cosmogon-supply-vehicle-reference",crate::supply_vehicle::MODEL)] {
+        if (expected.contains_key(id) || terrain_versions.get(id).is_some()) && terrain_versions.get(id).and_then(Value::as_str) != Some(model) {
+            return Err(SaveError::Vehicle(format!("Missing or mismatched {id} model pin")));
+        }
+    }
+    u.validate_vehicle_state().map_err(SaveError::Vehicle)?;
     // Acceleration is a derived, skipped cache. Restore it before any position reader
     // extrapolates between macro steps (illumination, climate, camera and habitat budgets).
     // Otherwise a resumed dynamic world briefly uses linear instead of quadratic motion.

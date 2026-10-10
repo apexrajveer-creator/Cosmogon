@@ -675,3 +675,18 @@ mod crop_edit_tests {
         let mut c=sim.universe.habitats[0].config.clone();c.crop=None;sim.edit(Edit::ConfigureHabitat {system:0,id:0,config:Box::new(c)},0.).unwrap();sim.undo(0.);assert_eq!(serde_json::to_value(&sim.universe).unwrap(),after);
     }
 }
+
+#[cfg(test)]
+mod world_vehicle_edit_tests {
+    use super::*;
+    #[test]
+    fn actual_finite_craft_create_remove_and_reference_refusal_use_ordinary_undo() {
+        let u=Universe::new(UniverseSettings {scenario:cosmogon_sim::Scenario::SolarSystemLab,..Default::default()});
+        let d=cosmogon_sim::world_vehicle::Definition::circular_example(&u,BodyRef {system:0,body:3},cosmogon_sim::supply_vehicle::Plan::example()).unwrap();
+        let m:Manifest=serde_json::from_value(serde_json::json!({"format":"test","version":1,"id":"vehicle-in-memory-test","name":"Test","created_unix":0,"modified_unix":0,"template":"test","owner":"test"})).unwrap();
+        let mut sim=Sim::new(u.clone(),Session::Sandbox(m));let before=serde_json::to_value(&sim.universe).unwrap();
+        sim.edit(Edit::CreateVehicle {definition:Box::new(d.clone())},0.).unwrap();let created=serde_json::to_value(&sim.universe).unwrap();assert!(sim.dirty);sim.undo(0.);assert_eq!(serde_json::to_value(&sim.universe).unwrap(),before);sim.redo(0.);assert_eq!(serde_json::to_value(&sim.universe).unwrap(),created);
+        sim.universe.advance_by(2.25);let moving=serde_json::to_value(&sim.universe).unwrap();sim.edit(Edit::RemoveVehicle {system:0,id:0},0.).unwrap();assert!(sim.universe.vehicles.is_empty());sim.undo(0.);assert_eq!(serde_json::to_value(&sim.universe).unwrap(),moving);
+        let mut reference=Sim::new(u,Session::Reference {dataset:"test".into(),title:"Test reference".into()});let before=serde_json::to_value(&reference.universe).unwrap();assert!(reference.edit(Edit::CreateVehicle {definition:Box::new(d)},0.).is_err());assert_eq!(serde_json::to_value(&reference.universe).unwrap(),before);assert!(reference.undo_label().is_none());
+    }
+}

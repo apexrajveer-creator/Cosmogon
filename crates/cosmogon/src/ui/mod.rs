@@ -14,6 +14,7 @@ mod research_chart;
 mod surface_study;
 mod habitat;
 pub(crate) mod vehicle;
+pub(crate) mod world_vehicle;
 pub use vehicle::VehicleUi;
 mod habitat_oxygen;
 mod habitat_water;
@@ -271,9 +272,9 @@ fn init_ui_state(mut ui: ResMut<UiState>, args: Res<crate::args::Args>) {
         ui.body_tab = BodyTab::Surface;
     }
     if args.habitat_definition.is_some() || args.greenhouse_definition.is_some() || args.crop_chemistry.is_some() || args.greenhouse_supplies.is_some() || args.habitat_sweep.is_some() || args.habitat_recording.is_some() {ui.habitat_open=true;}
-    if args.vehicle_plan.is_some() || args.vehicle_recording.is_some() {ui.vehicle_open=true;}
+    if args.flight_definition.is_some() || args.flight_recording.is_some() || args.vehicle_plan.is_some() || args.vehicle_recording.is_some() {ui.vehicle_open=true;}
     match args.panel.as_deref() {
-        Some("vehicle"|"vehicle-design"|"vehicle-burns"|"vehicle-results"|"vehicle-model"|"vehicle-files") => ui.vehicle_open=true,
+        Some("vehicle"|"vehicle-design"|"vehicle-burns"|"vehicle-results"|"vehicle-model"|"vehicle-files"|"vehicle-flight"|"vehicle-flight-results"|"vehicle-flight-files") => ui.vehicle_open=true,
         Some("create") => ui.create_open = true,
         Some("physics") => ui.physics_open = true,
         Some("surface") => ui.body_tab = BodyTab::Surface,

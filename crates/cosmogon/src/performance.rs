@@ -212,7 +212,7 @@ fn record(
         "platform": {"os": std::env::consts::OS, "arch": std::env::consts::ARCH,
             "adapter": adapter.as_ref().map(|a| &a.name), "backend": adapter.as_ref().map(|a| format!("{:?}", a.backend))},
         "measurement": {"detailed": perf.detailed, "automatic": automatic, "warmup_frames": warmup,
-            "pipelined_rendering": !((args.vehicle_plan.is_some() || args.vehicle_recording.is_some() || args.panel.as_deref().is_some_and(|p|p.starts_with("vehicle")) || args.habitat_audio.is_some() || args.habitat_sweep.is_some() || args.habitat_recording.is_some() || args.greenhouse_definition.is_some() || args.habitat_definition.is_some() || args.research_recording.is_some() || args.surface_site.is_some() || args.mars_terrain.is_some() || args.terrain_section.is_some()) && args.quit_after_capture),
+            "pipelined_rendering": !((args.flight_definition.is_some() || args.flight_recording.is_some() || args.vehicle_plan.is_some() || args.vehicle_recording.is_some() || args.panel.as_deref().is_some_and(|p|p.starts_with("vehicle")) || args.habitat_audio.is_some() || args.habitat_sweep.is_some() || args.habitat_recording.is_some() || args.greenhouse_definition.is_some() || args.habitat_definition.is_some() || args.research_recording.is_some() || args.surface_site.is_some() || args.mars_terrain.is_some() || args.terrain_section.is_some()) && args.quit_after_capture),
             "window_capacity": limit, "percentile_method": "nearest-rank",
             "startup_to_observing_ms": perf.startup_to_observing_ms, "last_load_ms": perf.last_load_ms},
         "scene": {"scenario": u.settings.scenario.label(), "seed": u.settings.seed,

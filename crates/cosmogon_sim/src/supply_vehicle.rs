@@ -330,7 +330,7 @@ fn default_observation_interval() -> f64 {
     1.
 }
 impl State {
-    fn new(d: &Definition) -> Result<Self, String> {
+    pub(crate) fn new(d: &Definition) -> Result<Self, String> {
         d.validate()?;
         Ok(Self {
             elapsed_s: 0.,
@@ -346,7 +346,7 @@ impl State {
     pub fn mass_kg(&self, d: &Definition) -> f64 {
         d.inert_mass_kg() + self.propellant_kg
     }
-    fn apply(&mut self, d: &Definition, c: &Command) -> Result<Interval, String> {
+    pub(crate) fn apply(&mut self, d: &Definition, c: &Command) -> Result<Interval, String> {
         d.validate()?;
         c.validate()?;
         // Reject invalid retained state before any mutation, including non-finite counters.

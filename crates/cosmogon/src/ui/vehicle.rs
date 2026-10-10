@@ -1,4 +1,4 @@
-//! Authored vehicle design remains independent of the live universe.
+//! Independent propulsion design and connected actual world-flight controls.
 use super::{ACCENT, MUTED};
 use bevy::{
     prelude::*,
@@ -12,6 +12,7 @@ type WorkerResult = Result<(Bundle, String, bool), String>;
 
 #[derive(Resource)]
 pub struct VehicleUi {
+    flight: super::world_vehicle::FlightUi,
     draft: Plan,
     result: Option<Bundle>,
     source: String,
@@ -31,6 +32,7 @@ pub struct VehicleUi {
 impl Default for VehicleUi {
     fn default() -> Self {
         Self {
+            flight: super::world_vehicle::FlightUi::default(),
             draft: Plan::example(),
             result: None,
             source: String::new(),
@@ -51,12 +53,13 @@ impl Default for VehicleUi {
 }
 impl VehicleUi {
     pub fn pending(&self) -> bool {
-        self.task.is_some() || self.queued_output.is_some()
+        self.task.is_some() || self.queued_output.is_some() || self.flight.pending()
     }
     pub fn metadata(&self) -> Value {
-        json!({"pane":self.pane,"staged_plan":self.draft,"request":self.request,"source":self.source,"pending":self.pending(),"selected_observation":self.selected,"selected_row":self.result.as_ref().and_then(|r|r.rows.get(self.selected)),"complete_manifest":self.result.as_ref().map(|r|&r.manifest),"status":self.status,"scope":"Independent finite propulsion design bench; no live world edits, flight trajectory or cargo delivery"})
+        json!({"world_flight":self.flight.metadata(),"pane":self.pane,"staged_plan":self.draft,"request":self.request,"source":self.source,"pending":self.pending(),"selected_observation":self.selected,"selected_row":self.result.as_ref().and_then(|r|r.rows.get(self.selected)),"complete_manifest":self.result.as_ref().map(|r|&r.manifest),"status":self.status,"scope":"Independent finite propulsion design bench; no live world edits, flight trajectory or cargo delivery"})
     }
     fn poll(&mut self) {
+        self.flight.poll();
         if let Some(result) = self
             .task
             .as_mut()
@@ -170,12 +173,17 @@ pub fn preflight(args: &crate::args::Args) -> Result<(), String> {
     Ok(())
 }
 pub fn init(mut form: ResMut<VehicleUi>, args: Res<crate::args::Args>) {
+    form.flight.initialize(&args);
     form.pane = match args.panel.as_deref() {
+        Some("vehicle-flight") => 4,
+        Some("vehicle-flight-results") => 5,
+        Some("vehicle-flight-files") => 6,
         Some("vehicle-burns") => 1,
         Some("vehicle-results") => 2,
         Some("vehicle-model" | "vehicle-files") => 3,
         _ => 0,
     };
+    if (args.flight_definition.is_some() || args.flight_recording.is_some()) && form.pane < 4 {form.pane=5;}
     form.requested_observation = args.vehicle_observation;
     form.output = args.vehicle_output.clone().unwrap_or_default();
     if let Some(path) = &args.vehicle_recording {
@@ -202,6 +210,8 @@ pub fn panel(
     mut contexts: EguiContexts,
     mut state: ResMut<super::UiState>,
     mut form: ResMut<VehicleUi>,
+    mut sim: ResMut<crate::sim::Sim>,
+    time: Res<Time>,
 ) {
     form.poll();
     if !state.vehicle_open || state.hidden || state.photo_mode {
@@ -211,20 +221,23 @@ pub fn panel(
         return;
     };
     let mut open = state.vehicle_open;
-    let max_height = (ctx.content_rect().height() - 180.).max(240.);
-    egui::Window::new("Supply vehicle design").open(&mut open).default_pos([345.,82.]).default_width(600.).default_height(570.).max_height(max_height).show(ctx,|ui| {
-        ui.label("Finite propellant and cargo · authored free-space propulsion bench");
-        ui.horizontal_wrapped(|ui|{for (i,label) in ["Design","Burn plan","Results","Models & files"].iter().enumerate(){ui.selectable_value(&mut form.pane,i,*label);}});
+    let max_height = (ctx.available_rect().height() - 210.).max(240.);
+    let form = &mut *form;
+    egui::Window::new("Supply vehicles").open(&mut open).default_pos([345.,82.]).default_width(600.).default_height(570.).max_height(max_height).show(ctx,|ui| {
+        if form.pane < 4 {ui.label("Finite propellant and cargo · authored free-space propulsion bench");}
+        ui.horizontal_wrapped(|ui|{for (i,label) in ["Design","Burn plan","Results","Models & files","World flight","Recorded flight","Flight models & files"].iter().enumerate(){ui.selectable_value(&mut form.pane,i,*label);}});
         let busy=form.pending();
         egui::ScrollArea::vertical().id_salt("vehicle-design-scroll").show(ui,|ui| {
             match form.pane {
-                0=>design(ui,&mut form),1=>burns(ui,&mut form),2=>results(ui,&mut form),_=>files(ui,&mut form,busy),
+                0=>design(ui,form),1=>burns(ui,form),2=>results(ui,form),3=>files(ui,form,busy),pane=>form.flight.draw(ui,&mut sim,&form.draft,pane,time.elapsed_secs_f64()),
             }
+            if form.pane < 4 {
             ui.separator();
             if let Err(e)=form.draft.validate(){ui.colored_label(ACCENT,e);}
             if ui.add_enabled(!busy && form.draft.validate().is_ok(),egui::Button::new("Calculate this design")).clicked(){form.start(None);}
             if let Some(status)=&form.status {ui.add(egui::Label::new(status).wrap());}
-            ui.label(egui::RichText::new("Design-only cargo stays aboard. This does not launch a vehicle, establish a landing or supply a habitat.").small().color(MUTED));
+            ui.label(egui::RichText::new("This design bench retains cargo aboard. World flight uses explicit creation controls; no habitat delivery is implied.").small().color(MUTED));
+            }
         });
     });
     state.vehicle_open = open;

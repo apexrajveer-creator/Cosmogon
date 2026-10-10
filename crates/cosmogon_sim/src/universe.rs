@@ -187,6 +187,11 @@ pub struct Universe {
     pub habitats: Vec<crate::habitat::Habitat>,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub(crate) next_habitat_id: u64,
+    /// Optional finite authored spacecraft; absent legacy worlds keep identical bytes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vehicles: Vec<crate::world_vehicle::Flight>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub(crate) next_vehicle_id: u64,
 }
 
 fn is_zero(n:&u64)->bool {*n==0}
@@ -259,6 +264,8 @@ impl Universe {
             nurseries: Vec::new(),
             habitats: Vec::new(),
             next_habitat_id: 0,
+            vehicles: Vec::new(),
+            next_vehicle_id: 0,
         };
         let prehistory_events = u.run_prehistory(&mut biospheres);
         u.biospheres = biospheres;
@@ -542,6 +549,7 @@ impl Universe {
                 TASK_ENV => self.step_environment(due),
                 crate::stellar::TASK_STARS => star_skip = Some(self.step_stars(due, k)),
                 crate::habitat::TASK => self.step_habitats(due),
+                crate::world_vehicle::TASK => self.step_vehicles(due),
                 _ => {}
             }
             self.scheduler.complete(task);
@@ -552,6 +560,9 @@ impl Universe {
                 self.scheduler.skip_to(crate::stellar::TASK_STARS, next_k);
             }
             self.time = due;
+            // Park terminal flight on its completed fixed task, never on the caller
+            // frame clock, which would make saved state depend on frame chunking.
+            if task == crate::world_vehicle::TASK { self.ensure_vehicle_task(); }
             report.steps += 1;
             if let Some(min) = stop_at_importance {
                 if let Some(i) = (history_len..self.history.events.len()).find(|&i| self.history.events[i].importance >= min) {

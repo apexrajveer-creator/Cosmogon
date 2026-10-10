@@ -105,6 +105,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     if let Some(c) = it.next() {
         a.cmd = c;
         if matches!(a.cmd.as_str(),"habitat"|"habitat-sweep") {a.samples=25;a.interval_days=1.0/24.0;a.scenario=Scenario::SolarSystemLab;}
+        if matches!(a.cmd.as_str(),"flight-definition"|"flight-study") {a.scenario=Scenario::SolarSystemLab;a.target="Mars".into();a.samples=121;a.interval_days=1.0/86400.0;}
         if a.cmd=="habitat-sweep" {a.parameter="firm_power_w".into();}
         if matches!(a.cmd.as_str(),"habitat-definition"|"habitat-crop-definition") {a.scenario=Scenario::SolarSystemLab;a.target="Mars".into();}
     }
@@ -126,6 +127,9 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if matches!(a.cmd.as_str(),"greenhouse-definition"|"greenhouse-supply-definition") && flag!="--output" {return Err(format!("{flag} is not a greenhouse-definition option"));}
         if matches!(a.cmd.as_str(),"crop-chemistry"|"crop-chemistry-inspect"|"greenhouse-supply-inspect") && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a crop supply/chemistry inspection option"));}
         if matches!(a.cmd.as_str(),"habitat-diagnose"|"habitat-crop-harvest") && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
+        if a.cmd=="flight-definition" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output"|"--target"|"--seed"|"--scenario"|"--samples"|"--interval-seconds") {return Err(format!("{flag} is not a world flight definition option"));}
+        if a.cmd=="flight-study" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output") {return Err(format!("{flag} is not a world flight study option"));}
+        if a.cmd=="flight-inspect" && flag!="--recording" {return Err(format!("{flag} is not a world flight recording inspection option"));}
         if a.cmd=="vehicle-definition" && flag!="--output" {return Err(format!("{flag} is not a vehicle-definition option"));}
         if a.cmd=="vehicle-study" && !matches!(flag.as_str(),"--definition"|"--output") {return Err(format!("{flag} is not a finite vehicle study option"));}
         if a.cmd=="vehicle-inspect" && flag!="--recording" {return Err(format!("{flag} is not a vehicle recording inspection option"));}
@@ -147,6 +151,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
                 if matches!(a.cmd.as_str(),"habitat"|"habitat-sweep") && !(1..=1024).contains(&requested) {return Err("Habitat samples must be between 1 and 1024".into());}
                 a.samples=if matches!(a.cmd.as_str(),"habitat"|"habitat-sweep") {requested} else {requested.clamp(2,4096)};
             },
+            "--interval-seconds" if a.cmd=="flight-definition" => a.interval_days=number::<f64>(val()?, &flag)?/86400.,
             "--interval-days" => a.interval_days = number(val()?, &flag)?,
             "--target" => { a.target = val()?; explicit_target = true; },
             "--mars-terrain" => {let v=val()?;if !matches!(v.as_str(),"4"|"16") {return Err("--mars-terrain requires 4 or 16 pixels per degree".into());}a.mars_terrain=Some(v);},
@@ -200,10 +205,15 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             unknown => return Err(format!("Unknown flag {unknown}; use --help")),
         }
     }
+    if a.cmd=="flight-inspect" && a.recording.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err("flight-inspect requires --recording COMPLETE_DIR".into());}
+    if matches!(a.cmd.as_str(),"flight-definition"|"flight-study") {
+        if [&a.initial,&a.definition,&a.output].iter().any(|p|p.as_deref().is_some_and(|s|s.trim().is_empty())) {return Err("Flight files require nonempty paths".into());}
+        if a.cmd=="flight-study" && a.definition.is_none() {return Err("flight-study requires --definition PINNED_STUDY".into());}
+    }
         if a.cmd=="vehicle-inspect" && a.recording.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err("vehicle-inspect requires --recording COMPLETE_DIR".into());}
     if matches!(a.cmd.as_str(),"vehicle-definition"|"vehicle-study") && a.output.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Vehicle output requires a nonempty new file/folder".into());}
     if a.cmd=="vehicle-study" && a.definition.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Choose a nonempty vehicle plan file".into());}
-    if matches!(a.cmd.as_str(),"habitat"|"habitat-definition"|"habitat-crop-definition") && a.initial.is_some() && (explicit_scenario || explicit_seed) {return Err("Choose saved --initial world or new --scenario/--seed, not both".into());}
+    if matches!(a.cmd.as_str(),"flight-definition"|"habitat"|"habitat-definition"|"habitat-crop-definition") && a.initial.is_some() && (explicit_scenario || explicit_seed) {return Err("Choose saved --initial world or new --scenario/--seed, not both".into());}
     if matches!(a.cmd.as_str(),"greenhouse"|"greenhouse-supplies") && a.habitat_id.is_some() && a.initial.is_none() {return Err("Greenhouse habitat context requires --initial saved world".into());}
     if a.cmd=="habitat-sweep" {
         if a.initial.is_none() || a.output.is_none() {return Err("habitat-sweep requires --initial SAVE and --output NEW_DIR".into());}
@@ -262,6 +272,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     Ok(a)
 }
 fn help() {
+    eprintln!("cosmogon-cli flight-definition [--initial WORLD --definition PROPULSION_PLAN --target Mars --samples 121 --interval-seconds 1 --output NEW_FILE]\ncosmogon-cli flight-study --definition PINNED_STUDY [--initial WORLD --output NEW_DIR]\ncosmogon-cli flight-inspect --recording COMPLETE_DIR   # exact full-world flight replay, no cargo delivery");
     eprintln!("cosmogon-cli vehicle-definition [--output NEW_FILE]   # explicit assumed finite vehicle and burn plan\ncosmogon-cli vehicle-study [--definition PLAN --output NEW_DIR]   # ideal free-space finite propulsion, no launch/delivery\ncosmogon-cli vehicle-inspect --recording COMPLETE_DIR   # exact independent numeric/source replay");
     eprintln!("cosmogon-cli habitat-rerun --recording COMPLETE_DESIGN --output NEW_DIR [--definition NEW_TYPED_PLAN]   # exact original common starting world");
     eprintln!("cosmogon-cli habitat-balance --recording FOLDER [--from-index N] [--observation N] [--output NEW_DIR]");
@@ -423,6 +434,26 @@ fn main() {
                 } else {cosmogon_sim::habitat_figure::Figure::read(recording,a.reference.as_deref().map(std::path::Path::new),&layout)?};
                 figure.export(std::path::Path::new(a.output.as_deref().expect("validated output")))})();
             match result {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).unwrap()),Err(e)=>{eprintln!("Recorded figure failed: {e}");std::process::exit(1);}}
+        },
+        "flight-definition" | "flight-study" | "flight-inspect" => {
+            let result=(||->Result<serde_json::Value,String>{
+                use cosmogon_sim::{world_vehicle,world_vehicle_recording as flight};
+                if a.cmd=="flight-inspect" { return Ok(flight::Bundle::read(std::path::Path::new(a.recording.as_deref().expect("validated recording")))?.manifest); }
+                let world=if let Some(path)=&a.initial {flight::read_world(std::path::Path::new(path))?} else {Universe::new(UniverseSettings {scenario:a.scenario,seed:a.seed,..Default::default()})};
+                if a.cmd=="flight-definition" {
+                    let parent=world.systems.iter().enumerate().find_map(|(i,s)|s.find_body(&a.target).map(|j|cosmogon_sim::BodyRef {system:i as u32,body:j as u32})).ok_or("No matching flight starting body")?;
+                    let plan=if let Some(path)=&a.definition {cosmogon_sim::supply_vehicle::Plan::read(std::path::Path::new(path))?} else {cosmogon_sim::supply_vehicle::Plan::example()};
+                    let d=world_vehicle::Definition::circular_example(&world,parent,plan)?;
+                    let study=flight::Study::new(&world,d,a.samples,a.interval_days*86400.)?;
+                    if let Some(path)=&a.output {study.write(&world,std::path::Path::new(path))?;}
+                    return serde_json::to_value(&study).map_err(|e|e.to_string());
+                }
+                let study=flight::Study::read(std::path::Path::new(a.definition.as_deref().expect("validated definition")))?;
+                let bundle=flight::Bundle::run(&world,study)?;
+                if let Some(output)=&a.output {bundle.export(std::path::Path::new(output))?;}
+                Ok(bundle.manifest)
+            })();
+            match result {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).expect("finite actual flight result")),Err(e)=>{eprintln!("World flight operation failed: {e}");std::process::exit(1);}}
         },
         "vehicle-definition" => {
             let plan=cosmogon_sim::supply_vehicle::Plan::example();
@@ -922,6 +953,11 @@ mod argument_tests {
         parse_args(values.iter().map(|s| s.to_string()))
     }
 
+    #[test]
+    fn flight_commands_refuse_missing_definitions_and_ignored_origin_controls() {
+        for v in [vec!["flight-study"],vec!["flight-inspect"],vec!["flight-study","--definition"," "],vec!["flight-inspect","--recording"," "],vec!["flight-inspect","--recording","r","--output","new"],vec!["flight-study","--definition","d","--samples","3"],vec!["flight-definition","--initial","s","--seed","2"],vec!["flight-definition","--interval-days","1"]] {assert!(args(&v).is_err());}
+        assert!(args(&["flight-definition","--samples","9","--interval-seconds","0.5","--target","Mars"]).is_ok());assert!(args(&["flight-study","--definition","d","--initial","s","--output","new"]).is_ok());assert!(args(&["flight-inspect","--recording","r"]).is_ok());
+    }
     #[test]
     fn vehicle_commands_refuse_missing_recordings_and_unrelated_world_controls() {
         for v in [vec!["vehicle-inspect"],vec!["vehicle-inspect","--recording"," "],vec!["vehicle-study","--initial","s"],vec!["vehicle-study","--samples","5"],vec!["vehicle-definition","--seed","2"],vec!["vehicle-study","--output"," "],vec!["vehicle-inspect","--recording","x","--output","y"]] {assert!(args(&v).is_err());}

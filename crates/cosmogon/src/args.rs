@@ -34,6 +34,11 @@ pub struct Args {
     pub mars_terrain: Option<String>,
     pub terrain_section: Option<String>,
     pub habitat_definition: Option<String>,
+    pub flight_definition:Option<String>,
+    pub flight_origin:Option<String>,
+    pub flight_recording:Option<String>,
+    pub flight_output:Option<String>,
+    pub flight_observation:Option<usize>,
     pub vehicle_plan:Option<String>,
     pub vehicle_recording:Option<String>,
     pub vehicle_output:Option<String>,
@@ -187,6 +192,11 @@ impl Args {
                 "--greenhouse-supply-day" => a.greenhouse_supply_day=Some(val().parse().unwrap_or(usize::MAX)),
                 "--greenhouse-supply-resource" => a.greenhouse_supply_resource=Some(val()),
                 "--greenhouse-definition" => a.greenhouse_definition=Some(val()),
+                "--flight-definition" => a.flight_definition=Some(val()),
+                "--flight-origin" => a.flight_origin=Some(val()),
+                "--flight-recording" => a.flight_recording=Some(val()),
+                "--flight-output" => a.flight_output=Some(val()),
+                "--flight-observation" => a.flight_observation=Some(val().parse().unwrap_or(usize::MAX)),
                 "--vehicle-plan" => a.vehicle_plan=Some(val()),
                 "--vehicle-recording" => a.vehicle_recording=Some(val()),
                 "--vehicle-output" => a.vehicle_output=Some(val()),
@@ -229,13 +239,22 @@ impl Args {
                 f => eprintln!("ignoring unknown argument {f}"),
             }
         }
-        if (a.vehicle_plan.is_some() || a.vehicle_recording.is_some() || a.panel.as_deref().is_some_and(|p|p.starts_with("vehicle")) || a.input_bindings.is_some() || a.camera_path.is_some() || a.habitat_recording.is_some() || a.greenhouse_definition.is_some() || a.crop_chemistry.is_some() || a.greenhouse_supplies.is_some() || a.habitat_definition.is_some() || a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
+        if (a.flight_definition.is_some() || a.flight_recording.is_some() || a.vehicle_plan.is_some() || a.vehicle_recording.is_some() || a.panel.as_deref().is_some_and(|p|p.starts_with("vehicle")) || a.input_bindings.is_some() || a.camera_path.is_some() || a.habitat_recording.is_some() || a.greenhouse_definition.is_some() || a.crop_chemistry.is_some() || a.greenhouse_supplies.is_some() || a.habitat_definition.is_some() || a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
             a.new = Some(Scenario::SolarSystemLab);
         }
         a
     }
 
     fn validate_surface(&self) -> Result<(), String> {
+        for (value,label) in [(&self.flight_definition,"flight definition"),(&self.flight_origin,"flight original world"),(&self.flight_recording,"flight recording"),(&self.flight_output,"new flight output")] {
+            if value.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err(format!("Choose a nonempty {label} path"));}
+        }
+        let flight=self.flight_definition.is_some() || self.flight_recording.is_some();
+        if self.flight_definition.is_some() && self.flight_recording.is_some() {return Err("Choose one pinned flight definition or complete flight recording".into());}
+        if self.flight_definition.is_some() != self.flight_origin.is_some() {return Err("A flight definition requires its exact --flight-origin world; origin alone is not a study".into());}
+        if (self.flight_output.is_some() || self.flight_observation.is_some()) && !flight {return Err("Flight output/observation requires an explicit definition and origin or complete recording".into());}
+        if self.flight_observation.is_some_and(|i|i>=4096) {return Err("Flight observation must be an integer inside the actual 0–4095 recording bounds".into());}
+        if flight && (self.vehicle_plan.is_some() || self.vehicle_recording.is_some() || self.menu.is_some() || self.habitat_audio_export.is_some() || self.habitat_definition.is_some() || self.habitat_sweep.is_some() || self.habitat_recording.is_some() || self.greenhouse_definition.is_some() || self.crop_chemistry.is_some() || self.greenhouse_supplies.is_some() || self.research_recording.is_some() || self.research_export.is_some() || self.research_batch.is_some() || self.terrain_section.is_some()) {return Err("Choose one automated flight, propulsion, cabin or research workspace".into());}
         for (value,label) in [(&self.vehicle_plan,"vehicle plan"),(&self.vehicle_recording,"vehicle recording"),(&self.vehicle_output,"new vehicle output")] {
             if value.as_deref().is_some_and(|s|s.trim().is_empty()){return Err(format!("Choose a nonempty {label} path"));}
         }
@@ -429,6 +448,14 @@ mod tests {
         assert!(Args::parse_from(["--habitat-sweep","p","--load","s","--habitat-study-output","o","--habitat-sample","24"].into_iter().map(String::from)).validate_surface().is_ok());
     }
 
+    #[test]
+    fn flight_launches_require_exact_origins_and_refuse_ignored_controls() {
+        for flags in [vec!["--flight-definition",""],vec!["--flight-definition","d"],vec!["--flight-origin","s"],vec!["--flight-recording"," "],vec!["--flight-output","new"],vec!["--flight-observation","0"],vec!["--flight-recording","r","--flight-definition","d","--flight-origin","s"],vec!["--flight-recording","r","--flight-observation","NaN"],vec!["--flight-recording","r","--flight-observation","4096"],vec!["--flight-recording","r","--vehicle-plan","p"],vec!["--flight-recording","r","--habitat-recording","h"],vec!["--flight-recording","r","--menu","new"]] {
+            assert!(Args::parse_from(flags.into_iter().map(String::from)).validate_surface().is_err());
+        }
+        let a=Args::parse_from(["--flight-definition","d","--flight-origin","s","--flight-output","new","--flight-observation","3"].into_iter().map(String::from));assert!(a.validate_surface().is_ok());assert!(matches!(a.new,Some(Scenario::SolarSystemLab)));
+        assert!(Args::parse_from(["--flight-recording","r"].into_iter().map(String::from)).validate_surface().is_ok());
+    }
     #[test]
     fn vehicle_launches_reject_ignored_inputs_and_use_actual_index_bounds() {
         for flags in [vec!["--vehicle-plan",""],vec!["--vehicle-recording",""],vec!["--vehicle-output","new"],vec!["--vehicle-observation","3"],vec!["--vehicle-plan","p","--vehicle-recording","r"],vec!["--vehicle-plan","p","--vehicle-observation","NaN"],vec!["--vehicle-plan","p","--vehicle-observation","8192"],vec!["--vehicle-plan","p","--vehicle-output",""],vec!["--vehicle-plan","p","--habitat-recording","r"],vec!["--vehicle-plan","p","--greenhouse-definition","g"],vec!["--vehicle-plan","p","--research-export","r"],vec!["--vehicle-plan","p","--menu","new"],vec!["--panel","vehicle","--menu","new"]] {assert!(Args::parse_from(flags.into_iter().map(String::from)).validate_surface().is_err());}

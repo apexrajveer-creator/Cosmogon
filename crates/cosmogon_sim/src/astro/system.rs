@@ -86,6 +86,17 @@ impl StarSystem {
         self.companion.as_ref().map(|c| self.position + c.orbit.position(self.star.mu() + c.star.mu(), t))
     }
 
+    /// Physics coordinates before adding the galactic origin. Subtracting the origin
+    /// from an absolute companion position would lose close-flight precision.
+    pub fn companion_local_position(&self,t:f64)->Option<Vec3d> {
+        if let Some(d)=&self.dynamics {
+            let acc=d.acc.get(1).copied().filter(|_|d.companion.is_some()).unwrap_or(Vec3d::ZERO);
+            let dt=t-d.time();
+            return d.companion.map(|c|c.pos+c.vel*dt+acc*(0.5*dt*dt));
+        }
+        self.companion.as_ref().map(|c|c.orbit.position(self.star.mu()+c.star.mu(),t))
+    }
+
     /// The planet (top-level body) that `body` belongs to.
     pub fn top_level(&self, body: usize) -> usize {
         let mut idx = body;

@@ -36,6 +36,7 @@ use bevy_egui::EguiPlugin;
 fn main() -> bevy::app::AppExit {
     let started = std::time::Instant::now();
     let args = args::Args::parse();
+    if let Err(e)=ui::world_vehicle::preflight(&args){eprintln!("Cannot open finite world flight: {e}");return AppExit::error();}
     if let Err(e)=ui::vehicle::preflight(&args){eprintln!("Cannot open supply vehicle design: {e}");return AppExit::error();}
     if let Some(path)=&args.habitat_definition {if let Err(e)=cosmogon_sim::habitat::Definition::read(std::path::Path::new(path)) {eprintln!("Cannot open habitat definition: {e}");return bevy::app::AppExit::error();}}
     if let Some(path)=&args.crop_chemistry {if let Err(e)=cosmogon_sim::crop_chemistry::read(std::path::Path::new(path)) {eprintln!("Cannot open crop chemistry: {e}");return bevy::app::AppExit::error();}}
@@ -159,7 +160,7 @@ fn main() -> bevy::app::AppExit {
     // The pipelined renderer's shutdown waits without servicing its main-thread
     // executor. Imported-table automation may finish during GPU initialization;
     // render those short jobs on the main thread so teardown cannot deadlock.
-    let plugins = if (args.vehicle_plan.is_some() || args.vehicle_recording.is_some() || args.panel.as_deref().is_some_and(|p|p.starts_with("vehicle")) || args.habitat_audio.is_some() || args.habitat_sweep.is_some() || args.habitat_recording.is_some() || args.greenhouse_definition.is_some() || args.crop_chemistry.is_some() || args.greenhouse_supplies.is_some() || args.habitat_definition.is_some() || args.research_recording.is_some() || args.surface_site.is_some() || args.mars_terrain.is_some() || args.terrain_section.is_some()) && args.quit_after_capture {
+    let plugins = if (args.flight_definition.is_some() || args.flight_recording.is_some() || args.vehicle_plan.is_some() || args.vehicle_recording.is_some() || args.panel.as_deref().is_some_and(|p|p.starts_with("vehicle")) || args.habitat_audio.is_some() || args.habitat_sweep.is_some() || args.habitat_recording.is_some() || args.greenhouse_definition.is_some() || args.crop_chemistry.is_some() || args.greenhouse_supplies.is_some() || args.habitat_definition.is_some() || args.research_recording.is_some() || args.surface_site.is_some() || args.mars_terrain.is_some() || args.terrain_section.is_some()) && args.quit_after_capture {
         plugins.disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>()
     } else {
         plugins

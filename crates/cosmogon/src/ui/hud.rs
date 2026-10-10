@@ -153,7 +153,7 @@ pub fn top_bar(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut si
                     ui.checkbox(&mut ui_state.camera_open, "Camera & Photo");
                     ui.checkbox(&mut ui_state.surface_study_open, "Mars terrain section");
                     ui.checkbox(&mut ui_state.habitat_open,"Habitat engineering");
-                    ui.checkbox(&mut ui_state.vehicle_open,"Supply vehicle design");
+                    ui.checkbox(&mut ui_state.vehicle_open,"Supply vehicles · design & flight");
                     ui.checkbox(&mut ui_state.alerts_open, "Sound & Alerts");
                     ui.checkbox(&mut settings.show_orbits, "Orbits");
                     ui.checkbox(&mut settings.show_labels, "Labels");

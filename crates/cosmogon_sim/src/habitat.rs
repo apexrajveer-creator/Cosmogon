@@ -1108,18 +1108,25 @@ impl Universe {
     }
     pub(crate) fn ensure_habitat_task(&mut self) {
         if self.habitats.is_empty() {
-            if self
-                .scheduler
-                .tasks
-                .get(TASK)
-                .is_some_and(|t| t.name == "habitats")
-            {
-                self.scheduler.tasks.remove(TASK);
+            if self.scheduler.tasks.get(TASK).is_some_and(|t| t.name == "habitats") {
+                if self.scheduler.tasks.len() == TASK + 1 {
+                    self.scheduler.tasks.remove(TASK);
+                } else {
+                    // Later task indices must never shift when a habitat is removed.
+                    self.scheduler.tasks[TASK] = crate::scheduler::Task {
+                        name: "habitats".into(), origin: self.time,
+                        period: crate::scheduler::NEVER, steps: 0,
+                    };
+                }
             }
             return;
         }
         if self.scheduler.tasks.len() == TASK {
             self.scheduler.add("habitats", self.time, PERIOD);
+        } else if self.scheduler.tasks.get(TASK).is_some_and(|t| t.name == "habitats" && t.period == crate::scheduler::NEVER) {
+            self.scheduler.tasks[TASK] = crate::scheduler::Task {
+                name: "habitats".into(), origin: self.time, period: PERIOD, steps: 0,
+            };
         }
     }
     pub(crate) fn step_habitats(&mut self, time: f64) {

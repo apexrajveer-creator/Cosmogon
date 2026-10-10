@@ -417,7 +417,7 @@ pub fn tool_windows(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, m
             add("Sound: mix, audio modes and quiet settings".into(), Act::Command(Cmd::OpenAlerts(1)));
             add("Notifications: category routing and thresholds".into(), Act::Command(Cmd::OpenAlerts(2)));
             add("Habitat engineering: build, configure, inspect and export".into(), Act::Command(Cmd::OpenHabitat));
-            add("Supply vehicle design".into(), Act::Command(Cmd::OpenVehicle));
+            add("Supply vehicles · design & flight".into(), Act::Command(Cmd::OpenVehicle));
             add("Performance: frame times and export report".into(), Act::Command(Cmd::OpenPerformance));
             add("Mars terrain section: numeric topography and source export".into(),Act::Command(Cmd::OpenTerrainSection));
             add("Save sandbox".into(), Act::Command(Cmd::Save));

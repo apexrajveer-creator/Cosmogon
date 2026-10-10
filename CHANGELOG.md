@@ -1,3 +1,9 @@
+## Unreleased — physical finite vehicle flight
+
+- Connect authored finite propellant/cargo to optional actual world spacecraft, fixed deterministic gravity/variable-mass motion, explicit spherical first contacts and retained unsupported-state reasons. Ordinary create/remove edits, undo/redo, saves and model/source pins share the authoritative world.
+- Native live controls and independent pinned-world studies, protected complete origins/final worlds/36-column CSV/JSON, strict full-world reopening/replay, stable bytes and request-time worker controls. Preserve exact previous propulsion recordings; first contact is not a safe landing or delivery. Gravity/frame discontinuities currently stop unresolved flight explicitly.
+- Retain habitat scheduler slots while later vehicle tasks exist; park terminal flight on the completed task time so fractional caller chunks preserve identical state. Bound study work and estimated payload before allocation. Enabled fleet state/fingerprints deliberately change; absent legacy worlds omit the new state and retain golden `0xf2c4140a45ae509b`. No graphics or dependency change; physical landing/loading/delivery, hardware fidelity and phase 10 remain incomplete.
+
 ## Unreleased — finite supply-vehicle design and propulsion
 
 - Shared authored dry/tank/propellant/payload and finite cabin-consumable cargo design, deterministic constant-effective-Isp burns, exact fuel cutoff and actual mass/impulse/vector-capability observations. Add stable deterministic `dln1p` and expose raw numerical residuals.

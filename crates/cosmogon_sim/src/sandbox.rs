@@ -94,6 +94,8 @@ pub enum Edit {
     SetProperty { body: BodyRef, property: BodyProperty },
     /// Explicit observed height-source choice; does not switch gravity or orbital state.
     SetMarsTerrain { body: BodyRef, dataset: terrain::ElevationData },
+    CreateVehicle { definition: Box<crate::world_vehicle::Definition> },
+    RemoveVehicle { system: u32, id: u64 },
     CreateHabitat { definition: Box<crate::habitat::Definition> },
     ConfigureHabitat { system: u32, id: u64, config: Box<crate::habitat::Config> },
     HarvestHabitatCrop { system:u32,id:u64 },
@@ -108,8 +110,9 @@ pub enum Edit {
 impl Edit {
     pub fn system(&self) -> u32 {
         match self {
-            Edit::AddBody { system, .. } | Edit::SetStar { system, .. } | Edit::SetPhysics { system, .. } | Edit::Intervene { system, .. } | Edit::ConfigureHabitat {system,..} | Edit::RemoveHabitat {system,..} | Edit::HarvestHabitatCrop {system,..} => *system,
+            Edit::AddBody { system, .. } | Edit::SetStar { system, .. } | Edit::SetPhysics { system, .. } | Edit::Intervene { system, .. } | Edit::ConfigureHabitat {system,..} | Edit::RemoveHabitat {system,..} | Edit::HarvestHabitatCrop {system,..} | Edit::RemoveVehicle {system,..} => *system,
             Edit::CreateHabitat {definition} => definition.body.system,
+            Edit::CreateVehicle {definition} => definition.parent.system,
             Edit::RemoveBody { body } | Edit::SetState { body, .. } | Edit::Impulse { body, .. } | Edit::SetOrbit { body, .. } | Edit::SetProperty { body, .. } | Edit::SetMarsTerrain { body, .. } => body.system,
         }
     }
@@ -418,6 +421,20 @@ fn validate(u: &Universe, e: &Edit) -> Result<(), String> {
                 _ => {}
             }
         }
+        Edit::CreateVehicle {definition} => {
+            definition.validate(u)?;
+            if u.vehicles.len() >= crate::world_vehicle::MAX_VEHICLES { return Err("A world supports at most 64 finite vehicles".into()); }
+            if !u.time.is_finite() || u.time + crate::world_vehicle::PERIOD == u.time { return Err("World time cannot represent one-second vehicle scheduling".into()); }
+            for (slot, name) in [(crate::habitat::TASK, "habitats"), (crate::world_vehicle::TASK, "vehicles")] {
+                if u.scheduler.tasks.get(slot).is_some_and(|task|task.name != name) { return Err("Vehicle scheduling requires supported fixed task slots".into()); }
+            }
+            if u.scheduler.tasks.len() < crate::habitat::TASK { return Err("Missing base world scheduler slots".into()); }
+            u.next_vehicle_id.checked_add(1).ok_or("Vehicle identifier counter overflow")?;
+            crate::world_vehicle::Flight::new(u.next_vehicle_id, (**definition).clone(), u)?;
+        }
+        Edit::RemoveVehicle {system,id} => {
+            if !u.vehicles.iter().any(|v|v.id == *id && v.definition.parent.system == *system) { return Err("No such finite vehicle".into()); }
+        }
         Edit::CreateHabitat {definition} => {
             definition.validate()?;body_ok(&definition.body)?;
             if !u.body(definition.body).kind.has_surface() {return Err("Habitat placement requires an existing solid surface".into());}
@@ -472,6 +489,8 @@ fn describe(u: &Universe, e: &Edit) -> String {
             BodyProperty::Co2Fraction(f) => format!("Set CO₂ of {} to {:.4}%", name(body), f * 100.0),
             BodyProperty::WaterInventory(w) => format!("Set water of {} to {w:.3} Earth oceans", name(body)),
         },
+        Edit::CreateVehicle {definition} => format!("Created finite flight {} relative to {}",definition.plan.definition.name,name(&definition.parent)),
+        Edit::RemoveVehicle {id,..} => format!("Removed finite vehicle {id}"),
         Edit::CreateHabitat {definition} => format!("Built {} on {}",definition.name,name(&definition.body)),
         Edit::ConfigureHabitat {id,..} => format!("Configured habitat {id}"),
         Edit::HarvestHabitatCrop {id,..} => format!("Harvested completed crop in habitat {id}"),
@@ -510,6 +529,26 @@ impl Universe {
             return Ok(EditOutcome { created: None, summary });
         }
         // Habitat edits have their own conserved state; never activate orbital dynamics.
+        if matches!(edit, Edit::CreateVehicle {..} | Edit::RemoveVehicle {..}) {
+            let summary = describe(self, &edit);
+            let parent = match &edit {
+                Edit::CreateVehicle {definition} => {
+                    let next = self.next_vehicle_id.checked_add(1).ok_or("Vehicle identifier counter overflow")?;
+                    let flight = crate::world_vehicle::Flight::new(self.next_vehicle_id, (**definition).clone(), self)?;
+                    let parent = flight.definition.parent;
+                    self.vehicles.push(flight); self.next_vehicle_id = next; parent
+                }
+                Edit::RemoveVehicle {id,..} => {
+                    let index = self.vehicles.iter().position(|v|v.id == *id).expect("validated vehicle");
+                    self.vehicles.remove(index).definition.parent
+                }
+                _ => unreachable!(),
+            };
+            self.ensure_vehicle_task();
+            self.edits.push(EditRecord {time:t,summary:summary.clone(),edit});
+            self.history.push(Event {time:t,category:Category::Space,importance:3,title:summary.clone(),detail:"Authored finite test-particle spacecraft initial conditions. No settlement loading, safe landing or cargo delivery is implied.".into(),system:Some(parent.system),body:Some(parent.body),civ:None});
+            return Ok(EditOutcome {created:None,summary});
+        }
         if matches!(edit,Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::HarvestHabitatCrop {..} | Edit::RemoveHabitat {..}) {
             let summary=describe(self,&edit);
             let body=match &edit {
@@ -736,7 +775,7 @@ impl Universe {
                     sys.deactivate_dynamics(t)?;
                 }
             }
-            Edit::Intervene { .. } | Edit::SetMarsTerrain { .. } | Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::HarvestHabitatCrop {..} | Edit::RemoveHabitat {..} => unreachable!("handled above"),
+            Edit::CreateVehicle {..} | Edit::RemoveVehicle {..} | Edit::Intervene { .. } | Edit::SetMarsTerrain { .. } | Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::HarvestHabitatCrop {..} | Edit::RemoveHabitat {..} => unreachable!("handled above"),
         }
 
         let sys = &mut self.systems[s];

@@ -73,3 +73,7 @@ pub mod habitat_heat_trajectory;
 pub mod habitat_crop_trajectory;
 
 pub mod supply_vehicle;
+
+pub mod world_vehicle;
+
+pub mod world_vehicle_recording;
