@@ -205,6 +205,7 @@ impl Bundle {
             "summary":{"final_flight":rows.last().map(|r|&r.flight),"retained_cargo":study.flight.plan.definition.cargo,
                 "mass_residual_kg":study.flight.plan.definition.initial_propellant_kg-rows.last().unwrap().flight.propulsion.propellant_kg-rows.last().unwrap().flight.propulsion.exhausted_propellant_kg}});
         if study.flight.contact.is_some() {manifest["files"].as_array_mut().unwrap().push(json!("contact.csv"));}
+        if study.flight.contact.as_ref().is_some_and(|h|h.shear.is_some()) {manifest["files"].as_array_mut().unwrap().push(json!("shear.csv"));}
         Ok(Self {
             study,
             origin: initial.clone(),
@@ -248,6 +249,9 @@ impl Bundle {
         if self.study.flight.contact.is_some() {
             let index=files.len()-1;
             files.insert(index,("contact.csv",contact_csv(&self.rows).into_bytes()));
+        }
+        if self.study.flight.contact.as_ref().is_some_and(|h|h.shear.is_some()) {
+            let index=files.len()-1;files.insert(index,("shear.csv",shear_csv(&self.rows)?.into_bytes()));
         }
         if files
             .iter()
@@ -306,6 +310,9 @@ impl Bundle {
         }
         if study.flight.contact.is_some() && crate::habitat_recording::read(&path.join("contact.csv"),MAX_BYTES)?!=contact_csv(&replay.rows) {
             return Err("Stored contact CSV differs from exact actual foot/work observations".into());
+        }
+        if study.flight.contact.as_ref().is_some_and(|h|h.shear.is_some()) && crate::habitat_recording::read(&path.join("shear.csv"),MAX_BYTES)?!=shear_csv(&replay.rows)? {
+            return Err("Stored shear CSV differs from exact persistent foot/work observations".into());
         }
         let final_world = save::from_json(&crate::habitat_recording::read(
             &path.join("final.cosmo"),
@@ -438,7 +445,9 @@ pub fn contact_csv(rows:&[Observation])->String {
         if let Some(object)=value.as_object() {for (name,item) in object {numbers(item,&format!("{prefix}{name}_"),out);}}
         else if value.is_number() {out.push((prefix.trim_end_matches('_').into(),value.to_string()));}
     }
-    let mut schema=vec![];numbers(&serde_json::to_value(crate::vehicle_contact_dynamics::Work::default()).unwrap(),"cumulative_",&mut schema);
+    let mut schema=vec![];let empty=crate::vehicle_contact_dynamics::Work::default();
+    let first=rows.first().and_then(|r|r.flight.contact.as_ref()).map_or(&empty,|s|&s.cumulative_work);
+    numbers(&serde_json::to_value(first).unwrap(),"cumulative_",&mut schema);
     let mut output=format!("{base},{}\n",schema.iter().map(|(name,_)|name.as_str()).collect::<Vec<_>>().join(","));
     for row in rows {if let Some(state)=&row.flight.contact {
         let mut work=vec![];numbers(&serde_json::to_value(&state.cumulative_work).unwrap(),"cumulative_",&mut work);
@@ -451,11 +460,26 @@ pub fn contact_csv(rows:&[Observation])->String {
     }}
     output
 }
+pub fn shear_csv(rows: &[Observation]) -> Result<String, String> {
+    let mut output=String::from("world_time_s,craft_time_s,foot_index,normal_load_n,shear_x_m,shear_y_m,shear_z_m,shear_force_x_n,shear_force_y_n,shear_force_z_n,shear_energy_j,cumulative_endpoint_relative_work_j,cumulative_shear_storage_change_j,cumulative_plastic_dissipation_j,cumulative_unloading_release_j,cumulative_numerical_dissipation_j,cumulative_shear_balance_residual_j,cumulative_plastic_slip_distance_m\n");
+    for row in rows {
+        let d=row.flight.definition.contact.as_ref().and_then(|h|h.shear.as_ref()).ok_or("Shear CSV requires explicit persistent hardware")?;
+        let r=row.flight.contact.as_ref().ok_or("Missing rigid shear state")?;
+        let work=r.cumulative_work.shear.as_ref().ok_or("Missing cumulative shear work")?;
+        for (index,foot) in r.feet.iter().enumerate() {
+            let s=foot.shear.as_ref().ok_or("Missing recorded foot shear")?;let force=d.force_n(s)?;
+            let mut values=vec![row.world_time_s.to_string(),row.flight.last_time_s.to_string(),index.to_string()];
+            values.extend([s.normal_load_n,s.elastic_shear_m.x,s.elastic_shear_m.y,s.elastic_shear_m.z,force.x,force.y,force.z,d.energy_j(s)?,work.endpoint_relative_work_j,work.elastic_storage_change_j,work.plastic_dissipation_j,work.unloading_release_j,work.numerical_dissipation_j,work.balance_residual_j,work.plastic_slip_distance_m].iter().map(ToString::to_string));
+            output.push_str(&values.join(","));output.push('\n');
+        }
+    }
+    Ok(output)
+}
 pub fn context_for(definition: &Definition) -> Value {
     if definition.contact.is_none() { return context(); }
     let mut result=context();
-    let contact=crate::vehicle_contact_dynamics::context();
-    result["model"]=json!(world_vehicle::CONTACT_MODEL);
+    let contact=crate::vehicle_contact_dynamics::context_for(definition.contact.as_ref().unwrap());
+    result["model"]=json!(definition.model);
     result["operator"]=contact["operator"].clone();
     result["contact"]=contact["response"].clone();
     result["limits"]=contact["limits"].clone();

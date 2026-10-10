@@ -26,6 +26,15 @@ pub struct Definition {
     pub maximum_tangential_force_n: f64,
 }
 impl Definition {
+    pub fn example() -> Self {
+        Self {
+            model: MODEL.into(),
+            stiffness_n_m: 5000.,
+            friction_coefficient: 0.5,
+            maximum_elastic_shear_m: 0.5,
+            maximum_tangential_force_n: 100000.,
+        }
+    }
     /// Transport actual terrain material orientation between two completed
     /// source-frame readings. Relative displacement is still supplied by the
     /// coupled integrator; source-centre movement must not become foot slip.

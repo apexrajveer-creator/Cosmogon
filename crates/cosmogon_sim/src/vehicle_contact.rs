@@ -252,6 +252,8 @@ pub struct Foot {
 #[serde(deny_unknown_fields)]
 pub struct FootSample {
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shear: Option<crate::vehicle_shear::State>,
     pub position_m: Vec3d,
     pub velocity_m_s: Vec3d,
     pub lever_inertial_m: Vec3d,
@@ -329,6 +331,7 @@ impl Foot {
         }
         Ok(FootSample {
             model: MODEL.into(),
+            shear: None,
             position_m: position,
             velocity_m_s: velocity,
             lever_inertial_m: lever,

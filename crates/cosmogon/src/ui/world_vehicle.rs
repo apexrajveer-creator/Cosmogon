@@ -438,7 +438,7 @@ impl FlightUi {
                     }
                 } else {d.contact=None;d.model=cosmogon_sim::world_vehicle::MODEL.into();}
             }
-            if let Some(h)=&mut d.contact {hardware_controls(ui,h);}
+            if let Some(h)=&mut d.contact {hardware_controls(ui,h);d.model=h.flight_model().into();}
             let valid = Flight::new(0,d.clone(),&sim.universe);
             if let Err(e) = &valid {
                 ui.colored_label(ACCENT, e);
@@ -579,8 +579,11 @@ impl FlightUi {
             }
         });
         if bundle.study.flight.contact.is_some() {ui.horizontal_wrapped(|ui| {
-            for (index,label) in [(4,"Loaded feet"),(5,"Current elastic energy"),(6,"Cumulative contact dissipation"),(7,"Body angular speed"),(8,"Cumulative contact residual")] {ui.selectable_value(&mut self.metric,index,label);}
+            for (index,label) in [(4,"Loaded feet"),(5,"Normal spring energy"),(6,"Normal and smooth-friction loss"),(7,"Body angular speed"),(8,"Cumulative contact residual")] {ui.selectable_value(&mut self.metric,index,label);}
         });} else if self.metric>3 {self.metric=0;}
+        if bundle.study.flight.contact.as_ref().is_some_and(|h|h.shear.is_some()) {ui.horizontal_wrapped(|ui| {
+            for (index,label) in [(9,"Tangential stored energy"),(10,"Plastic slip loss"),(11,"Unloading release"),(12,"Endpoint numerical term"),(13,"Endpoint shear residual"),(14,"Accumulated slip distance")] {ui.selectable_value(&mut self.metric,index,label);}
+        });} else if self.metric>8 {self.metric=0;}
         plot(ui, bundle, self.metric, self.selected_row);
         ui.collapsing("Retained source and clock support",|ui|{
             ui.add(egui::Label::new(format!("Source: {} · origin {}",self.source,bundle.manifest["origin_fingerprint"])).wrap());
@@ -689,8 +692,19 @@ impl FlightUi {
     }
 }
 fn hardware_controls(ui:&mut egui::Ui,h:&mut cosmogon_sim::vehicle_contact_dynamics::Hardware) {
+    let mut persistent=h.shear.is_some();
+    if ui.checkbox(&mut persistent,"Persistent foot shear (replaces smooth sliding friction)").changed() {
+        if persistent {h.model=cosmogon_sim::vehicle_contact_dynamics::SHEAR_MODEL.into();h.shear=Some(cosmogon_sim::vehicle_shear::Definition::example());for f in &mut h.feet {f.response.sliding_friction=0.;}}
+        else {h.model=cosmogon_sim::vehicle_contact::MODEL.into();h.shear=None;}
+    }
     ui.collapsing("Contact hardware assumptions",|ui| {
         ui.label("Editable authored mechanics. Inertia scales with retained mass; symmetric fuel removal carries co-rotating angular momentum. Central thrust uses inertial command axes.");
+        if let Some(s)=&mut h.shear {
+            ui.label("A foot retains elastic shear at rest and slips beyond its finite friction capacity. This does not establish stable landing or attachment.");
+            for (label,value) in [("Tangential stiffness (N/m)",&mut s.stiffness_n_m),("Coulomb coefficient",&mut s.friction_coefficient),("Elastic shear limit (m)",&mut s.maximum_elastic_shear_m),("Tangential structural limit (N)",&mut s.maximum_tangential_force_n)] {
+                ui.horizontal_wrapped(|ui| {ui.label(label);ui.add(egui::DragValue::new(value).speed(0.01).max_decimals(9));});
+            }
+        }
         for (label,v) in [("Gyration radii (m)",&mut h.gyration_radii_m),("Initial body angular velocity (rad/s)",&mut h.initial_angular_velocity_body_rad_s)] {
             ui.label(label);ui.horizontal_wrapped(|ui| {for (axis,value) in [("X",&mut v.x),("Y",&mut v.y),("Z",&mut v.z)] {ui.label(axis);ui.add(egui::DragValue::new(value).speed(0.01).max_decimals(9));}});
         }
@@ -709,7 +723,7 @@ fn hardware_controls(ui:&mut egui::Ui,h:&mut cosmogon_sim::vehicle_contact_dynam
                 ui.horizontal_wrapped(|ui| {ui.label(label);ui.add(egui::DragValue::new(value).speed(0.01).max_decimals(9));});
             }
         });}
-        ui.label("Static friction, attachment, entry/heating and physical cargo delivery are still unavailable. Study work is bounded; use a short recording first.");
+        ui.label("Attachment, stability certification, entry/heating and physical cargo delivery remain unavailable. Persistent shear requires zero legacy sliding coefficient; disabling it leaves that coefficient editable. Study work is bounded; use a short recording first.");
     });
 }
 fn arrival_readings(ui: &mut egui::Ui, r: &Approach) {
@@ -791,7 +805,13 @@ fn readings(ui: &mut egui::Ui, f: &Flight, world_time: f64) {
         ui.label(format!("Peak compression {:.6} m · peak resultant load {:.3} N",r.last_work.maximum_compression_m,r.last_work.maximum_resultant_load_n));
         ui.label(format!("Body angular speed {:.6} rad/s · {} resolved substeps in {:.6} s",r.angular_velocity_body_rad_s.length(),r.last_work.substeps,r.last_work.duration_s));
         ui.label(format!("Contact balance residual {:.6} J · accumulated {:.6} J",r.last_work.contact_balance_residual_j,r.cumulative_work.contact_balance_residual_j));
-        ui.label("Authored finite gear response with sliding friction. No static attachment, safe landing certification or cargo delivery.");
+        if let Some(s)=&r.cumulative_work.shear {
+            let storage=f.definition.contact.as_ref().and_then(|h|h.shear.as_ref()).and_then(|d|r.feet.iter().map(|foot|d.energy_j(foot.shear.as_ref()? ).ok()).collect::<Option<Vec<_>>>()).map(|v|v.iter().sum::<f64>());
+            if let Some(storage)=storage {ui.label(format!("Persistent shear · stored {:.6} J · slip loss {:.6} J · unloading release {:.6} J",storage,s.plastic_dissipation_j,s.unloading_release_j));}
+            else {ui.colored_label(ACCENT,"Retained tangential storage is unavailable");}
+            ui.label(format!("Endpoint numerical term {:.6} J · constitutive residual {:.6} J",s.numerical_dissipation_j,s.balance_residual_j));
+            ui.label("Authored persistent shear. Endpoint work and actual midpoint motion have separate balances; numerical terms are not measured friction. Stability, attachment and cargo delivery remain unavailable.");
+        } else {ui.label("Authored finite gear response with sliding friction. No static attachment, safe landing certification or cargo delivery.");}
         ui.collapsing("Per-foot forces, rotating terrain and full work evidence",|ui| {
             for (i,foot) in r.feet.iter().enumerate() {
                 ui.label(format!("Foot {} · gap {:.6} m · compression {:.6} m · normal {:.3} N · slope {:.3}°",i+1,foot.surface.tangent_gap_m,foot.response.compression_m,foot.response.normal_load_n,foot.surface.slope_rad.to_degrees()));
@@ -821,6 +841,9 @@ fn plot(ui: &mut egui::Ui, b: &Bundle, metric: usize, selected: usize) {
             5 => r.flight.contact.as_ref().map(|s|s.feet.iter().map(|f|f.response.stored_elastic_energy_j).sum()).unwrap_or(0.),
             6 => r.flight.contact.as_ref().map(|s|s.cumulative_work.normal_dissipation_j+s.cumulative_work.sliding_dissipation_j).unwrap_or(0.),
             7 => r.flight.contact.as_ref().map(|s|s.angular_velocity_body_rad_s.length()).unwrap_or(0.),
+            9..=14 => r.flight.contact.as_ref().and_then(|s|s.cumulative_work.shear.as_ref()).map(|w|match metric {
+                9=>w.elastic_storage_change_j,10=>w.plastic_dissipation_j,11=>w.unloading_release_j,12=>w.numerical_dissipation_j,13=>w.balance_residual_j,_=>w.plastic_slip_distance_m,
+            }).unwrap_or(0.),
             _ => r.flight.contact.as_ref().map(|s|s.cumulative_work.contact_balance_residual_j).unwrap_or(0.),
         })
         .collect::<Vec<_>>();
@@ -858,7 +881,7 @@ fn plot(ui: &mut egui::Ui, b: &Bundle, metric: usize, selected: usize) {
         .circle_filled(points[selected], 3., egui::Color32::WHITE);
     ui.label(format!(
         "World elapsed 0–{duration:.6} s · raw range {min:.9}–{max:.9} {}",
-        match metric {0=>"kg",3=>"m",4=>"feet",5|6|8=>"J",7=>"rad/s",_=>"m/s"}
+        match metric {0=>"kg",3|14=>"m",4=>"feet",5|6|8|9..=13=>"J",7=>"rad/s",_=>"m/s"}
     ));
 }
 pub fn preflight(args: &crate::args::Args) -> Result<(), String> {
@@ -967,6 +990,18 @@ mod tests {
         assert_eq!(Bundle::read(&path).unwrap().manifest,original.manifest);
         std::fs::write(path.join("contact.csv"),"changed").unwrap();assert!(Bundle::read(&path).is_err());
         std::fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn persistent_shear_worker_retains_frozen_law_and_exact_protected_export() {
+        AsyncComputeTaskPool::get_or_init(bevy::tasks::TaskPool::new);
+        let (world,d)=setup();let centre=world.systems[0].body_state(d.parent.body as usize,world.time).pos;
+        let h=cosmogon_sim::vehicle_contact_dynamics::Hardware::example(&world,d.parent,centre+d.initial_relative_position_m).unwrap().with_shear(cosmogon_sim::vehicle_shear::Definition::example()).unwrap();
+        let d=d.with_contact(&world,h).unwrap();let mut form=FlightUi{draft:Some(d.clone()),samples:3,interval_s:1.,..Default::default()};
+        form.start(&world,false);form.draft.as_mut().unwrap().contact.as_mut().unwrap().shear.as_mut().unwrap().stiffness_n_m=1.;finish(&mut form);
+        let original=form.result.as_ref().unwrap();assert_eq!(original.study.flight,d);assert_eq!(original.manifest["model"],cosmogon_sim::world_vehicle::SHEAR_MODEL);
+        let path=std::env::temp_dir().join(format!("cosmogon-native-shear-{}",std::process::id()));let _=std::fs::remove_dir_all(&path);
+        original.export(&path).unwrap();assert!(path.join("shear.csv").exists());assert!(original.export(&path).is_err());
+        assert_eq!(Bundle::read(&path).unwrap().manifest,original.manifest);std::fs::write(path.join("shear.csv"),"changed").unwrap();assert!(Bundle::read(&path).is_err());std::fs::remove_dir_all(path).unwrap();
     }
     #[test]
     fn arrival_worker_freezes_exact_source_keeps_drafts_and_preflights_protected_output() {

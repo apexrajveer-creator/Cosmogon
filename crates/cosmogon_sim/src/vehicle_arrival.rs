@@ -281,7 +281,7 @@ impl GeographicStart {
     pub fn contact_flight(&self,world:&Universe,target:BodyRef,plan:Plan,hardware:crate::vehicle_contact_dynamics::Hardware)->Result<Definition,String> {
         let absolute=self.absolute(world,target)?;
         let centre=world.systems[target.system as usize].body_state(target.body as usize,world.time);
-        let result=Definition {model:crate::world_vehicle::CONTACT_MODEL.into(),frame:crate::world_vehicle::FRAME.into(),parent:target,plan,
+        let result=Definition {model:hardware.flight_model().into(),frame:crate::world_vehicle::FRAME.into(),parent:target,plan,
             initial_relative_position_m:absolute.position_m-centre.pos,initial_relative_velocity_m_s:absolute.velocity_m_s-centre.vel,contact:Some(hardware)};
         Flight::new(world.next_vehicle_id,result.clone(),world)?;Ok(result)
     }

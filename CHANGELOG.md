@@ -1,3 +1,9 @@
+## Unreleased — integrated persistent foot shear
+
+- Add explicit world-flight version3 / terrain-contact version2 with actual per-foot history, objective rotating-ground transport and finite tangential spring/Coulomb response in coupled motion. Keep endpoint constitutive and actual midpoint mechanical balances separate, including numerical/storage/slip/unloading terms and actual residuals.
+- Connect native typed controls/graphs, explicit CLI hardware, conditional strict save pins and protected independently replayed shear CSV/nested approach evidence. Old spherical/smooth-contact recordings and absent legacy state retain their semantics; enabled state deliberately changes under separate pins. The golden remains `0xf2c4140a45ae509b`. Stable footprint/attachment, safe landing and cargo transfer remain incomplete.
+- Repair checked-build overflow in the existing south-hemisphere rendering key with explicit modulo-u64 arithmetic, preserving released generated values. No new graphics, shaders, assets or dependencies; graphics remain queued. All 505 release tests plus one existing ignored pass; release/package checks, 67 CLI/native cases, six inspected screenshots and a 48.448818-second live run pass. [Verification and numerical limits](docs/VEHICLE_STATIC_SHEAR_VALIDATION.md).
+
 ## Unreleased — persistent foot shear foundation
 
 - Add a separately versioned finite tangential spring/slider, objective terrain-frame history transport, retained plastic slip/unloading release/numerical dissipation and structural refusals. Eight component tests cover static force, independent supported-mass equilibrium, changing directions, separation, objective motion and refinement; all 500 release workspace tests plus one existing ignored pass.

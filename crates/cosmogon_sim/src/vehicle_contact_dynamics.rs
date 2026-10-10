@@ -10,6 +10,7 @@ use cosmogon_core::{dmath::DMath, math::Quatd};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_STEPS_PER_SECOND: usize = 10_000;
+pub const SHEAR_MODEL: &str = "cosmogon-finite-terrain-contact/2";
 fn finite(v: Vec3d) -> bool {
     v.x.is_finite() && v.y.is_finite() && v.z.is_finite()
 }
@@ -55,6 +56,8 @@ fn diagonal(v: Vec3d, d: Vec3d) -> Vec3d {
 #[serde(deny_unknown_fields)]
 pub struct Hardware {
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shear: Option<crate::vehicle_shear::Definition>,
     /// Fixed authored mass distribution: I_i = actual mass * gyration_radius_i².
     pub gyration_radii_m: Vec3d,
     pub initial_orientation_xyzw: [f64; 4],
@@ -66,6 +69,22 @@ pub struct Hardware {
     pub maximum_step_s: f64,
 }
 impl Hardware {
+    pub fn with_shear(mut self, shear: crate::vehicle_shear::Definition) -> Result<Self, String> {
+        self.model = SHEAR_MODEL.into();
+        self.shear = Some(shear);
+        for foot in &mut self.feet {
+            foot.response.sliding_friction = 0.;
+        }
+        self.validate()?;
+        Ok(self)
+    }
+    pub fn flight_model(&self) -> &'static str {
+        if self.shear.is_some() {
+            world_vehicle::SHEAR_MODEL
+        } else {
+            world_vehicle::CONTACT_MODEL
+        }
+    }
     /// Authored four-foot example aligned to the actual local modeled normal.
     /// Numerical parameters are editable assumptions, not a measured vehicle.
     pub fn example(world: &Universe, target: BodyRef, point: Vec3d) -> Result<Self, String> {
@@ -90,6 +109,7 @@ impl Hardware {
         };
         let result = Self {
             model: MODEL.into(),
+            shear: None,
             gyration_radii_m: Vec3d::new(1.5, 1.5, 1.5),
             initial_orientation_xyzw: array(rotation),
             initial_angular_velocity_body_rad_s: inverse(rotation)
@@ -118,8 +138,10 @@ impl Hardware {
         let g = self.gyration_radii_m;
         let d = diagonal(g, g);
         let orientation = self.initial_orientation_xyzw;
-        if self.model != MODEL
-            || !finite(g)
+        if !matches!(
+            (self.model.as_str(), &self.shear),
+            (MODEL, None) | (SHEAR_MODEL, Some(_))
+        ) || !finite(g)
             || [g.x, g.y, g.z].iter().any(|v| !(0.01..=100.).contains(v))
             || d.x > d.y + d.z
             || d.y > d.x + d.z
@@ -148,9 +170,15 @@ impl Hardware {
         }
         for foot in &self.feet {
             foot.response.validate()?;
+            if self.shear.is_some() && foot.response.sliding_friction != 0. {
+                return Err("Persistent shear requires zero legacy smooth-sliding coefficient; do not apply both friction laws".into());
+            }
             if !finite(foot.offset_body_m) || foot.offset_body_m.length() > 100. {
                 return Err("Foot offset exceeds the 100 m contact hardware bound".into());
             }
+        }
+        if let Some(shear) = &self.shear {
+            shear.validate()?;
         }
         Ok(())
     }
@@ -161,7 +189,66 @@ impl Hardware {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ShearWork {
+    pub endpoint_relative_work_j: f64,
+    pub elastic_storage_change_j: f64,
+    pub plastic_dissipation_j: f64,
+    pub unloading_release_j: f64,
+    pub numerical_dissipation_j: f64,
+    pub balance_residual_j: f64,
+    pub plastic_slip_distance_m: f64,
+}
+impl ShearWork {
+    fn add(&mut self, b: &Self) {
+        self.endpoint_relative_work_j += b.endpoint_relative_work_j;
+        self.elastic_storage_change_j += b.elastic_storage_change_j;
+        self.plastic_dissipation_j += b.plastic_dissipation_j;
+        self.unloading_release_j += b.unloading_release_j;
+        self.numerical_dissipation_j += b.numerical_dissipation_j;
+        self.balance_residual_j += b.balance_residual_j;
+        self.plastic_slip_distance_m += b.plastic_slip_distance_m;
+    }
+    fn balance_terms_j(&self) -> f64 {
+        self.elastic_storage_change_j
+            + self.plastic_dissipation_j
+            + self.unloading_release_j
+            + self.numerical_dissipation_j
+    }
+    fn validate(&self) -> Result<(), String> {
+        if [
+            self.endpoint_relative_work_j,
+            self.elastic_storage_change_j,
+            self.plastic_dissipation_j,
+            self.unloading_release_j,
+            self.numerical_dissipation_j,
+            self.balance_residual_j,
+            self.plastic_slip_distance_m,
+        ]
+        .iter()
+        .any(|v| !v.is_finite())
+            || [
+                self.plastic_dissipation_j,
+                self.unloading_release_j,
+                self.numerical_dissipation_j,
+                self.plastic_slip_distance_m,
+            ]
+            .iter()
+            .any(|v| *v < 0.)
+            || (self.endpoint_relative_work_j + self.balance_terms_j() - self.balance_residual_j)
+                .abs()
+                > 1e-8 * (1. + self.endpoint_relative_work_j.abs() + self.balance_terms_j().abs())
+        {
+            return Err("Invalid retained endpoint shear work evidence".into());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Work {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shear: Option<ShearWork>,
     pub duration_s: f64,
     pub substeps: u64,
     pub contact_force_work_j: f64,
@@ -187,7 +274,16 @@ pub struct Work {
     pub maximum_resultant_load_n: f64,
 }
 impl Work {
+    fn for_hardware(h: &Hardware) -> Self {
+        Self {
+            shear: h.shear.as_ref().map(|_| ShearWork::default()),
+            ..Default::default()
+        }
+    }
     fn add(&mut self, b: &Self) {
+        if let Some(other) = &b.shear {
+            self.shear.get_or_insert_with(ShearWork::default).add(other);
+        }
         self.duration_s += b.duration_s;
         self.substeps += b.substeps;
         self.contact_force_work_j += b.contact_force_work_j;
@@ -214,6 +310,9 @@ impl Work {
             .max(b.maximum_resultant_load_n);
     }
     fn validate(&self) -> Result<(), String> {
+        if let Some(shear) = &self.shear {
+            shear.validate()?;
+        }
         if [
             self.duration_s,
             self.contact_force_work_j,
@@ -252,6 +351,7 @@ impl Work {
                 + self.elastic_storage_change_j
                 + self.normal_dissipation_j
                 + self.sliding_dissipation_j
+                + self.shear.as_ref().map_or(0., ShearWork::balance_terms_j)
                 - self.contact_balance_residual_j)
                 .abs()
                 > 1e-8
@@ -262,6 +362,10 @@ impl Work {
                         + self.elastic_storage_change_j.abs()
                         + self.normal_dissipation_j
                         + self.sliding_dissipation_j)
+                    + self
+                        .shear
+                        .as_ref()
+                        .map_or(0., |s| 1e-8 * s.balance_terms_j().abs())
         {
             return Err("Invalid retained contact work evidence".into());
         }
@@ -288,12 +392,12 @@ impl RigidState {
     ) -> Result<Self, String> {
         h.validate()?;
         let mut result = Self {
-            model: MODEL.into(),
+            model: h.model.clone(),
             orientation_xyzw: h.initial_orientation_xyzw,
             angular_velocity_body_rad_s: h.initial_angular_velocity_body_rad_s,
             feet: vec![],
-            last_work: Work::default(),
-            cumulative_work: Work::default(),
+            last_work: Work::for_hardware(h),
+            cumulative_work: Work::for_hardware(h),
         };
         result.feet = sample(world, target, world.time, position, velocity, &result, h)?;
         if result.feet.iter().any(|f| f.surface.tangent_gap_m < 0.) {
@@ -303,7 +407,7 @@ impl RigidState {
     }
     pub(crate) fn validate(&self, h: &Hardware, flight: &Flight) -> Result<(), String> {
         h.validate()?;
-        if self.model != MODEL
+        if self.model != h.model
             || self.orientation_xyzw.iter().any(|v| !v.is_finite())
             || (self.orientation_xyzw.iter().map(|v| v * v).sum::<f64>() - 1.).abs() > 1e-10
             || !finite(self.angular_velocity_body_rad_s)
@@ -311,6 +415,11 @@ impl RigidState {
             || self.feet.len() != h.feet.len()
         {
             return Err("Invalid retained rigid contact state".into());
+        }
+        if self.last_work.shear.is_some() != h.shear.is_some()
+            || self.cumulative_work.shear.is_some() != h.shear.is_some()
+        {
+            return Err("Contact work and shear hardware capability disagree".into());
         }
         self.last_work.validate()?;
         self.cumulative_work.validate()?;
@@ -335,7 +444,7 @@ impl RigidState {
         for (foot, f) in h.feet.iter().zip(&self.feet) {
             let lever = q(self.orientation_xyzw).rotate_vec3(foot.offset_body_m);
             let tol = (128. * f64::EPSILON * flight.position_m.length()).max(1e-6);
-            if f.model != MODEL
+            if f.model != h.model
                 || f.surface.frame.target != flight.definition.parent
                 || (f.surface.frame.time_s - flight.last_time_s).abs() > 1e-6
                 || !finite(f.position_m)
@@ -355,11 +464,31 @@ impl RigidState {
             {
                 return Err("Invalid retained foot geometry, pose or clock".into());
             }
-            let response = foot.response.response(
+            let mut response = foot.response.response(
                 f.surface.tangent_gap_m,
                 f.surface.outward_normal,
                 f.velocity_m_s - f.surface.velocity_m_s,
             )?;
+            match (&h.shear, &f.shear) {
+                (None, None) => {}
+                (Some(d), Some(s)) => {
+                    s.validate(d)?;
+                    if s.normal_load_n != response.normal_load_n
+                        || (s.outward_normal - f.surface.outward_normal).length() > 1e-10
+                    {
+                        return Err(
+                            "Retained shear normal/load do not match actual foot response".into(),
+                        );
+                    }
+                    response.force_n += d.force_n(s)?;
+                    if response.force_n.length() > foot.response.maximum_load_n {
+                        return Err(
+                            "Retained combined foot load exceeds authored structural limit".into(),
+                        );
+                    }
+                }
+                _ => return Err("Retained foot shear/hardware capability mismatch".into()),
+            }
             // Compare canonical serde values: original f64 values round-trip through the save reader.
             if serde_json::to_value(&response).map_err(|e| e.to_string())?
                 != serde_json::to_value(&f.response).map_err(|e| e.to_string())?
@@ -416,10 +545,30 @@ impl RigidState {
                 "Retained actual elastic storage does not close across contact work history".into(),
             );
         }
+        if let Some(d) = &h.shear {
+            let storage = self
+                .feet
+                .iter()
+                .map(|f| d.energy_j(f.shear.as_ref().ok_or("Missing retained foot shear")?))
+                .collect::<Result<Vec<_>, String>>()?
+                .iter()
+                .sum::<f64>();
+            let change = self
+                .cumulative_work
+                .shear
+                .as_ref()
+                .unwrap()
+                .elastic_storage_change_j;
+            if (change - storage).abs() > 1e-8 * (1. + storage.abs()) {
+                return Err(
+                    "Retained tangential storage does not close across shear history".into(),
+                );
+            }
+        }
         Ok(())
     }
 }
-fn sample(
+fn sample_geometry(
     world: &Universe,
     target: BodyRef,
     time: f64,
@@ -469,6 +618,134 @@ fn sample(
         .iter()
         .map(|f| f.sample(world, target, time, &pose, h.normal_probe_m))
         .collect()
+}
+fn attach_shear(
+    foot: &mut FootSample,
+    definition: &crate::vehicle_shear::Definition,
+    state: crate::vehicle_shear::State,
+    centre_velocity: Vec3d,
+    omega: Vec3d,
+    limit: f64,
+) -> Result<(), String> {
+    foot.model = SHEAR_MODEL.into();
+    foot.response.force_n += definition.force_n(&state)?;
+    if foot.response.force_n.length() > limit {
+        return Err("Combined normal/shear foot force exceeds authored structural limit".into());
+    }
+    foot.torque_about_centre_n_m = foot.lever_inertial_m.cross(foot.response.force_n);
+    foot.centre_force_power_w = foot.response.force_n.dot(centre_velocity);
+    foot.torque_power_w = foot.torque_about_centre_n_m.dot(omega);
+    foot.ground_force_power_w = foot.response.force_n.dot(foot.surface.velocity_m_s);
+    // Existing elastic rate/storage fields retain normal spring semantics.
+    // Shear has a discrete history/work ledger, not invented instantaneous loss.
+    foot.power_residual_w = foot.centre_force_power_w + foot.torque_power_w
+        - foot.ground_force_power_w
+        + foot.elastic_storage_rate_w
+        + foot.response.normal_dissipation_w;
+    foot.shear = Some(state);
+    Ok(())
+}
+fn sample(
+    world: &Universe,
+    target: BodyRef,
+    time: f64,
+    position: Vec3d,
+    velocity: Vec3d,
+    state: &RigidState,
+    h: &Hardware,
+) -> Result<Vec<FootSample>, String> {
+    let mut samples = sample_geometry(world, target, time, position, velocity, state, h)?;
+    if let Some(d) = &h.shear {
+        let omega = q(state.orientation_xyzw).rotate_vec3(state.angular_velocity_body_rad_s);
+        for (i, f) in samples.iter_mut().enumerate() {
+            let unloaded;
+            let from;
+            let previous = if let Some(old) = state.feet.get(i) {
+                from = &old.surface.frame;
+                old.shear
+                    .as_ref()
+                    .ok_or("Missing persistent foot history")?
+            } else {
+                from = &f.surface.frame;
+                unloaded = crate::vehicle_shear::State::unloaded(f.surface.outward_normal)?;
+                &unloaded
+            };
+            let increment = d.advance_in_rotating_frames(
+                previous,
+                from,
+                &f.surface.frame,
+                f.surface.outward_normal,
+                Vec3d::ZERO,
+                f.response.normal_load_n,
+            )?;
+            attach_shear(
+                f,
+                d,
+                increment.state,
+                velocity,
+                omega,
+                h.feet[i].response.maximum_load_n,
+            )?;
+        }
+    }
+    Ok(samples)
+}
+fn evolve_shear(
+    initial: &[FootSample],
+    predicted: &mut [FootSample],
+    middle_relative_velocity: &[Vec3d],
+    dt: f64,
+    state: &RigidState,
+    centre_velocity: Vec3d,
+    h: &Hardware,
+) -> Result<Option<ShearWork>, String> {
+    let Some(d) = &h.shear else { return Ok(None) };
+    let omega = q(state.orientation_xyzw).rotate_vec3(state.angular_velocity_body_rad_s);
+    let mut work = ShearWork::default();
+    for (i, (a, b)) in initial.iter().zip(predicted.iter_mut()).enumerate() {
+        let start = a.surface.tangent_gap_m;
+        let end = b.surface.tangent_gap_m;
+        // Linear within-step crossing assumption. Do not accumulate free-flight
+        // displacement as spring preload before actual first contact.
+        let fraction = if start >= 0. && end >= 0. {
+            0.
+        } else if start >= 0. {
+            (-end / (start - end)).clamp(0., 1.)
+        } else if end >= 0. {
+            (-start / (end - start)).clamp(0., 1.)
+        } else {
+            1.
+        };
+        let v = middle_relative_velocity[i];
+        let tangent = v - b.surface.outward_normal * v.dot(b.surface.outward_normal);
+        let increment = d.advance_in_rotating_frames(
+            a.shear.as_ref().ok_or("Missing initial foot shear")?,
+            &a.surface.frame,
+            &b.surface.frame,
+            b.surface.outward_normal,
+            tangent * (dt * fraction),
+            b.response.normal_load_n,
+        )?;
+        work.add(&ShearWork {
+            endpoint_relative_work_j: increment.relative_foot_work_j,
+            elastic_storage_change_j: increment.elastic_storage_change_j,
+            plastic_dissipation_j: increment.plastic_dissipation_j,
+            unloading_release_j: increment.unloading_release_j,
+            numerical_dissipation_j: increment.numerical_dissipation_j,
+            balance_residual_j: increment.balance_residual_j,
+            plastic_slip_distance_m: increment.plastic_slip_m.length(),
+        });
+        attach_shear(
+            b,
+            d,
+            increment.state,
+            centre_velocity,
+            omega,
+            h.feet[i].response.maximum_load_n,
+        )?;
+    }
+    work.validate()?;
+    Ok(Some(work))
 }
 fn force(samples: &[FootSample]) -> Vec3d {
     samples
@@ -573,13 +850,30 @@ fn substep(
     )?);
     mid.angular_velocity_body_rad_s =
         state.angular_velocity_body_rad_s + initial_alpha * (dt * 0.5);
-    let mid_samples = sample(
+    let mut mid_samples = sample_geometry(
         world,
         target,
         time + dt * 0.5,
         mid_position,
         mid_velocity,
         &mid,
+        h,
+    )?;
+    let half_relative = initial
+        .iter()
+        .zip(&mid_samples)
+        .map(|(a, b)| {
+            ((a.velocity_m_s - a.surface.velocity_m_s) + (b.velocity_m_s - b.surface.velocity_m_s))
+                * 0.5
+        })
+        .collect::<Vec<_>>();
+    evolve_shear(
+        &initial,
+        &mut mid_samples,
+        &half_relative,
+        dt * 0.5,
+        &mid,
+        mid_velocity,
         h,
     )?;
     let mid_mass = mid_propulsion.mass_kg(definition);
@@ -612,7 +906,7 @@ fn substep(
     )?);
     rigid.angular_velocity_body_rad_s = state.angular_velocity_body_rad_s
         + angular_acceleration(&mid, h, mid_mass, torque(&mid_samples)) * dt;
-    rigid.feet = sample(
+    let mut final_feet = sample_geometry(
         world,
         target,
         next.last_time_s,
@@ -621,6 +915,20 @@ fn substep(
         &rigid,
         h,
     )?;
+    let middle_relative = mid_samples
+        .iter()
+        .map(|f| f.velocity_m_s - f.surface.velocity_m_s)
+        .collect::<Vec<_>>();
+    let shear_work = evolve_shear(
+        &initial,
+        &mut final_feet,
+        &middle_relative,
+        dt,
+        &rigid,
+        velocity,
+        h,
+    )?;
+    rigid.feet = final_feet;
     let final_sources = gravity(world, target, next.last_time_s, position)?.1;
     // Other source contact is conservatively refused before accepting a whole step.
     // A swept hull bound includes midpoint deviation and acceleration curvature.
@@ -648,6 +956,7 @@ fn substep(
         }
     }
     let mut work = Work {
+        shear: shear_work,
         duration_s: dt,
         substeps: 1,
         ..Default::default()
@@ -681,7 +990,8 @@ fn substep(
         - work.moving_ground_work_j
         + work.elastic_storage_change_j
         + work.normal_dissipation_j
-        + work.sliding_dissipation_j;
+        + work.sliding_dissipation_j
+        + work.shear.as_ref().map_or(0., ShearWork::balance_terms_j);
     let final_mass = next.propulsion.mass_kg(definition);
     work.translational_kinetic_change_j = 0.5
         * (final_mass * velocity.length_squared() - mass * flight.velocity_m_s.length_squared());
@@ -767,7 +1077,7 @@ pub(crate) fn advance(flight: &mut Flight, world: &Universe, to: f64) -> Result<
         return Err("Contact gravity source inventory changed since the resolved state".into());
     }
     let mut next = flight.clone();
-    next.contact.as_mut().unwrap().last_work = Work::default();
+    next.contact.as_mut().unwrap().last_work = Work::for_hardware(&h);
     let mut count = 0;
     let target_elapsed = to - next.launched_at_s;
     while next.propulsion.elapsed_s < target_elapsed {
@@ -806,7 +1116,9 @@ pub(crate) fn advance(flight: &mut Flight, world: &Universe, to: f64) -> Result<
             // Resolving entry is tighter than resolving distant flight. This also
             // bounds foot travel across a finite normal probe near contact.
             if gap < foot.response.maximum_stroke_m + 2. * h.maximum_step_s * speed {
-                stiffness += foot.response.stiffness_n_m * leverage;
+                stiffness += (foot.response.stiffness_n_m
+                    + h.shear.as_ref().map_or(0., |s| s.stiffness_n_m))
+                    * leverage;
                 // The smooth Coulomb force has a low-speed tangential derivative
                 // bounded by mu*normal_load/slip_scale. Normal damping alone cannot
                 // bound the stiffness of this friction regularization. Include an
@@ -826,6 +1138,9 @@ pub(crate) fn advance(flight: &mut Flight, world: &Universe, to: f64) -> Result<
                 step = step
                     .min(0.1 * foot.response.maximum_stroke_m / speed)
                     .min(0.25 * h.normal_probe_m / speed);
+                if let Some(s) = &h.shear {
+                    step = step.min(0.1 * s.maximum_elastic_shear_m / speed);
+                }
             } else {
                 step = step.min(0.25 * gap / speed);
             }
@@ -887,6 +1202,25 @@ pub fn context() -> serde_json::Value {
         "mass_removal_energy_scope":"Exhausted kinetic terms are the pre-ejection co-moving/co-rotating removed-mass share used in the body mechanical balance; not exhaust-jet kinetic energy, fuel chemical energy or a complete engine energy budget",
         "limits":["No static friction, persistent attachment, safe landing certification or cargo transfer","No hull/other-body collision response, atmosphere/entry/heating or thrust attitude controller","Explicit authored mechanics, not empirical hardware calibration or uncertainty","Finite-difference overview terrain is not measured meter-scale roughness or registered areoid shape","Small-stroke and bounded stability/travel steps; inability to resolve fails atomically at the prior supported macro state"],
         "max_substeps_per_second":MAX_STEPS_PER_SECOND,"empirical_validation":null,"uncertainty":null})
+}
+pub fn context_for(h: &Hardware) -> serde_json::Value {
+    if h.shear.is_none() {
+        return context();
+    }
+    let mut value = context();
+    value["model"] = serde_json::json!(world_vehicle::SHEAR_MODEL);
+    value["contact_model"] = serde_json::json!(SHEAR_MODEL);
+    value["shear_model"] = serde_json::json!(crate::vehicle_shear::MODEL);
+    value["shear_model_descriptor"] = serde_json::to_value(
+        crate::research::PhysicsModelRegistry::get("vehicle-persistent-shear"),
+    )
+    .expect("finite static model metadata");
+    value["response"] = serde_json::json!("Finite normal spring/damper plus persistent tangential spring/Coulomb endpoint return; material-frame and small-normal rotation transports memory, zero legacy smooth friction, actual combined off-centre forces/torques");
+    value["shear_integration"] = serde_json::json!("Midpoint mechanical force uses predicted half-step shear; full endpoint history uses midpoint relative velocity and a linear within-step contact fraction. Endpoint constitutive work/storage/plastic/unloading/numerical balance is separate from actual midpoint mechanical work; coupling residual is retained, not zeroed.");
+    value["normal_fields"] = serde_json::json!("Foot elastic_energy_j and elastic_storage_rate_w remain normal-spring quantities. Tangential storage is computed from retained shear state and appears separately in shear.csv/work; sliding_dissipation_w is zero because shear slip is a discrete increment, not invented instantaneous power.");
+    value["limits"] = serde_json::json!(["Persistent shear force does not establish footprint stability, attachment, safe landing certification or cargo transfer", "Authored endpoint law and reduced rigid feet, not the exact continuous 3D contact algorithm or measured regolith/gear", "Numerical endpoint dissipation and midpoint coupling residual are not calibrated ground friction", "No hull/other-body collision response, atmosphere/entry/heating or thrust attitude controller", "Finite-difference overview terrain is not measured meter-scale roughness or registered areoid shape", "Finite force/travel, small normal turns and substep budget; unsupported motion stops atomically"]);
+    value["shear_sources"] = serde_json::json!(["https://arxiv.org/html/2002.10231v1","https://ntrs.nasa.gov/api/citations/20260000331/downloads/Apollo%2011%20LM%20Touchdown%20Dynamics%20VnV%20for%20HLS.pdf?attachment=true"]);
+    value
 }
 
 #[cfg(test)]
@@ -1291,5 +1625,189 @@ mod tests {
         changed["universe"]["vehicles"][0]["contact"]["feet"][0]["response"]["normal_load_n"] =
             serde_json::json!(99999.);
         assert!(crate::save::from_json(&changed.to_string()).is_err());
+    }
+
+    fn shear_setup() -> (Universe, Definition) {
+        let (world, mut d) = setup(1.6, 0.1);
+        let h = d
+            .contact
+            .take()
+            .unwrap()
+            .with_shear(crate::vehicle_shear::Definition::example())
+            .unwrap();
+        d.model = h.flight_model().into();
+        d.contact = Some(h);
+        d.validate(&world).unwrap();
+        (world, d)
+    }
+    #[test]
+    fn persistent_shear_changes_actual_motion_and_keeps_separate_storage_work() {
+        let (mut world, d) = shear_setup();
+        let cargo = d.plan.definition.cargo.clone();
+        let origin = world.time;
+        launch(&mut world, d);
+        world.advance_to(origin + 8., None, None);
+        let f = &world.vehicles[0];
+        assert_eq!(f.phase, Phase::Flying, "{:?}", f.phase);
+        let r = f.contact.as_ref().unwrap();
+        let work = r.cumulative_work.shear.as_ref().unwrap();
+        assert!(r
+            .feet
+            .iter()
+            .any(|f| f.shear.as_ref().unwrap().elastic_shear_m.length() > 1e-10));
+        assert!(r.feet.iter().any(|f| f.response.normal_load_n > 0.));
+        assert!(work.elastic_storage_change_j > 0.);
+        assert!(work.numerical_dissipation_j > 0.);
+        assert_eq!(f.definition.plan.definition.cargo, cargo);
+        assert!(world.habitats.is_empty());
+        assert!(r.cumulative_work.contact_balance_residual_j.is_finite());
+        world.validate_vehicle_state().unwrap();
+        let (mut legacy, old) = setup(1.6, 0.1);
+        launch(&mut legacy, old);
+        legacy.advance_to(origin + 8., None, None);
+        assert_ne!(f.velocity_m_s, legacy.vehicles[0].velocity_m_s);
+        assert!(legacy.vehicles[0]
+            .contact
+            .as_ref()
+            .unwrap()
+            .cumulative_work
+            .shear
+            .is_none());
+    }
+    #[test]
+    fn persistent_shear_save_chunks_and_complete_recordings_replay_exactly() {
+        let (world, d) = shear_setup();
+        let mut direct = world.clone();
+        let origin = world.time;
+        launch(&mut direct, d.clone());
+        direct.advance_to(origin + 4., None, None);
+        let mut split = world.clone();
+        launch(&mut split, d.clone());
+        split.advance_to(origin + 2., None, None);
+        split = crate::save::from_json(&crate::save::to_json(&split, "shear").unwrap()).unwrap();
+        split.advance_to(origin + 4., None, None);
+        assert_eq!(
+            crate::research::state_fingerprint(&direct).unwrap(),
+            crate::research::state_fingerprint(&split).unwrap()
+        );
+        let study = crate::world_vehicle_recording::Study::new(&world, d, 5, 1.).unwrap();
+        let bundle = crate::world_vehicle_recording::Bundle::run(&world, study).unwrap();
+        let path =
+            std::env::temp_dir().join(format!("cosmogon-shear-flight-{}", std::process::id()));
+        if path.exists() {
+            std::fs::remove_dir_all(&path).unwrap();
+        }
+        bundle.export(&path).unwrap();
+        let replay = crate::world_vehicle_recording::Bundle::read(&path).unwrap();
+        assert_eq!(bundle.manifest, replay.manifest);
+        assert_eq!(bundle.manifest["model"], world_vehicle::SHEAR_MODEL);
+        assert!(bundle.manifest["files"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("shear.csv")));
+        let contact = std::fs::read_to_string(path.join("contact.csv")).unwrap();
+        let count = contact.lines().next().unwrap().split(',').count();
+        assert!(contact
+            .lines()
+            .skip(1)
+            .all(|line| line.split(',').count() == count));
+        std::fs::write(path.join("shear.csv"), "changed").unwrap();
+        assert!(crate::world_vehicle_recording::Bundle::read(&path).is_err());
+        std::fs::remove_dir_all(&path).unwrap();
+    }
+    #[test]
+    fn persistent_shear_versions_history_and_model_pins_are_strict() {
+        let (mut world, d) = shear_setup();
+        let origin = world.time;
+        let mut mixed = d.clone();
+        mixed.model = world_vehicle::CONTACT_MODEL.into();
+        assert!(mixed.validate(&world).is_err());
+        let mut mixed = d.clone();
+        mixed.contact.as_mut().unwrap().feet[0]
+            .response
+            .sliding_friction = 0.1;
+        assert!(mixed.validate(&world).is_err());
+        launch(&mut world, d);
+        world.advance_to(origin + 3., None, None);
+        assert_eq!(world.vehicles[0].phase, Phase::Flying);
+        let original = serde_json::to_value(
+            serde_json::from_str::<serde_json::Value>(
+                &crate::save::to_json(&world, "shear").unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        for key in [
+            "cosmogon-finite-foot-shear",
+            "cosmogon-persistent-terrain-contact",
+            "cosmogon-world-vehicle-shear-capability",
+        ] {
+            let mut bad = original.clone();
+            bad["header"]["data_versions"]
+                .as_object_mut()
+                .unwrap()
+                .remove(key);
+            assert!(crate::save::from_json(&bad.to_string()).is_err(), "{key}");
+        }
+        let mut bad = original.clone();
+        bad["universe"]["vehicles"][0]["contact"]["feet"][0]["shear"]["elastic_shear_m"]["x"] =
+            serde_json::json!(10.);
+        assert!(crate::save::from_json(&bad.to_string()).is_err());
+        let mut bad = original.clone();
+        bad["universe"]["vehicles"][0]["contact"]["cumulative_work"]
+            .as_object_mut()
+            .unwrap()
+            .remove("shear");
+        assert!(crate::save::from_json(&bad.to_string()).is_err());
+    }
+    #[test]
+    fn persistent_shear_excludes_free_motion_before_linear_first_contact() {
+        let (mut world, d) = shear_setup();
+        launch(&mut world, d.clone());
+        let rigid = world.vehicles[0].contact.as_ref().unwrap();
+        let h = d.contact.as_ref().unwrap();
+        let mut a = rigid.feet[0].clone();
+        let mut b = a.clone();
+        // Controlled crossing readings: only the final half of the 0.01 s
+        // interval is in contact; the 1 m/s tangent motion is not all preload.
+        a.surface.tangent_gap_m = 0.01;
+        b.surface.tangent_gap_m = -0.01;
+        b.surface.frame =
+            crate::vehicle_arrival::SurfaceFrame::at(&world, d.parent, world.time + 0.01).unwrap();
+        b.response.normal_load_n = 100.;
+        b.response.force_n = b.surface.outward_normal * 100.;
+        let tangent = b
+            .surface
+            .outward_normal
+            .cross(Vec3d::new(0., 0., 1.))
+            .normalize();
+        let mut predicted = vec![b];
+        let mut one = h.clone();
+        one.feet.truncate(1);
+        let work = evolve_shear(
+            &[a],
+            &mut predicted,
+            &[tangent],
+            0.01,
+            rigid,
+            world.vehicles[0].velocity_m_s,
+            &one,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(
+            (predicted[0]
+                .shear
+                .as_ref()
+                .unwrap()
+                .elastic_shear_m
+                .length()
+                - 0.005)
+                .abs()
+                < 1e-10
+        );
+        assert_eq!(work.plastic_dissipation_j, 0.);
+        assert!((work.elastic_storage_change_j - 0.0625).abs() < 1e-10);
+        assert!(work.balance_residual_j.abs() < 1e-10);
     }
 }

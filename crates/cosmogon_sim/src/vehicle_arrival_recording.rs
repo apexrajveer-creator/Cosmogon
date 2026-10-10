@@ -121,6 +121,7 @@ impl Report {
         }
         let mut manifest = json!({"format":"cosmogon-vehicle-approach-recording","schema_version":1,"complete":true,"definition":definition,"flight_manifest":flight.manifest,"observations":points.len(),"context":vehicle_arrival::context(),"files":["definition.json","approach.json","approach.csv","flight/definition.json","flight/origin.cosmo","flight/observations.json","flight/trajectories.csv","flight/final.cosmo","flight/manifest.json"]});
         if flight.study.flight.contact.is_some() {manifest["files"].as_array_mut().unwrap().push(json!("flight/contact.csv"));}
+        if flight.study.flight.contact.as_ref().is_some_and(|h|h.shear.is_some()) {manifest["files"].as_array_mut().unwrap().push(json!("flight/shear.csv"));}
         Ok(Self {
             definition,
             flight: flight.clone(),

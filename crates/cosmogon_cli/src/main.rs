@@ -25,6 +25,7 @@ struct Args {
     recording: Option<String>,
     geographic_start: Option<String>,
     contact_hardware: Option<String>,
+    static_shear: bool,
     branches: Option<[usize;2]>,
     observation: Option<usize>,
     reference_index: Option<usize>,
@@ -70,6 +71,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         recording: None,
         geographic_start: None,
         contact_hardware: None,
+        static_shear: false,
         branches: None,
         observation: None,
         reference_index: None,
@@ -132,7 +134,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if matches!(a.cmd.as_str(),"greenhouse-definition"|"greenhouse-supply-definition") && flag!="--output" {return Err(format!("{flag} is not a greenhouse-definition option"));}
         if matches!(a.cmd.as_str(),"crop-chemistry"|"crop-chemistry-inspect"|"greenhouse-supply-inspect") && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a crop supply/chemistry inspection option"));}
         if matches!(a.cmd.as_str(),"habitat-diagnose"|"habitat-crop-harvest") && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
-        if a.cmd=="contact-hardware" && !matches!(flag.as_str(),"--initial"|"--target"|"--seed"|"--scenario"|"--output"|"--geographic-start") {return Err(format!("{flag} is not a contact hardware option"));}
+        if a.cmd=="contact-hardware" && !matches!(flag.as_str(),"--initial"|"--target"|"--seed"|"--scenario"|"--output"|"--geographic-start"|"--static-shear") {return Err(format!("{flag} is not a contact hardware option"));}
         if a.cmd=="flight-definition" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output"|"--target"|"--seed"|"--scenario"|"--samples"|"--interval-seconds"|"--geographic-start"|"--contact-hardware") {return Err(format!("{flag} is not a world flight definition option"));}
         if a.cmd=="flight-study" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output") {return Err(format!("{flag} is not a world flight study option"));}
         if matches!(a.cmd.as_str(),"arrival-start"|"contact-start") && flag!="--output" {return Err(format!("{flag} is not a geographic start option"));}
@@ -156,6 +158,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if a.cmd=="habitat-compare" && !matches!(flag.as_str(),"--recording"|"--reference"|"--measure"|"--alignment"|"--output") {return Err(format!("{flag} is not a habitat comparison option"));}
         if matches!(flag.as_str(),"--parameter"|"--from"|"--to"|"--runs"|"--samples"|"--interval-days") {explicit_sweep=true;}
         match flag.as_str() {
+            "--static-shear" if a.cmd=="contact-hardware" => a.static_shear=true,
             "--contact-hardware" if a.cmd=="flight-definition" => a.contact_hardware=Some(val()?),
             "--geographic-start" if matches!(a.cmd.as_str(),"flight-definition"|"contact-hardware") => a.geographic_start=Some(val()?),
             "--samples" => {
@@ -481,6 +484,7 @@ fn main() {
                 let plan=cosmogon_sim::supply_vehicle::Plan::example();
                 let point=if let Some(path)=&a.geographic_start {cosmogon_sim::vehicle_arrival::GeographicStart::read(std::path::Path::new(path))?.absolute(&world,parent)?.position_m} else {let definition=world_vehicle::Definition::circular_example(&world,parent,plan)?;world.systems[parent.system as usize].body_state(parent.body as usize,world.time).pos+definition.initial_relative_position_m};
                 let hardware=Hardware::example(&world,parent,point)?;
+                let hardware=if a.static_shear {hardware.with_shear(cosmogon_sim::vehicle_shear::Definition::example())?} else {hardware};
                 let value=serde_json::to_value(&hardware).map_err(|e|e.to_string())?;
                 if let Some(path)=&a.output {
                     use std::io::Write;
@@ -1018,6 +1022,9 @@ mod argument_tests {
         for values in [vec!["contact-hardware","--definition","ignored"],vec!["contact-hardware","--output"," "],vec!["contact-hardware","--initial","s","--seed","2"],vec!["flight-study","--definition","d","--contact-hardware","h"],vec!["flight-definition","--contact-hardware"," "]] {assert!(args(&values).is_err());}
         assert!(args(&["contact-hardware","--target","Mars","--geographic-start","g","--output","new"]).is_ok());
         assert!(args(&["contact-start","--output","new"]).is_ok());assert!(args(&["contact-start","--target","Mars"]).is_err());
+        assert!(args(&["contact-hardware","--static-shear"]).unwrap().static_shear);
+        assert!(args(&["contact-hardware","--static-shear","true"]).is_err());
+        assert!(args(&["flight-definition","--static-shear"]).is_err());
         assert!(args(&["flight-definition","--geographic-start","g","--contact-hardware","h","--samples","5","--interval-seconds","0.5"]).is_ok());
     }
     #[test]

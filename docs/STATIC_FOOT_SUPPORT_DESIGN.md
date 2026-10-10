@@ -1,6 +1,6 @@
 # Persistent foot shear and supported surface operations — active build
 
-The accepted terrain-contact checkpoint is `1c0c6e0`: coupled normal gear response and smooth sliding friction, 492 passing tests. It cannot hold a finite lateral load at zero relative speed. The next integrated build must add persistent shear, demonstrate rotating-ground support and footprint stability, and then connect actual retained cargo to the exact co-located habitat stores. Do not grant resources, freeze motion from a speed threshold, or reinterpret old records.
+The preceding terrain-contact checkpoint `1c0c6e0` supplies coupled normal gear response and smooth sliding friction, with 492 passing tests. The accepted version-3 integration now supplies persistent shear in actual motion, with 505 passing release tests and native evidence. The next build must establish rotating-ground footprint/load and support evidence, then connect actual retained cargo to the exact co-located habitat stores. Do not grant resources, freeze motion from a speed threshold, or reinterpret old records.
 
 ## Evidence and inference
 
@@ -20,7 +20,9 @@ This is an authored endpoint/backward-Euler constitutive update. It is not the e
 
 Retain Coulomb/plastic dissipation, unloading release, **numerical dissipation**, storage and the actual balance residual separately. Numerical damping cannot be sold as measured material friction. Separation relaxes remaining tangential storage with an explicit release term; the reduced interface assumes irreversible loss at contact loss rather than recovering it elsewhere. Test zero-speed force retention, fresh loading, sliding, reversal, shrinking capacity, separation, changing normals, common rigid rotation and step refinement. No uncontrolled energy grant or hidden history erase is allowed.
 
-## Integration and acceptance still required
+## Integration and remaining surface-operation requirements
+
+The active integration uses explicit world-flight version 3 and terrain-contact version 2, with a separately pinned shear law. Foot readings retain actual combined force/torque but keep their original normal spring storage/rate fields; optional tangential history carries the separate shear storage. The coupled midpoint solver evaluates shear at the midpoint prediction and independently retains the full endpoint constitutive increment. Its endpoint work/numerical term is a discrete constitutive balance; the actual midpoint mechanical balance retains the coupling residual. Do not label that endpoint numerical term as measured ground friction or hide a difference between endpoint and applied midpoint work. Old version-2 motion/CSV/source context remain exact.
 
 - Add a new explicit hardware/world capability version. Original v1 spherical flight and v2 smooth-sliding contact definitions and recordings must remain byte-exact. Optional new fields remain absent in old saves; enabled state has separate model pins and source context.
 - Evolve actual foot histories with coupled translation/attitude and the derivative-aware rotating terrain. A fresh-contact displacement must exclude the part before contact. Bound tangential stiffness and changing contact normal in the same finite substep budget; integrate/retain actual force/torque/storage/work residuals.
@@ -28,9 +30,9 @@ Retain Coulomb/plastic dissipation, unloading release, **numerical dissipation**
 - Establish actual support/load/footprint and local-frame motion evidence before any cargo operation. Static force retention alone does not establish stability, attachment or safe landing.
 - Cargo requires a separately retained finite inventory and changing-mass epochs. Preserve immutable original designs, finite propulsion mass/ideal-capability closures, inertia/exhaust assumptions and carried momentum/energy. Transfer only actual available quantities to the same nearby habitat stocks within capacity; rejected material remains aboard. No timer arrival, store grant or silent discard.
 
-The shear component is the current mechanical foundation; it is not yet enabled in world flight. Full integrated release tests, clippy, package/capture checks and an ordinary live session follow integration. Calibration, atmospheric entry, hardware/power/thermal hazards and the full directive remain incomplete. Graphics stay queued.
+The persistent shear mechanism is now explicitly enabled in version-3 world flight. Full integrated release/clippy/build/package/signature/DMG checks pass, with 67 CLI/native cases, six inspected screenshots and a 48.448818-second live run. [Final evidence and numerical limits](VEHICLE_STATIC_SHEAR_VALIDATION.md). Footprint/stability, attachment, physical cargo operations, calibration, atmospheric entry, hardware/power/thermal hazards and the full directive remain incomplete. Graphics stay queued.
 
-## Current component evidence
+## Preceding component evidence
 
 `vehicle_shear.rs` now implements the finite shear/history/work mechanism and actual derivative-aware terrain-frame transport. Eight development tests pass, including an independent implicit supported-mass equilibrium, 1D continuum-work refinement and actual tilted MOLA-frame transport without ephemeris slip. The mass test starts unloaded; its endpoint numerical damping is explicitly retained. These tests do not enable static support in a saved world, validate multi-foot stability or make delivery available. The full release workspace passes **500 tests plus one existing ignored** and release all-target clippy passes. All 171 frozen Rust files match; existing warnings remain with none attributed to the shear component. Evidence is retained under ignored `dist/vehicle-static-foot-support-foundation/`. The accepted packaged terrain flight remains the 492-test `1c0c6e0` checkpoint; no new packaged/visual claim is made for this component.
 

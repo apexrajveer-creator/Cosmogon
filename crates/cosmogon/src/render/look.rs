@@ -420,7 +420,10 @@ fn procedural_giant(body: &Body) -> (Giant, String) {
             if remaining < 2.0 {
                 break;
             }
-            let half = (remaining / (per_hemi - k) as f32 * 0.5 * (0.6 + 0.8 * r(40 + k as u64 + hemi as i64 as u64 * 100) as f32)).max(1.0);
+            // The negative hemisphere key intentionally uses modulo-u64
+            // arithmetic. Keep release values identical in checked builds.
+            let key = (40 + k as u64).wrapping_add((hemi as i64 as u64).wrapping_mul(100));
+            let half = (remaining / (per_hemi - k) as f32 * 0.5 * (0.6 + 0.8 * r(key) as f32)).max(1.0);
             let dark = if k % 2 == 0 { 0.5 + 0.5 * r(60 + k as u64) as f32 } else { -(0.3 + 0.5 * r(70 + k as u64) as f32) };
             bands.push(band(hemi * (lat + half), half, dark));
             lat += half * 2.0;

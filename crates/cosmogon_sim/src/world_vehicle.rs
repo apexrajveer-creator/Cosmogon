@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 pub const MODEL: &str = "cosmogon-finite-world-vehicle/1";
 pub const CONTACT_MODEL: &str = "cosmogon-finite-world-vehicle/2";
+pub const SHEAR_MODEL: &str = "cosmogon-finite-world-vehicle/3";
 pub const FRAME: &str = "system-local-inertial-simulation-axes";
 pub(crate) const SUBSTEP_S: f64 = 0.25;
 pub(crate) const TASK: usize = 5;
@@ -32,7 +33,7 @@ pub struct Definition {
 }
 impl Definition {
     pub fn with_contact(mut self, world:&Universe, hardware:crate::vehicle_contact_dynamics::Hardware)->Result<Self,String> {
-        self.model=CONTACT_MODEL.into();self.contact=Some(hardware);
+        self.model=hardware.flight_model().into();self.contact=Some(hardware);
         Flight::new(world.next_vehicle_id,self.clone(),world)?;
         Ok(self)
     }
@@ -56,10 +57,10 @@ impl Definition {
         Ok(d)
     }
     pub fn validate_structure(&self) -> Result<(), String> {
-        if self.frame != FRAME || !matches!((self.model.as_str(), &self.contact), (MODEL, None) | (CONTACT_MODEL, Some(_))) {
+        if self.frame != FRAME || !matches!((self.model.as_str(), &self.contact), (MODEL, None) | (CONTACT_MODEL | SHEAR_MODEL, Some(_))) {
             return Err("Unsupported finite flight model or reference frame".into());
         }
-        if let Some(h) = &self.contact { h.validate()?; }
+        if let Some(h) = &self.contact { h.validate()?; if self.model != h.flight_model() {return Err("World-flight and contact hardware model versions disagree".into());} }
         self.plan.validate()?;
         if !finite(self.initial_relative_position_m)
             || self.initial_relative_position_m.length() > 1e15
