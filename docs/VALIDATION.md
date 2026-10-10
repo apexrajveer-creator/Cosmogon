@@ -108,3 +108,5 @@ new public release or a notarized distribution.
 Local evidence is retained in ignored `dist/validation/`: inspected PNGs, photo metadata, raw reports,
 failure logs/results, and final check logs. The source instructions and evidence summary are committed;
 generated binaries and captures are not tracked.
+
+Frozen habitat starting-world selection: [verification](FROZEN_HABITAT_ORIGINS_VALIDATION.md), 435 passed plus one existing ignored, 39 cases, seven inspected packaged layouts and a 48-second normal run. Original and request-time live results independently reproduce; solver/saves/golden/graphics stay unchanged.

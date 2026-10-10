@@ -76,6 +76,22 @@ fn main() -> bevy::app::AppExit {
         let path=std::path::Path::new(args.habitat_recording.as_deref().expect("validated pressure recording"));
         if let Err(e)=ui::habitat_recordings::check_input(path,Some(index)) {eprintln!("Cannot select pressure reference: {e}");return AppExit::error();}
     }
+    if args.habitat_origin.is_some() || args.habitat_rerun_output.is_some() {
+        let checked=(||->Result<(),String>{
+            let path=std::path::Path::new(args.habitat_recording.as_deref().expect("validated design"));
+            let origin=cosmogon_sim::habitat_origin::Origin::read(path)?;
+            if let Some(output)=&args.habitat_rerun_output {
+                if std::path::Path::new(output.trim()).exists(){return Err("Existing study results are protected; choose a new rerun folder".into());}
+                let plan=cosmogon_sim::habitat_sweep::Plan::read(&path.join("plan.json"))?;
+                let world=if args.habitat_origin.as_deref()==Some("live") {
+                    cosmogon_sim::save::read_file(std::path::Path::new(args.load.as_deref().ok_or("Choose an explicit live starting world")?)).map_err(|e|e.to_string())?
+                }else{origin.load()?};
+                plan.validate_world(&world,origin.habitat_id)?;
+            }
+            Ok(())
+        })();
+        if let Err(e)=checked{eprintln!("Cannot select experiment starting world: {e}");return AppExit::error();}
+    }
     if let Some(selection)=&args.habitat_branches {
         let checked=(||->Result<(),String>{
             let pair=cosmogon_sim::habitat_design::parse_branches(selection)?;

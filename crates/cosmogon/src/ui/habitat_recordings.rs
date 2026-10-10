@@ -26,11 +26,12 @@ fn open_design(location:std::path::PathBuf,path:String,sample:Option<usize>) -> 
     let a=design.recordings()[0].clone();
     let b=design.recordings().last().ok_or("Empty design")?.clone();
     let manifest=design.manifest().clone();
+    let origin=cosmogon_sim::habitat_origin::Origin::from_manifest(&location,&manifest)?;
     let (single,paired)=match design {
         cosmogon_sim::habitat_design::Design::Single(d)=>(Some(d),None),
         cosmogon_sim::habitat_design::Design::Paired(d)=>(None,Some(d)),
     };
-    Ok(SweepResult {a,b,manifest,paired,single,path,sample})
+    Ok(SweepResult {a,b,manifest,paired,single,origin:Some(origin),origin_selection:None,path,sample})
 }
 pub struct Launch {
     pub plan: Plan,
@@ -55,6 +56,8 @@ struct SweepResult {
     manifest: serde_json::Value,
     paired: Option<Design>,
     single: Option<cosmogon_sim::habitat_design::Single>,
+    origin: Option<cosmogon_sim::habitat_origin::Origin>,
+    origin_selection: Option<bool>,
     path: String,
     sample: Option<usize>,
 }
@@ -85,6 +88,12 @@ impl Default for SweepForm {
 
 #[derive(Default)]
 pub struct Study {
+    origin: Option<cosmogon_sim::habitat_origin::Origin>,
+    use_saved_origin: bool,
+    origin_validation: Option<(Plan,Result<(),String>)>,
+    sweep_request: Option<serde_json::Value>,
+    pub requested_origin: Option<bool>,
+    pub rerun_output: Option<String>,
     pub recording: Option<Recording>,
     pub comparison: Option<Recording>,
     pub experiment_mode: bool,
@@ -163,7 +172,7 @@ impl Study {
         self.balance.pending() || self.figure.pending() || self.pressure.pending() || self.replay.pending() || self.paired_export.is_some() || self.task.is_some()
             || self.comparison_task.is_some()
             || self.sweep_task.is_some()
-            || self.launch.is_some()
+            || self.launch.is_some() || self.rerun_output.is_some()
     }
     pub fn start_comparison(&mut self, path: String) {
         let location = std::path::PathBuf::from(&path);
@@ -180,16 +189,57 @@ impl Study {
         path: String,
         sample: Option<usize>,
     ) {
-        self.factorial_mode = plan.secondary.is_some();
+        self.sweep_request=Some(serde_json::json!({"origin":{"kind":"current_live_world","simulation_time_s":base.time,"habitat_id":id,"state_fingerprint":cosmogon_sim::research::state_fingerprint(&base).ok(),"data_versions":cosmogon_sim::save::data_versions(&base)},"plan":plan,"output":path,"scope":"Exact request-time independent starting world; completed observations remain unchanged until success"}));
         self.sweep_task = Some(
             AsyncComputeTaskPool::get()
-                .spawn(async move { run_sweep(base, id, plan, path, sample) }),
+                .spawn(async move {let mut result=run_sweep(base,id,plan,path,sample)?;result.origin_selection=Some(false);Ok(result)}),
         );
         self.status = Some("Running independent habitat branches; live world is unchanged…".into());
     }
+    fn start_saved_sweep(&mut self, plan: Plan, path: String) -> Result<(),String> {
+        let origin=self.origin.clone().ok_or("Open a complete design to reuse its original starting world")?;
+        let sample=Some(self.selected.min(plan.samples.saturating_sub(1)));
+        self.sweep_request=Some(serde_json::json!({"origin":origin.metadata(),"plan":plan,"output":path,"scope":"Retained source pins captured at request; actual common file is rechecked before writing any results"}));
+        self.sweep_task=Some(AsyncComputeTaskPool::get().spawn(async move {
+            let world=origin.load()?;
+            let mut result=run_sweep(world,origin.habitat_id,plan,path,sample)?;
+            result.origin_selection=Some(true);Ok(result)
+        }));
+        self.status=Some("Checking pinned original starting world and running independent branches…".into());
+        Ok(())
+    }
+    fn saved_plan_validation(&mut self, plan: &Plan) -> Result<(),String> {
+        let origin=self.origin.as_ref().ok_or("Open a complete design to choose its saved starting world")?;
+        if self.origin_validation.as_ref().is_none_or(|(cached,_)|cached!=plan) {
+            self.origin_validation=Some((plan.clone(),plan.validate_world(origin.cached_world(),origin.habitat_id)));
+        }
+        self.origin_validation.as_ref().unwrap().1.clone()
+    }
+    fn cancel_dependent_launches(&mut self) {
+        // A requested new run failed: never export or verify previous observations as its result.
+        self.rerun_output=None;self.requested_origin=None;self.requested_branches=None;
+        self.figure.launch=false;self.balance.launch=false;self.replay.launch=false;
+        self.keep_experiment_at_launch=false;
+    }
     pub fn launch_if_ready(&mut self, base: &Universe, selected: Option<u64>, reference: bool) {
+        if self.rerun_output.is_some() && self.origin.is_some() && self.task.is_none() && self.sweep_task.is_none() && self.comparison_task.is_none() {
+            let output=self.rerun_output.take().unwrap();
+            if reference {self.cancel_dependent_launches();self.status=Some("Clone this reference world to a sandbox before running a new experiment".into());return;}
+            let plan=match self.sweep_manifest.as_ref().and_then(|m|serde_json::from_value::<Plan>(m["plan"].clone()).ok()){Some(p)=>p,None=>{self.cancel_dependent_launches();self.status=Some("Open a complete design before rerunning".into());return;}};
+            if self.single.is_some(){self.requested_branches=Some(self.branches);}
+            self.keep_experiment_at_launch=self.experiment_mode;
+            if self.use_saved_origin {
+                if let Err(e)=self.start_saved_sweep(plan,output){self.cancel_dependent_launches();self.status=Some(e);}
+            }else{
+                let id=self.origin.as_ref().unwrap().habitat_id;
+                let sample=Some(self.selected.min(plan.samples.saturating_sub(1)));
+                self.start_sweep(base.clone(),id,plan,output,sample);
+            }
+            return;
+        }
         if let Some(launch) = self.launch.take() {
             if reference {
+                self.cancel_dependent_launches();
                 self.status =
                     Some("Clone the reference world before running habitat experiments.".into());
                 return;
@@ -217,6 +267,7 @@ impl Study {
             if let Some(id) = id {
                 self.start_sweep(base.clone(), id, launch.plan, launch.output, launch.sample);
             } else {
+                self.cancel_dependent_launches();
                 self.status = Some("Choose a habitat in the common starting world.".into());
             }
         }
@@ -259,6 +310,9 @@ impl Study {
             self.sweep.output.clear();
         }
         self.balance.reset();
+        if result.origin_selection.is_none(){self.sweep_request=None;}
+        self.use_saved_origin=self.requested_origin.take().or(result.origin_selection).unwrap_or(true);
+        self.origin=result.origin;self.origin_validation=None;
         self.recording = Some(result.a);
         self.comparison = Some(result.b);
         self.selected = index;
@@ -285,7 +339,7 @@ impl Study {
         }
         self.balance.reset();
         self.sweep_manifest = None;
-        self.paired=None;self.single=None;self.single_source.clear();self.paired_curve=None;self.replay.reset();
+        self.paired=None;self.single=None;self.origin=None;self.origin_validation=None;self.use_saved_origin=false;self.sweep_request=None;self.single_source.clear();self.paired_curve=None;self.replay.reset();
         self.factorial_mode = false;
         self.recording = Some(r);
         self.loaded_path=path.clone();
@@ -311,6 +365,7 @@ impl Study {
             {
                 Ok(()) => {}
                 Err(e) => {
+                    self.cancel_dependent_launches();
                     self.status = Some(format!(
                         "Could not open recording: {e}. Previous observations are preserved."
                     ))
@@ -327,7 +382,7 @@ impl Study {
                 Ok(r) => {
                     self.balance.reset();
                     self.sweep_manifest = None;
-                    self.paired=None;self.single=None;self.single_source.clear();self.paired_curve=None;self.replay.reset();
+                    self.paired=None;self.single=None;self.origin=None;self.origin_validation=None;self.use_saved_origin=false;self.sweep_request=None;self.single_source.clear();self.paired_curve=None;self.replay.reset();
                     self.factorial_mode = false;
                     self.comparison = Some(r);
                     self.comparison_path = self.pending_comparison_path.clone();
@@ -347,17 +402,18 @@ impl Study {
         {
             self.sweep_task = None;
             if let Err(e) = result.and_then(|r| self.commit_sweep(r)) {
+                self.cancel_dependent_launches();
                 self.status=Some(format!("Sweep failed: {e}. Previous recorded views are preserved. A folder without completion manifest is incomplete."));
             }
         }
-        if (self.balance_mode || self.balance.launch) && self.launch.is_none() && self.task.is_none() && self.sweep_task.is_none() && self.comparison_task.is_none() {
+        if (self.balance_mode || self.balance.launch) && self.launch.is_none() && self.rerun_output.is_none() && self.task.is_none() && self.sweep_task.is_none() && self.comparison_task.is_none() {
             if !self.balance.prepared {let b=self.prepare_balance();self.balance.set(b);}
             if self.balance.launch {let source=if self.paired.is_some(){self.paired_source.clone()}else{self.loaded_path.clone()};self.balance.start(&source);}
         }
-        if self.figure.launch && self.launch.is_none() && self.task.is_none() && self.sweep_task.is_none() && self.comparison_task.is_none() {
+        if self.figure.launch && self.launch.is_none() && self.rerun_output.is_none() && self.task.is_none() && self.sweep_task.is_none() && self.comparison_task.is_none() {
             let figure=self.prepare_figure();self.figure.start(figure);
         }
-        if self.replay.launch && (self.paired.is_some() || self.single.is_some()) && self.task.is_none() && self.comparison_task.is_none() && self.sweep_task.is_none() {
+        if self.replay.launch && self.rerun_output.is_none() && (self.paired.is_some() || self.single.is_some()) && self.task.is_none() && self.comparison_task.is_none() && self.sweep_task.is_none() {
             self.replay.start(if self.single.is_some(){self.single_source.clone()}else{self.paired_source.clone()});
         }
     }
@@ -400,6 +456,9 @@ impl Study {
             metadata["crop_trajectory_context"] = cosmogon_sim::habitat_crop_trajectory::context(&recordings);
         }
         if let Some(d)=&self.single {metadata["single_design"]=serde_json::json!({"source":self.single_source,"manifest":d.manifest,"selected_branches":self.branches,"observation":d.report_at(self.selected).ok()});}
+        if let Some(origin)=&self.origin {
+            metadata["study_origin"]=serde_json::json!({"retained_original":origin.metadata(),"selected_kind":if self.use_saved_origin{"original_saved_common_world"}else{"current_live_world"},"staged_plan_only":self.experiment_mode,"request":self.sweep_request});
+        }
         Some(metadata)
     }
 }
@@ -873,6 +932,19 @@ fn experiment(
 ) {
     ui.strong("Controlled habitat experiment");
     ui.label("Independent branches · fixed initial stocks · assumed properties");
+    if let Some(origin)=&study.origin {
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut study.use_saved_origin,true,"Original saved starting world");
+            ui.selectable_value(&mut study.use_saved_origin,false,"Current live world");
+        });
+        if study.use_saved_origin {
+            ui.add(egui::Label::new(format!("Saved source: {} · {} · world time {:.6} s",origin.directory.display(),origin.habitat.definition.name,origin.cached_world().time)).wrap());
+            ui.label(egui::RichText::new("Exact original finite stores and clock; the live world stays independent.").small().color(MUTED));
+            ui.label(format!("Pinned state {} · ordinary new edits apply before sampling",origin.fingerprint));
+        }
+    }
+    if !study.use_saved_origin || study.origin.is_none() {
+    ui.label(format!("Live world time {:.6} s · current finite stores captured when Run is pressed",world.time));
     egui::ComboBox::from_id_salt("sweep-habitat")
         .selected_text(
             habitat_id
@@ -889,6 +961,7 @@ fn experiment(
                 );
             }
         });
+    }
     egui::ComboBox::from_id_salt("habitat-sweep-parameter")
         .selected_text(study.sweep.parameter.label())
         .show_ui(ui, |ui| {
@@ -901,7 +974,7 @@ fn experiment(
         study.sweep.parameter.unit()
     ));
     ui.text_edit_singleline(&mut study.sweep.values);
-    if let Some(h)=habitat_id.and_then(|id|world.habitats.iter().find(|h|h.id==id)) {
+    if let Some(h)=if study.use_saved_origin && study.origin.is_some() {study.origin.as_ref().map(|o|&o.habitat)}else{habitat_id.and_then(|id|world.habitats.iter().find(|h|h.id==id))} {
         example_levels(ui,study.sweep.parameter,h,&mut study.sweep.values);
     }
     ui.checkbox(&mut study.sweep.paired,"Pair with a second setting (four combinations)");
@@ -911,7 +984,7 @@ fn experiment(
         });
         ui.label(format!("Exactly two levels for each setting · second levels ({})",study.sweep.secondary_parameter.unit()));
         ui.text_edit_singleline(&mut study.sweep.secondary_values);
-        if let Some(h)=habitat_id.and_then(|id|world.habitats.iter().find(|h|h.id==id)) {
+        if let Some(h)=if study.use_saved_origin && study.origin.is_some() {study.origin.as_ref().map(|o|&o.habitat)}else{habitat_id.and_then(|id|world.habitats.iter().find(|h|h.id==id))} {
             example_levels(ui,study.sweep.secondary_parameter,h,&mut study.sweep.secondary_values);
         }
     }
@@ -956,12 +1029,12 @@ fn experiment(
         Ok(p)
     });
     if let Some(note)=plan.as_ref().ok().and_then(Plan::configuration_assumptions) {assumptions(ui,&note);}
-    let validation = plan.as_ref().map_err(Clone::clone).and_then(|_| {
+    let validation = if study.use_saved_origin && study.origin.is_some() {plan.as_ref().map_err(Clone::clone).and_then(|p|study.saved_plan_validation(p))}else{plan.as_ref().map_err(Clone::clone).and_then(|_| {
         habitat_id
             .filter(|id| world.habitats.iter().any(|h| h.id == *id))
             .ok_or_else(|| "Select a live habitat".to_string())
             .and_then(|id| plan.as_ref().map_err(Clone::clone)?.validate_world(world, id))
-    });
+    })};
     if let Err(e) = &validation {
         ui.colored_label(ACCENT, e);
     }
@@ -978,13 +1051,11 @@ fn experiment(
         )
         .clicked()
     {
-        study.start_sweep(
-            world.clone(),
-            habitat_id.expect("validated habitat"),
-            plan.expect("validated plan"),
-            study.sweep.output.clone(),
-            None,
-        );
+        if study.use_saved_origin && study.origin.is_some() {
+            if let Err(e)=study.start_saved_sweep(plan.expect("validated plan"),study.sweep.output.clone()){study.status=Some(e);}
+        }else{
+            study.start_sweep(world.clone(),habitat_id.expect("validated habitat"),plan.expect("validated plan"),study.sweep.output.clone(),None);
+        }
     }
     if let Some(manifest) = &study.sweep_manifest {
         ui.label(format!(
@@ -1003,6 +1074,56 @@ fn experiment(
 mod tests {
     use super::*;
 
+    #[test]
+    fn saved_and_live_workers_capture_independent_origins_and_preserve_results_on_failure() {
+        AsyncComputeTaskPool::get_or_init(bevy::tasks::TaskPool::new);
+        let mut world=Universe::new(cosmogon_sim::UniverseSettings{scenario:cosmogon_sim::Scenario::SolarSystemLab,..Default::default()});
+        let mut d=cosmogon_sim::crop_process::definition_at(cosmogon_sim::BodyRef{system:0,body:3},0.,0.);d.config.crew=0;
+        world.apply_edit(cosmogon_sim::sandbox::Edit::CreateHabitat{definition:Box::new(d)}).unwrap();
+        world.advance_to(world.time+86410.25,None,None);
+        let root=std::env::temp_dir().join(format!("cosmogon-native-origins-{}",std::process::id()));let _=std::fs::remove_dir_all(&root);
+        let plan=Plan::linear(Parameter::FirmPowerW,0.,10000.,3,3,60.).unwrap();
+        habitat_sweep::execute(&world,0,&plan,&root.join("source")).unwrap();
+        let mut study=Study{keep_experiment_at_launch:true,requested_branches:Some([1,2]),..Default::default()};
+        study.commit_sweep(open_design(root.join("source"),root.join("source").to_string_lossy().into_owned(),Some(1)).unwrap()).unwrap();
+        assert!(study.use_saved_origin);assert!(study.saved_plan_validation(&plan).is_ok());
+        assert_eq!(study.origin_validation.as_ref().unwrap().0,plan);
+        let original=study.metadata().unwrap()["single_design"].clone();
+        let mut live=world.clone();live.advance_to(live.time+86400.,None,None);
+        let live_fingerprint=cosmogon_sim::research::state_fingerprint(&live).unwrap();
+        study.rerun_output=Some(root.join("saved").to_string_lossy().into_owned());
+        study.launch_if_ready(&live,None,false);
+        assert!(study.sweep_task.is_some());assert_eq!(study.metadata().unwrap()["single_design"],original);
+        let request=study.sweep_request.clone().unwrap();
+        study.path="unopened source".into();study.sweep.values="12, 13".into();
+        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(30);
+        while study.sweep_task.is_some(){study.poll();assert!(std::time::Instant::now()<deadline);std::thread::sleep(std::time::Duration::from_millis(5));}
+        assert_eq!(study.branches,[1,2]);assert_eq!(study.selected,1);assert!(study.experiment_mode);assert!(study.use_saved_origin);
+        assert_eq!(study.sweep_request.as_ref(),Some(&request));assert_eq!(study.origin.as_ref().unwrap().cached_world().time,world.time);
+        assert_eq!(study.single.as_ref().unwrap().recordings[1].rows,cosmogon_sim::habitat_design::read_single(&root.join("source")).unwrap().recordings[1].rows);
+        assert_eq!(cosmogon_sim::research::state_fingerprint(&live).unwrap(),live_fingerprint);
+        study.use_saved_origin=false;study.rerun_output=Some(root.join("live").to_string_lossy().into_owned());study.launch_if_ready(&live,None,false);
+        while study.sweep_task.is_some(){study.poll();assert!(std::time::Instant::now()<deadline);std::thread::sleep(std::time::Duration::from_millis(5));}
+        assert!(!study.use_saved_origin);assert_eq!(study.origin.as_ref().unwrap().fingerprint,live_fingerprint);
+        assert_eq!(study.sweep_request.as_ref().unwrap()["origin"]["state_fingerprint"],live_fingerprint);
+        assert_ne!(study.recording.as_ref().unwrap().rows[0].simulation_time_s,world.time);
+        let before=study.metadata().unwrap()["single_design"].clone();
+        let mut bad=plan.clone();bad.values=vec![-1.,50.];study.factorial_mode=true;
+        study.start_sweep(live.clone(),0,bad,root.join("bad").to_string_lossy().into_owned(),None);
+        assert!(study.factorial_mode);
+        while study.sweep_task.is_some(){study.poll();assert!(std::time::Instant::now()<deadline);std::thread::sleep(std::time::Duration::from_millis(5));}
+        assert!(study.factorial_mode);assert_eq!(study.metadata().unwrap()["single_design"],before);assert!(!root.join("bad").exists());
+        let mut altered=live.clone();altered.habitats[0].state.potable_water_kg-=1.;altered.habitats[0].state.wastewater_kg+=1.;
+        std::fs::write(root.join("live/base.cosmo"),cosmogon_sim::save::to_json(&altered,"changed").unwrap()).unwrap();
+        study.use_saved_origin=true;study.start_saved_sweep(plan,root.join("changed").to_string_lossy().into_owned()).unwrap();
+        study.figure.output=root.join("stale-figure").to_string_lossy().into_owned();study.figure.launch=true;
+        study.balance.launch=true;study.replay.launch=true;
+        while study.sweep_task.is_some(){study.poll();assert!(std::time::Instant::now()<deadline);std::thread::sleep(std::time::Duration::from_millis(5));}
+        assert!(!study.figure.pending());assert!(!study.balance.pending());assert!(!study.replay.pending());assert!(!root.join("stale-figure").exists());
+        assert!(study.status.as_ref().unwrap().contains("changed"));assert_eq!(study.metadata().unwrap()["single_design"],before);assert!(!root.join("changed").exists());
+        study.commit(study.recording.clone().unwrap(),"ordinary".into(),Some(0)).unwrap();assert!(!study.use_saved_origin);assert!(study.origin.is_none());
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn actual_crop_figure_and_metadata_keep_loaded_source_when_drafts_change() {
         let d=cosmogon_sim::crop_process::definition_at(cosmogon_sim::BodyRef{system:0,body:0},0.,0.);
@@ -1113,6 +1234,8 @@ mod tests {
             manifest,
             paired:None,
             single:None,
+            origin:None,
+            origin_selection:None,
             path: "new".into(),
             sample,
         };

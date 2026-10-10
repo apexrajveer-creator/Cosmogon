@@ -37,6 +37,7 @@ pub mod habitat_comparison;
 pub mod habitat_sweep;
 pub mod habitat_factorial;
 pub mod habitat_design;
+pub mod habitat_origin;
 pub mod habitat_replay;
 pub mod greenhouse;
 pub mod greenhouse_supplies;

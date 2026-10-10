@@ -225,3 +225,5 @@ Recorded actual crop trajectories use explicit `crop_progress`, dry stock, feed/
 Controlled installed crop experiment controls and exact saved response catalogs: [guide](docs/CONTROLLED_CROP_STUDIES.md), [design](docs/CONTROLLED_CROP_STUDIES_DESIGN.md).
 
 Complete saved single-setting studies retain every branch and support selected comparisons, exact figures and independent whole-design replay: [guide](docs/SAVED_SINGLE_HABITAT_DESIGNS.md). CLI `--branches A,B` selects single-design figure inputs; native `--habitat-branches A,B` selects actual retained branches.
+
+Complete single/paired study reruns now explicitly choose the original saved or current live starting world; CLI `habitat-rerun` reuses the original with optional new typed settings. [Guide](docs/FROZEN_HABITAT_ORIGINS.md). Source-pinned request-time checks protect previous results and require a fresh output.

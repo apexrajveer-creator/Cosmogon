@@ -4,7 +4,7 @@ A completed single-setting sweep can now be reopened as a whole study. The share
 
 In Habitat engineering → Recordings & comparisons, open the sweep folder containing `plan.json`, `base.cosmo` and the completed `manifest.json`. The initial comparison uses the first and last branches. The two branch menus select any retained independent recordings, including the same branch for a self-comparison. Source path, plan and branch identity stay separate from editable folder text and staged controls. WHY, pressure, graph layout, balances and figures use the selected actual recordings. A single-setting study has no four-response factorial effects.
 
-Run experiment restores the typed setting, levels, number of observations and interval with an empty output destination. A new run still uses the explicitly supplied saved common world or current live starting world, following the existing experiment mechanism. To repeat the original common origin exactly, supply the study's `base.cosmo`; restoring controls alone does not rewind the live world.
+Run experiment restores the typed setting, levels, number of observations and interval with an empty output destination. The connected [starting-world selection](FROZEN_HABITAT_ORIGINS.md) now defaults to the original saved common world and explicitly offers the current live world. Restoring controls alone does not rewind the live world.
 
 CLI examples, using an existing completed study:
 

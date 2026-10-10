@@ -126,6 +126,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if matches!(a.cmd.as_str(),"greenhouse-definition"|"greenhouse-supply-definition") && flag!="--output" {return Err(format!("{flag} is not a greenhouse-definition option"));}
         if matches!(a.cmd.as_str(),"crop-chemistry"|"crop-chemistry-inspect"|"greenhouse-supply-inspect") && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a crop supply/chemistry inspection option"));}
         if matches!(a.cmd.as_str(),"habitat-diagnose"|"habitat-crop-harvest") && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
+        if a.cmd=="habitat-rerun" && !matches!(flag.as_str(),"--recording"|"--definition"|"--output"){return Err(format!("{flag} is not a saved-origin habitat rerun option"));}
         if a.cmd=="habitat-verify" && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a habitat replay verification option"));}
         if a.cmd=="habitat-balance" && !matches!(flag.as_str(),"--recording"|"--from-index"|"--observation"|"--output") {return Err(format!("{flag} is not a recorded balance option"));}
         if a.cmd=="habitat-figure" && !matches!(flag.as_str(),"--recording"|"--reference"|"--definition"|"--output"|"--branches") {return Err(format!("{flag} is not a recorded figure option"));}
@@ -210,6 +211,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     }
     if a.cmd=="habitat-crop-harvest" && (a.initial.is_none() || a.habitat_id.is_none() || a.output.is_none()) {return Err("habitat-crop-harvest requires --initial SAVE --habitat-id ID --output NEW_DIR".into());}
     if a.cmd=="habitat-diagnose" && (a.initial.is_none() || a.habitat_id.is_none()) {return Err("habitat-diagnose requires --initial SAVE and explicit --habitat-id ID".into());}
+    if a.cmd=="habitat-rerun" && (a.recording.as_deref().is_none_or(|p|p.trim().is_empty()) || a.output.as_deref().is_none_or(|p|p.trim().is_empty())){return Err("habitat-rerun requires --recording COMPLETE_DESIGN --output NEW_DIR".into());}
     if a.cmd=="habitat-verify" && a.recording.is_none() {return Err("habitat-verify requires --recording COMPLETE_PAIRED_FOLDER".into());}
     if a.cmd=="habitat-pressure" && (a.recording.is_none() || a.observation.is_none()) {return Err("habitat-pressure requires --recording ORDINARY_BRANCH_FOLDER and --observation INDEX".into());}
     if a.cmd=="habitat-balance" && a.recording.is_none() {return Err("habitat-balance requires --recording FOLDER".into());}
@@ -254,6 +256,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     Ok(a)
 }
 fn help() {
+    eprintln!("cosmogon-cli habitat-rerun --recording COMPLETE_DESIGN --output NEW_DIR [--definition NEW_TYPED_PLAN]   # exact original common starting world");
     eprintln!("cosmogon-cli habitat-balance --recording FOLDER [--from-index N] [--observation N] [--output NEW_DIR]");
     eprintln!("cosmogon-cli habitat-figure --recording FOLDER --definition GRAPH_LAYOUT --output NEW_DIR [--reference ORDINARY_B]");
     eprintln!("cosmogon-cli habitat-sweep --initial SAVE --output NEW_DIR --parameter firm_power_w --from 0 --to 4000 --runs 3 [--samples 25 --interval-days 0.041666666666666664]\n  or --definition SWEEP_PLAN; optional --habitat-id ID\ncosmogon-cli habitat-compare --recording A --reference B [--measure water --alignment elapsed|world --output NEW_DIR]");
@@ -414,6 +417,7 @@ fn main() {
                 figure.export(std::path::Path::new(a.output.as_deref().expect("validated output")))})();
             match result {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).unwrap()),Err(e)=>{eprintln!("Recorded figure failed: {e}");std::process::exit(1);}}
         },
+        "habitat-rerun" => {if let Err(e)=habitat_rerun(&a){eprintln!("Saved-origin rerun failed: {e}");std::process::exit(1);}},
         "habitat-sweep" => {if let Err(e)=habitat_sweep(&a) {eprintln!("Habitat sweep failed: {e}");std::process::exit(1);}},
         "habitat-compare" => {if let Err(e)=habitat_compare(&a) {eprintln!("Habitat comparison failed: {e}");std::process::exit(1);}},
         "habitat-definition"|"habitat-crop-definition" => {if let Err(e)=habitat_definition(&a) {eprintln!("Habitat definition failed: {e}");std::process::exit(1);}},
@@ -799,6 +803,13 @@ fn habitat_sweep(a:&Args)->Result<(),String> {
     let report=cosmogon_sim::habitat_sweep::execute(&base,id,&plan,std::path::Path::new(a.output.as_deref().expect("validated output")))?;
     println!("{}",serde_json::to_string_pretty(&report).map_err(|e|e.to_string())?);Ok(())
 }
+fn habitat_rerun(a:&Args)->Result<(),String> {
+    let path=std::path::Path::new(a.recording.as_deref().expect("validated design"));
+    let origin=cosmogon_sim::habitat_origin::Origin::read(path)?;
+    let plan=if let Some(definition)=&a.definition{cosmogon_sim::habitat_sweep::Plan::read(std::path::Path::new(definition))?}else{cosmogon_sim::habitat_sweep::Plan::read(&path.join("plan.json"))?};
+    let result=cosmogon_sim::habitat_sweep::execute(&origin.load()?,origin.habitat_id,&plan,std::path::Path::new(a.output.as_deref().expect("validated new output")))?;
+    println!("{}",serde_json::to_string_pretty(&result).map_err(|e|e.to_string())?);Ok(())
+}
 fn habitat_verify(a:&Args)->Result<serde_json::Value,String> {
     let report=cosmogon_sim::habitat_replay::verify(std::path::Path::new(a.recording.as_deref().expect("validated replay folder")))?;
     if let Some(output)=&a.output {cosmogon_sim::habitat_replay::export(&report,std::path::Path::new(output))?;}
@@ -891,6 +902,11 @@ mod argument_tests {
         parse_args(values.iter().map(|s| s.to_string()))
     }
 
+    #[test]
+    fn saved_origin_reruns_refuse_ignored_or_incomplete_inputs() {
+        for v in [vec!["habitat-rerun"],vec!["habitat-rerun","--recording","x"],vec!["habitat-rerun","--recording","x","--output"," "],vec!["habitat-rerun","--recording","x","--output","new","--initial","other"],vec!["habitat-rerun","--recording","x","--output","new","--samples","2"]] {assert!(args(&v).is_err());}
+        let a=args(&["habitat-rerun","--recording","x","--output","new","--definition","plan"]).unwrap();assert_eq!(a.definition.as_deref(),Some("plan"));
+    }
     #[test]
     fn installed_crop_commands_refuse_ignored_or_ambiguous_inputs() {
         assert!(args(&["habitat-crop-definition","--output","x"]).is_ok());

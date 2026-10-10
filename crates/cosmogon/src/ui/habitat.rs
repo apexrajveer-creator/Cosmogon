@@ -474,6 +474,8 @@ pub fn init(mut form: ResMut<HabitatUi>, args: Res<crate::args::Args>, mut exit:
     if let Some(path)=&args.habitat_graph {match super::habitat_graph::Layout::read(std::path::Path::new(path)){Ok(d)=>form.recording.graph.layout=d,Err(e)=>form.recording.graph.status=Some(e)}}
     form.recording.apply_graph_layout();
     form.recording.graph_mode=args.panel.as_deref()==Some("habitat-graph-layout");
+    form.recording.requested_origin=args.habitat_origin.as_deref().map(|v|v=="saved");
+    form.recording.rerun_output=args.habitat_rerun_output.clone();
     form.recording.requested_branches=args.habitat_branches.as_deref().and_then(|s|cosmogon_sim::habitat_design::parse_branches(s).ok());
     if let Some(path)=&args.habitat_recording {form.tab=7;form.recording.metric=args.habitat_metric.as_deref().and_then(|v|cosmogon_sim::habitat_recording::Metric::parse(v).ok()).unwrap_or(form.recording.metric);form.recording.start(path.clone(),args.habitat_sample);}
     form.recording.factorial_mode=args.panel.as_deref().is_some_and(|p|p.starts_with("habitat-paired")) || form.recording.figure_mode && args.habitat_recording.as_ref().is_some_and(|p|std::path::Path::new(p).join("plan.json").exists());

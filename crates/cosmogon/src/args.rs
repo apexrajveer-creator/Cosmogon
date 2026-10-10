@@ -51,6 +51,8 @@ pub struct Args {
     pub habitat_graph: Option<String>,
     pub habitat_sample: Option<usize>,
     pub habitat_branches: Option<String>,
+    pub habitat_origin: Option<String>,
+    pub habitat_rerun_output: Option<String>,
     pub habitat_pressure_reference:Option<usize>,
     pub greenhouse_definition: Option<String>,
     pub crop_chemistry: Option<String>,
@@ -170,6 +172,8 @@ impl Args {
                 "--habitat-graph" => a.habitat_graph=Some(val()),
                 "--habitat-verify" => a.habitat_verify=true,
                 "--habitat-pressure-reference" => {a.habitat_pressure_reference=Some(val().parse().unwrap_or(usize::MAX));},
+                "--habitat-origin" => a.habitat_origin=Some(val()),
+                "--habitat-rerun-output" => a.habitat_rerun_output=Some(val()),
                 "--habitat-branches" => a.habitat_branches=Some(val()),
                 "--habitat-sample" => {let v=val();a.habitat_sample=Some(v.parse().unwrap_or(usize::MAX));},
                 "--crop-chemistry" => a.crop_chemistry=Some(val()),
@@ -274,6 +278,12 @@ impl Args {
         if let Some(metric)=&self.habitat_metric {cosmogon_sim::habitat_recording::Metric::parse(metric)?;}
         if self.habitat_pressure_reference.is_some() && self.habitat_recording.is_none() {return Err("--habitat-pressure-reference requires --habitat-recording".into());}
         if self.habitat_pressure_reference.is_some_and(|n|n>=1024) {return Err("--habitat-pressure-reference must be an index between 0 and 1023".into());}
+        if let Some(origin)=&self.habitat_origin {if !matches!(origin.as_str(),"saved"|"live"){return Err("--habitat-origin requires saved or live".into());}}
+        if self.habitat_origin.is_some() || self.habitat_rerun_output.is_some() {
+            if self.habitat_recording.is_none() || self.habitat_compare.is_some(){return Err("Saved/live origin selection requires a complete recorded design without an external comparison".into());}
+            if self.habitat_rerun_output.as_ref().is_some_and(|p|p.trim().is_empty()){return Err("--habitat-rerun-output requires a nonempty new folder".into());}
+            if self.habitat_rerun_output.is_some() && self.habitat_origin.as_deref()==Some("live") && self.load.is_none(){return Err("An automated live-origin rerun requires an explicit --load world".into());}
+        }
         if let Some(branches)=&self.habitat_branches {
             cosmogon_sim::habitat_design::parse_branches(branches)?;
             if self.habitat_compare.is_some() || self.habitat_recording.is_none() && self.habitat_sweep.is_none() {return Err("--habitat-branches requires a single-setting design/plan without an external comparison".into());}
@@ -294,6 +304,15 @@ impl Args {
 mod tests {
     use super::*;
 
+    #[test]
+    fn origin_requests_require_complete_design_context_and_explicit_live_world() {
+        for v in [vec!["--habitat-origin","saved"],vec!["--habitat-recording","x","--habitat-origin","unknown"],vec!["--habitat-recording","x","--habitat-origin"],vec!["--habitat-recording","x","--habitat-rerun-output"," "],vec!["--habitat-recording","x","--habitat-origin","saved","--habitat-compare","y"],vec!["--habitat-recording","x","--habitat-origin","live","--habitat-rerun-output","new"]] {
+            assert!(Args::parse_from(v.into_iter().map(String::from)).validate_surface().is_err());
+        }
+        for v in [vec!["--habitat-recording","x","--habitat-rerun-output","new"],vec!["--habitat-recording","x","--habitat-origin","live","--habitat-rerun-output","new","--load","current.cosmo"],vec!["--habitat-recording","x","--habitat-origin","saved"]] {
+            assert!(Args::parse_from(v.into_iter().map(String::from)).validate_surface().is_ok());
+        }
+    }
     #[test]
     fn crop_chemistry_requires_one_explicit_valid_launch() {
         for v in [vec!["--crop-chemistry-output","x"],vec!["--crop-chemistry","x","--greenhouse-supplies","y"],vec!["--crop-chemistry","x","--habitat-recording","y"],vec!["--crop-chemistry","x","--greenhouse-supply-output","y"],vec!["--greenhouse-supplies","x","--crop-chemistry-output","a","--greenhouse-supply-output","b"],vec!["--crop-chemistry","x","--greenhouse-supply-day","31"]] {assert!(Args::parse_from(v.into_iter().map(String::from)).validate_surface().is_err());}

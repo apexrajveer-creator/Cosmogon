@@ -1,3 +1,8 @@
+## Unreleased — frozen habitat study origins
+
+- Explicit original-saved/current-live starting-world selection, cached frozen preflight, exact finite stores/clocks/source pins and immutable request-time context for new single/paired experiments.
+- Shared `habitat-rerun` and packaged rerun/export controls, fresh destinations, changed-source/ordinary-edit refusals and successful-result-only view changes. Preserve solver, save/catalog formats, source constants, graphics and golden `0xf2c4140a45ae509b`.
+
 ## Unreleased — complete saved single-setting habitat designs
 
 - Reopen all independent common-state branches with strict plan/source/edit/time/catalog checks, actual branch choices, restored fresh-output controls and protected all-branch trajectories/selected figures.
