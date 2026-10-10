@@ -39,6 +39,9 @@ pub struct Args {
     pub flight_recording:Option<String>,
     pub flight_output:Option<String>,
     pub arrival_output:Option<String>,
+    pub support_output:Option<String>,
+    pub support_definition:Option<String>,
+    pub support_recording:Option<String>,
     pub flight_observation:Option<usize>,
     pub vehicle_plan:Option<String>,
     pub vehicle_recording:Option<String>,
@@ -193,6 +196,9 @@ impl Args {
                 "--greenhouse-supply-day" => a.greenhouse_supply_day=Some(val().parse().unwrap_or(usize::MAX)),
                 "--greenhouse-supply-resource" => a.greenhouse_supply_resource=Some(val()),
                 "--greenhouse-definition" => a.greenhouse_definition=Some(val()),
+                "--support-output" => a.support_output=Some(val()),
+                "--support-definition" => a.support_definition=Some(val()),
+                "--support-recording" => a.support_recording=Some(val()),
                 "--flight-definition" => a.flight_definition=Some(val()),
                 "--flight-origin" => a.flight_origin=Some(val()),
                 "--flight-recording" => a.flight_recording=Some(val()),
@@ -241,17 +247,21 @@ impl Args {
                 f => eprintln!("ignoring unknown argument {f}"),
             }
         }
-        if (a.flight_definition.is_some() || a.flight_recording.is_some() || a.vehicle_plan.is_some() || a.vehicle_recording.is_some() || a.panel.as_deref().is_some_and(|p|p.starts_with("vehicle")) || a.input_bindings.is_some() || a.camera_path.is_some() || a.habitat_recording.is_some() || a.greenhouse_definition.is_some() || a.crop_chemistry.is_some() || a.greenhouse_supplies.is_some() || a.habitat_definition.is_some() || a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
+        if (a.support_recording.is_some() || a.flight_definition.is_some() || a.flight_recording.is_some() || a.vehicle_plan.is_some() || a.vehicle_recording.is_some() || a.panel.as_deref().is_some_and(|p|p.starts_with("vehicle")) || a.input_bindings.is_some() || a.camera_path.is_some() || a.habitat_recording.is_some() || a.greenhouse_definition.is_some() || a.crop_chemistry.is_some() || a.greenhouse_supplies.is_some() || a.habitat_definition.is_some() || a.terrain_section.is_some() || a.mars_terrain.is_some() || a.surface_site.is_some() || a.profile.is_some() || a.research_export.is_some() || a.research_batch.is_some() || a.research_recording.is_some()) && a.new.is_none() && a.load.is_none() && !a.continue_latest {
             a.new = Some(Scenario::SolarSystemLab);
         }
         a
     }
 
     fn validate_surface(&self) -> Result<(), String> {
-        for (value,label) in [(&self.flight_definition,"flight definition"),(&self.flight_origin,"flight original world"),(&self.flight_recording,"flight recording"),(&self.flight_output,"new flight output"),(&self.arrival_output,"new approach output")] {
+        for (value,label) in [(&self.flight_definition,"flight definition"),(&self.flight_origin,"flight original world"),(&self.flight_recording,"flight recording"),(&self.flight_output,"new flight output"),(&self.arrival_output,"new approach output"),(&self.support_output,"new support output"),(&self.support_definition,"support assumptions"),(&self.support_recording,"support recording")] {
             if value.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err(format!("Choose a nonempty {label} path"));}
         }
-        let flight=self.flight_definition.is_some() || self.flight_recording.is_some();
+        if self.support_recording.is_some() && (self.flight_definition.is_some() || self.flight_origin.is_some() || self.flight_recording.is_some() || self.support_definition.is_some() || self.support_output.is_some() || self.flight_output.is_some() || self.arrival_output.is_some()) {return Err("Choose an existing support report or derive a new report from explicit flight inputs".into());}
+        let flight=self.flight_definition.is_some() || self.flight_recording.is_some() || self.support_recording.is_some();
+        if self.support_output.is_some() && !(self.flight_definition.is_some() || self.flight_recording.is_some()) {return Err("A support output requires a complete flight source".into());}
+        if self.support_definition.is_some() && !flight && self.panel.as_deref()!=Some("vehicle-support") {return Err("Support assumptions require a support panel or explicit flight source".into());}
+
         if self.flight_definition.is_some() && self.flight_recording.is_some() {return Err("Choose one pinned flight definition or complete flight recording".into());}
         if self.flight_definition.is_some() != self.flight_origin.is_some() {return Err("A flight definition requires its exact --flight-origin world; origin alone is not a study".into());}
         if (self.flight_output.is_some() || self.arrival_output.is_some() || self.flight_observation.is_some()) && !flight {return Err("Flight output/observation requires an explicit definition and origin or complete recording".into());}
@@ -342,6 +352,11 @@ impl Args {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn support_launches_require_one_complete_source_and_explicit_new_outputs() {
+        for flags in [vec!["--support-recording"," "],vec!["--support-output","new"],vec!["--support-recording","r","--flight-recording","f"],vec!["--support-recording","r","--support-definition","d"],vec!["--support-recording","r","--support-output","new"],vec!["--support-definition","d"],vec!["--support-recording","r","--flight-observation","4096"]] {assert!(Args::parse_from(flags.into_iter().map(String::from)).validate_surface().is_err());}
+        for flags in [vec!["--support-recording","r","--flight-observation","2"],vec!["--flight-recording","f","--support-definition","d","--support-output","new","--panel","vehicle-support"],vec!["--support-definition","d","--panel","vehicle-support"]] {assert!(Args::parse_from(flags.into_iter().map(String::from)).validate_surface().is_ok());}
+    }
 
     #[test]
     fn origin_requests_require_complete_design_context_and_explicit_live_world() {

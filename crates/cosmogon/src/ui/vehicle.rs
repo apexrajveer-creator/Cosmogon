@@ -176,12 +176,14 @@ pub fn init(mut form: ResMut<VehicleUi>, args: Res<crate::args::Args>) {
     form.flight.initialize(&args);
     form.pane = match args.panel.as_deref() {
         Some("vehicle-arrival") => 7,
+        Some("vehicle-support") => 8,
         Some("vehicle-flight") => 4,
         Some("vehicle-flight-results") => 5,
         Some("vehicle-flight-files") => 6,
         Some("vehicle-burns") => 1,
         Some("vehicle-results") => 2,
         Some("vehicle-model" | "vehicle-files") => 3,
+        _ if args.support_recording.is_some() || args.support_output.is_some() => 8,
         _ => 0,
     };
     if (args.flight_definition.is_some() || args.flight_recording.is_some()) && form.pane < 4 {form.pane=5;}
@@ -226,7 +228,7 @@ pub fn panel(
     let form = &mut *form;
     egui::Window::new("Supply vehicles").open(&mut open).default_pos([345.,82.]).default_width(600.).default_height(570.).max_height(max_height).show(ctx,|ui| {
         if form.pane < 4 {ui.label("Finite propellant and cargo · authored free-space propulsion bench");}
-        ui.horizontal_wrapped(|ui|{for (i,label) in ["Design","Burn plan","Results","Models & files","World flight","Recorded flight","Flight models & files","Approach"].iter().enumerate(){ui.selectable_value(&mut form.pane,i,*label);}});
+        ui.horizontal_wrapped(|ui|{for (i,label) in ["Design","Burn plan","Results","Models & files","World flight","Recorded flight","Flight models & files","Approach","Footprint & loads"].iter().enumerate(){ui.selectable_value(&mut form.pane,i,*label);}});
         let busy=form.pending();
         egui::ScrollArea::vertical().id_salt("vehicle-design-scroll").show(ui,|ui| {
             match form.pane {

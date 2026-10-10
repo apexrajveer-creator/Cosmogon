@@ -140,6 +140,10 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if matches!(a.cmd.as_str(),"arrival-start"|"contact-start") && flag!="--output" {return Err(format!("{flag} is not a geographic start option"));}
         if a.cmd=="flight-approach" && !matches!(flag.as_str(),"--recording"|"--target"|"--output") {return Err(format!("{flag} is not a recorded approach option"));}
         if a.cmd=="approach-inspect" && flag!="--recording" {return Err(format!("{flag} is not an approach inspection option"));}
+        if a.cmd=="support-definition" && flag!="--output" {return Err(format!("{flag} is not a support-definition option"));}
+        if a.cmd=="flight-support" && !matches!(flag.as_str(),"--recording"|"--definition"|"--output") {return Err(format!("{flag} is not a recorded support option"));}
+        if a.cmd=="support-inspect" && flag!="--recording" {return Err(format!("{flag} is not a support-inspection option"));}
+
     if a.contact_hardware.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Contact hardware requires a nonempty file".into());}
     if a.cmd=="contact-hardware" && [&a.initial,&a.output].iter().any(|p|p.as_deref().is_some_and(|s|s.trim().is_empty())) {return Err("Contact files require nonempty paths".into());}
     if a.cmd=="flight-inspect" && flag!="--recording" {return Err(format!("{flag} is not a world flight recording inspection option"));}
@@ -222,6 +226,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         }
     }
 if matches!(a.cmd.as_str(),"arrival-start"|"contact-start"|"flight-approach") && a.output.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Arrival output requires a nonempty fresh path".into());}
+if matches!(a.cmd.as_str(),"flight-support"|"support-inspect") && a.recording.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err("Support commands require --recording COMPLETE_DIR".into());}
+if matches!(a.cmd.as_str(),"support-definition"|"flight-support") && [&a.output,&a.definition].iter().any(|p|p.as_deref().is_some_and(|s|s.trim().is_empty())) {return Err("Support files require nonempty paths".into());}
 if a.cmd=="flight-approach" && explicit_target && a.target.trim().is_empty() {return Err("Choose a nonempty approach target".into());}
 if matches!(a.cmd.as_str(),"flight-approach"|"approach-inspect") && a.recording.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err("Approach commands require --recording COMPLETE_DIR".into());}
 if a.geographic_start.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Geographic start path must not be empty".into());}
@@ -294,7 +300,8 @@ if a.geographic_start.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err
     Ok(a)
 }
 fn help() {
-    eprintln!("cosmogon-cli contact-start [--output NEW_FILE]\ncosmogon-cli contact-hardware [--initial WORLD --target Mars --geographic-start FILE --output NEW_FILE]\nflight-definition --contact-hardware FILE explicitly enables versioned terrain/rigid-body motion; no safe landing or delivery");
+    eprintln!("cosmogon-cli contact-start [--output NEW_FILE]\ncosmogon-cli contact-hardware [--static-shear --initial WORLD --target Mars --geographic-start FILE --output NEW_FILE]\nflight-definition --contact-hardware FILE explicitly enables versioned terrain/rigid-body motion; no safe landing or delivery");
+    eprintln!("cosmogon-cli support-definition [--output NEW_FILE]\ncosmogon-cli flight-support --recording COMPLETE_FLIGHT_DIR [--definition LIMITS_FILE --output NEW_DIR]\ncosmogon-cli support-inspect --recording COMPLETE_SUPPORT_DIR\nConditional actual footprint/force evidence; no attachment or cargo permission");
     eprintln!("cosmogon-cli arrival-start [--output NEW_FILE]\ncosmogon-cli flight-approach --recording COMPLETE_FLIGHT_DIR [--target BODY --output NEW_DIR]\ncosmogon-cli approach-inspect --recording COMPLETE_APPROACH_DIR\nGeographic flight-definition starts: --geographic-start FILE (explicit spherical altitude and east/north/up velocities)");
     eprintln!("cosmogon-cli flight-definition [--initial WORLD --definition PROPULSION_PLAN --target Mars --samples 121 --interval-seconds 1 --output NEW_FILE]\ncosmogon-cli flight-study --definition PINNED_STUDY [--initial WORLD --output NEW_DIR]\ncosmogon-cli flight-inspect --recording COMPLETE_DIR   # exact full-world flight replay, no cargo delivery");
     eprintln!("cosmogon-cli vehicle-definition [--output NEW_FILE]   # explicit assumed finite vehicle and burn plan\ncosmogon-cli vehicle-study [--definition PLAN --output NEW_DIR]   # ideal free-space finite propulsion, no launch/delivery\ncosmogon-cli vehicle-inspect --recording COMPLETE_DIR   # exact independent numeric/source replay");
@@ -458,6 +465,18 @@ fn main() {
                 } else {cosmogon_sim::habitat_figure::Figure::read(recording,a.reference.as_deref().map(std::path::Path::new),&layout)?};
                 figure.export(std::path::Path::new(a.output.as_deref().expect("validated output")))})();
             match result {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).unwrap()),Err(e)=>{eprintln!("Recorded figure failed: {e}");std::process::exit(1);}}
+        },
+        "support-definition" | "flight-support" | "support-inspect" => {
+            let result=(||->Result<serde_json::Value,String>{
+                use cosmogon_sim::{vehicle_support::Definition,vehicle_support_recording::Report,world_vehicle_recording::Bundle};
+                if a.cmd=="support-definition" {let d=Definition::default();if let Some(path)=&a.output {d.write(std::path::Path::new(path))?;}return serde_json::to_value(d).map_err(|e|e.to_string());}
+                let path=std::path::Path::new(a.recording.as_deref().expect("validated support source"));
+                if a.cmd=="support-inspect" {return Ok(Report::read(path)?.manifest);}
+                let definition=if let Some(path)=&a.definition {Definition::read(std::path::Path::new(path))?} else {Definition::default()};
+                let report=Report::run(&Bundle::read(path)?,definition)?;
+                if let Some(path)=&a.output {report.export(std::path::Path::new(path))}else{Ok(report.manifest)}
+            })();
+            match result {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).expect("finite support evidence")),Err(e)=>{eprintln!("Support operation failed: {e}");std::process::exit(1);}}
         },
         "arrival-start" | "contact-start" | "flight-approach" | "approach-inspect" => {
             let result=(||->Result<serde_json::Value,String>{
@@ -1017,6 +1036,11 @@ mod argument_tests {
         parse_args(values.iter().map(|s| s.to_string()))
     }
 
+    #[test]
+    fn support_commands_refuse_ignored_flags_and_missing_sources() {
+        for values in [vec!["flight-support"],vec!["support-inspect"],vec!["flight-support","--recording"," "],vec!["flight-support","--recording","r","--definition"," "],vec!["flight-support","--recording","r","--target","Mars"],vec!["support-inspect","--recording","r","--output","o"],vec!["support-definition","--definition","d"],vec!["support-definition","--output"," "]] {assert!(args(&values).is_err());}
+        assert!(args(&["support-definition"]).is_ok());assert!(args(&["flight-support","--recording","r","--definition","d","--output","o"]).is_ok());assert!(args(&["support-inspect","--recording","r"]).is_ok());
+    }
     #[test]
     fn contact_arguments_require_explicit_typed_files_and_reject_ignored_inputs() {
         for values in [vec!["contact-hardware","--definition","ignored"],vec!["contact-hardware","--output"," "],vec!["contact-hardware","--initial","s","--seed","2"],vec!["flight-study","--definition","d","--contact-hardware","h"],vec!["flight-definition","--contact-hardware"," "]] {assert!(args(&values).is_err());}

@@ -1,3 +1,10 @@
+## Unreleased — actual vehicle footprint and ground-hold evidence
+
+- Add actual per-foot loads/utilization, shared-plane guards, deterministic loaded-site hulls, geometric/force-weighted/applied-wrench margins and conditional ground-following force/torque comparisons. Keep compliant force application separate from projected ground sites; retain source derivative/coordinate indicators and motion exclusions.
+- Add a native equal-scale footprint diagram, typed authored limits, frozen original-world reports and protected exact numeric/nested-flight exports, with strict reopening and headless commands. Original flight formats, simulation laws/saves and legacy golden remain unchanged. Instantaneous inclusion does not attach a craft, prove future stability or permit cargo access. Graphics remain queued.
+- Independent Mars rail comparison exposes existing source-operator approximation error separately from numerical derivative refinement. The original orbital operator and golden remain unchanged.
+- Verify 514 release tests plus one existing ignored, six release/package checks, 45 CLI/native cases, eight inspected captures and a 60.053035-second ordinary run. Correct new style warnings and bring the full diagram/legend ahead of numeric detail; all 173 frozen Rust files match the checked app.
+
 ## Unreleased — integrated persistent foot shear
 
 - Add explicit world-flight version3 / terrain-contact version2 with actual per-foot history, objective rotating-ground transport and finite tangential spring/Coulomb response in coupled motion. Keep endpoint constitutive and actual midpoint mechanical balances separate, including numerical/storage/slip/unloading terms and actual residuals.

@@ -1,6 +1,6 @@
 # Footprint support and finite supply operations — next connected mechanism
 
-Persistent shear is being integrated and verified separately from support/stability. It cannot alone make the ship landed, attached or authorized to transfer cargo. Preserve the original directive's launch/orbit/transfer/approach/entry/landing/delivery and camera/photo scope; the current reduced contact builds are intermediate capabilities.
+Persistent shear is integrated and accepted at `c9ab899`; [actual footprint/ground-hold evidence](VEHICLE_FOOTPRINT_SUPPORT.md) is accepted with 514 passing release tests and full packaged evidence. Neither mechanism alone makes the ship landed, attached or authorized to transfer cargo. Preserve the original directive's launch/orbit/transfer/approach/entry/landing/delivery and camera/photo scope; the current reduced contact builds are intermediate capabilities.
 
 ## Primary evidence
 
