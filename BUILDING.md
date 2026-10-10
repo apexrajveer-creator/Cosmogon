@@ -221,3 +221,5 @@ Crop chemistry uses `crop-chemistry` / `crop-chemistry-inspect` and native `--pa
 Finite installed crop setup, strict CLI harvest and packaged `habitat-crop` panels: [FINITE_GREENHOUSE](docs/FINITE_GREENHOUSE.md). Crop state uses explicit optional source pins; legacy saves/CSV catalogs remain available.
 
 Recorded actual crop trajectories use explicit `crop_progress`, dry stock, feed/product/electricity and optional signed heat-debit selections in ordinary/paired graphs and protected figures. Saved aggregate catalogs remain unchanged. See [guide](docs/RECORDED_CROP_TRAJECTORIES.md).
+
+Controlled installed crop experiment controls and exact saved response catalogs: [guide](docs/CONTROLLED_CROP_STUDIES.md), [design](docs/CONTROLLED_CROP_STUDIES_DESIGN.md).

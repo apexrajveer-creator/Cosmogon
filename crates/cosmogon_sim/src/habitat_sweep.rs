@@ -28,9 +28,10 @@ pub enum Parameter {
     MoistureCondensateCapacityKg,
     BreachAreaM2,BreachDischarge,BreachOutsidePressurePa,BreachGamma,
     VolumeM3, HeatCapacityJK, ConductanceWK, RadiatorAreaM2,
+    CropMaintainedConditions, CropAuxiliaryPowerW, CropDryCapacityKg, CropOxygenCapacityKg,
 }
 impl Parameter {
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 27] = [
         Self::FirmPowerW,
         Self::SolarAreaM2,
         Self::BatteryCapacityJ,
@@ -47,9 +48,14 @@ impl Parameter {
         Self::MoistureElectricityJKg,
         Self::MoistureCondensateCapacityKg,Self::BreachAreaM2,Self::BreachDischarge,Self::BreachOutsidePressurePa,Self::BreachGamma,
         Self::VolumeM3, Self::HeatCapacityJK, Self::ConductanceWK, Self::RadiatorAreaM2,
+        Self::CropMaintainedConditions, Self::CropAuxiliaryPowerW, Self::CropDryCapacityKg, Self::CropOxygenCapacityKg,
     ];
     pub fn id(self) -> &'static str {
         match self {
+            Self::CropMaintainedConditions => "crop_maintained_conditions",
+            Self::CropAuxiliaryPowerW => "crop_auxiliary_power_w",
+            Self::CropDryCapacityKg => "crop_dry_capacity_kg",
+            Self::CropOxygenCapacityKg => "crop_oxygen_capacity_kg",
             Self::VolumeM3 => "volume_m3", Self::HeatCapacityJK => "heat_capacity_j_k",
             Self::ConductanceWK => "conductance_w_k", Self::RadiatorAreaM2 => "radiator_area_m2",
             Self::BreachAreaM2=>"breach_area_m2",Self::BreachDischarge=>"breach_discharge",Self::BreachOutsidePressurePa=>"breach_outside_pressure_pa",Self::BreachGamma=>"breach_gamma",
@@ -78,6 +84,10 @@ impl Parameter {
     }
     pub fn label(self) -> &'static str {
         match self {
+            Self::CropMaintainedConditions => "Crop chamber maintained by assumption",
+            Self::CropAuxiliaryPowerW => "Assumed crop auxiliary power",
+            Self::CropDryCapacityKg => "Crop dry storage capacity (fixed held mass)",
+            Self::CropOxygenCapacityKg => "Crop shared oxygen capacity (fixed held gas)",
             Self::VolumeM3 => "Cabin volume (fixed initial gas)",
             Self::HeatCapacityJK => "Effective cabin heat capacity",
             Self::ConductanceWK => "Total envelope heat conductance",
@@ -104,6 +114,9 @@ impl Parameter {
     }
     pub fn unit(self) -> &'static str {
         match self {
+            Self::CropMaintainedConditions => "0 off / 1 assumed maintained",
+            Self::CropAuxiliaryPowerW => "W",
+            Self::CropDryCapacityKg | Self::CropOxygenCapacityKg => "kg",
             Self::VolumeM3 => "m³", Self::HeatCapacityJK => "J/K", Self::ConductanceWK => "W/K",
             Self::FirmPowerW
             | Self::ElectrolysisPowerW
@@ -121,11 +134,18 @@ impl Parameter {
             Self::MoistureCondensateCapacityKg => "kg",
         }
     }
+    pub fn crop(self) -> bool {
+        matches!(self, Self::CropMaintainedConditions | Self::CropAuxiliaryPowerW | Self::CropDryCapacityKg | Self::CropOxygenCapacityKg)
+    }
     pub fn geometry_or_thermal(self) -> bool {
         matches!(self, Self::VolumeM3 | Self::HeatCapacityJK | Self::ConductanceWK | Self::RadiatorAreaM2)
     }
     pub fn assumption(self) -> Option<&'static str> {
         match self {
+            Self::CropMaintainedConditions => Some("Only 0 (off) or 1 (maintained by assumption). This declares the ideal source chamber boundary, not actual HVAC, sensors or biological response. Off pauses supported production; it does not predict survival."),
+            Self::CropAuxiliaryPowerW => Some("User-assumed full auxiliary electrical demand in W, alongside original source lighting. Supported progress requires full allocation; retained source, chemical energy and initial stores remain unchanged. No calibrated equipment rating."),
+            Self::CropDryCapacityKg => Some("Combined standing and harvested dry capacity in kg. Held dry material is fixed and cannot be discarded. Additional capacity grants no biomass, nutrients or new cycle."),
+            Self::CropOxygenCapacityKg => Some("Capacity for the existing shared oxygen reserve in kg. Held gas is fixed; electrolysis can impose a smaller shared limit. Increased capacity grants no oxygen or new feedstocks."),
             Self::VolumeM3 => Some("Same initial gas mass and temperature, different assumed volume: initial pressure changes. This is a counterfactual cabin, not physical expansion or piston work."),
             Self::HeatCapacityJK => Some("Same initial temperature, different effective heat capacity. Initial implied sensible energy is not held equal; capacity is an assumption, not measured material data."),
             Self::ConductanceWK => Some("Total envelope conductance in W/K, not material conductivity or insulation thickness. No automatic geometry or equipment scaling."),
@@ -146,11 +166,40 @@ impl Parameter {
         Some([(current * 0.5).clamp(minimum, maximum),
             if current == 0.0 { zero_example } else { (current * 2.0).clamp(minimum, maximum) }])
     }
+    /// Crop capacity examples respect actual held material; all levels remain editable.
+    pub fn illustrative_levels_for(self, h: &habitat::Habitat) -> Option<[f64; 2]> {
+        if !self.crop() {return self.illustrative_levels(&h.config);}
+        let c = h.config.crop.as_ref()?;
+        let state = h.state.crop.as_ref()?;
+        h.config.validate().ok()?;
+        if self == Self::CropMaintainedConditions {return Some([0., 1.]);}
+        let (current, held, zero_example) = match self {
+            Self::CropAuxiliaryPowerW => (c.auxiliary_power_w, 0., 50.),
+            Self::CropDryCapacityKg => (c.biomass_capacity_kg, state.dry_mass_kg(), 100.),
+            Self::CropOxygenCapacityKg => (c.oxygen_capacity_kg, h.state.oxygen_reserve_kg, 200.),
+            _ => unreachable!(),
+        };
+        let levels = [(current * 0.5).max(held).min(1e7),
+            (if current == 0. {zero_example} else {current * 2.}).max(held).min(1e7)];
+        (levels[0] != levels[1]).then_some(levels)
+    }
     pub fn set(self, c: &mut habitat::Config, value: f64) -> Result<(), String> {
         if !value.is_finite() {
             return Err("Sweep values must be finite".into());
         }
         match self {
+            Self::CropMaintainedConditions | Self::CropAuxiliaryPowerW | Self::CropDryCapacityKg | Self::CropOxygenCapacityKg => {
+                let crop = c.crop.as_mut().ok_or("An enabled original installed crop is required before studying crop controls")?;
+                match self {
+                    Self::CropMaintainedConditions => crop.assume_maintained_conditions = match value {
+                        0. => false, 1. => true, _ => return Err("Crop maintained conditions must be exactly 0 or 1".into()),
+                    },
+                    Self::CropAuxiliaryPowerW => crop.auxiliary_power_w = value,
+                    Self::CropDryCapacityKg => crop.biomass_capacity_kg = value,
+                    Self::CropOxygenCapacityKg => crop.oxygen_capacity_kg = value,
+                    _ => unreachable!(),
+                }
+            }
             Self::VolumeM3 => c.volume_m3 = value,
             Self::HeatCapacityJK => c.heat_capacity_j_k = value,
             Self::ConductanceWK => c.conductance_w_k = value,
@@ -270,13 +319,19 @@ impl Plan {
         plan.validate()?;
         Ok(plan)
     }
-    /// Preserve legacy catalogs; these plans additionally expose existing total pressure.
+    /// Preserve legacy catalogs; typed thermal/crop plans declare their additional responses.
     pub fn metrics(&self, h: &habitat::Habitat) -> Vec<Metric> {
         let mut metrics: Vec<_> = Metric::for_habitat(h).collect();
-        if self.configuration_assumptions().is_some() && !metrics.contains(&Metric::TotalPressure) {
+        if self.parameters().any(Parameter::geometry_or_thermal) && !metrics.contains(&Metric::TotalPressure) {
             metrics.push(Metric::TotalPressure);
         }
+        if self.parameters().any(Parameter::crop) {
+            metrics.extend(Metric::ALL.into_iter().filter(|m| m.is_crop()));
+        }
         metrics
+    }
+    fn parameters(&self) -> impl Iterator<Item=Parameter> + '_ {
+        std::iter::once(self.parameter).chain(self.secondary.as_ref().map(|b| b.parameter))
     }
     pub fn configuration_assumptions(&self) -> Option<serde_json::Value> {
         let settings: Vec<_> = std::iter::once(self.parameter)
@@ -284,11 +339,30 @@ impl Plan {
             .filter_map(|p| p.assumption().map(|note| serde_json::json!({"parameter":p.id(),"unit":p.unit(),"assumption":note})))
             .collect();
         if settings.is_empty() {return None;}
-        Some(serde_json::json!({"format":"cosmogon-habitat-configuration-assumptions","schema_version":1,
+        let mut note = serde_json::json!({"format":"cosmogon-habitat-configuration-assumptions","schema_version":1,
             "settings":settings,"initial_controls":"Actual initial stocks and temperature preserved through ordinary edits; original definition remains unchanged. No gas refill, automatic geometry/equipment scaling or simulated expansion.",
             "capacity_scope":"Effective lumped heat capacity is assumed. Changing it does not preserve equal implied initial thermal energy. Breach support still requires nonnegative structure heat capacity.",
             "sources":[{"url":"https://www.grc.nasa.gov/www/k-12/airplane/eqstat.html","scope":"Ideal gas pV=nRT; supports the fixed-molecule volume/pressure relationship, not measured cabin geometry."},{"url":"https://www.grc.nasa.gov/www/k-12/airplane/specheat.html","scope":"Heat capacity and constant-volume heat/temperature relationships; no calibration of effective cabin capacity or envelope/radiator properties."}],
-            "limits":"Deterministic sensitivity at supplied assumptions, not field calibration, predictive uncertainty, physical expansion or equal-energy comparison."}))
+            "limits":"Deterministic sensitivity at supplied assumptions, not field calibration, predictive uncertainty, physical expansion or equal-energy comparison."});
+        if self.parameters().any(Parameter::crop) {
+            let thermal = self.parameters().any(Parameter::geometry_or_thermal);
+            note["context_kind"] = if thermal {"crop_and_geometry_thermal"} else {"crop"}.into();
+            note["crop_scope"] = crate::crop_process::LIMITS.into();
+            note["crop_source"] = crate::crop_process::source();
+            note["initial_crop_controls"] = "Original installed crop source, chemical basis, initial nutrients, retained material/counters, harvest state and installation clocks stay fixed. No feed grant, runtime installation, replanting or material discard.".into();
+            let crop_sources = serde_json::json!([
+                {"url":"https://ntrs.nasa.gov/api/citations/20210024855/downloads/BVAD_2.15.22-final.pdf","scope":"Maintained MEC lettuce source conditions; does not calibrate our auxiliary power or storage capacities."},
+                {"url":"https://ntrs.nasa.gov/citations/19930004806","scope":"Original crop material-flow reference; conservative CHON surrogate is separately declared and is not measured tissue or complete diet."}]);
+            if !thermal {
+                note["initial_controls"] = "Actual initial stocks, temperature, installed crop material/counters and original source conditions remain unchanged through ordinary edits.".into();
+                note["capacity_scope"] = "Dry and shared oxygen capacities constrain actual finite products without discarding held stocks. Increased capacity grants no material, energy or automatic new crop cycle.".into();
+                note["sources"] = crop_sources;
+            } else {
+                note["sources"].as_array_mut().expect("source list").extend(crop_sources.as_array().expect("crop source list").iter().cloned());
+            }
+            note["limits"] = "Deterministic engineering assumption study, not calibrated crop physiology, chamber HVAC, survival, statistical uncertainty, hardware optimization or repeated-cycle food production. Mixed geometry/thermal settings additionally do not simulate expansion or hold equal implied initial energy.".into();
+        }
+        Some(note)
     }
     pub(crate) fn with_assumptions(&self, mut report: serde_json::Value) -> serde_json::Value {
         if let Some(note) = self.configuration_assumptions() {report["configuration_assumptions"] = note;}
@@ -318,6 +392,12 @@ impl Plan {
             .any(|(i, v)| !v.is_finite() || self.values[..i].contains(v))
         {
             return Err("Sweep values must be finite and distinct".into());
+        }
+        for (parameter, values) in std::iter::once((self.parameter, self.values.as_slice()))
+            .chain(self.secondary.as_ref().map(|b| (b.parameter, b.values.as_slice()))) {
+            if parameter == Parameter::CropMaintainedConditions && values.iter().any(|v| *v != 0. && *v != 1.) {
+                return Err("Crop maintained conditions must be exactly 0 or 1".into());
+            }
         }
         if let Some(b) = &self.secondary {
             if self.values.len() != 2
@@ -371,6 +451,9 @@ impl Plan {
             .iter()
             .find(|h| h.id == id)
             .ok_or("No such habitat in the common starting world")?;
+        if self.parameters().any(Parameter::crop) && (h.state.crop.is_none() || h.config.crop.is_none()) {
+            return Err("An enabled original installed crop is required before studying crop controls".into());
+        }
         if !base.time.is_finite()
             || !((base.time + self.interval_s * (self.samples - 1) as f64).is_finite())
             || (self.samples > 1 && base.time + self.interval_s <= base.time)
@@ -828,6 +911,87 @@ mod tests {
             }
             assert!(parameter.set(&mut config,f64::NAN).is_err());
         }
+    }
+
+    fn installed_crop_world() -> Universe {
+        let mut u=Universe::new(crate::UniverseSettings {scenario:crate::Scenario::SolarSystemLab,..Default::default()});
+        let body=crate::BodyRef {system:0,body:u.systems[0].find_body("Mars").unwrap() as u32};
+        let mut d=crate::crop_process::definition_at(body,0.,0.);
+        d.config.crew=0;d.config.solar_area_m2=0.;d.config.firm_power_w=5000.;
+        d.config.base_load_w=0.;d.config.scrubber_power_w=0.;d.config.recycler_power_w=0.;
+        d.config.heater_limit_w=0.;d.config.radiator_pump_w=0.;d.config.radiator_area_m2=0.;d.config.conductance_w_k=0.;
+        d.config.heat_capacity_j_k=1e9;d.config.moisture.as_mut().unwrap().power_limit_w=0.;
+        d.initial.battery_j=0.;d.initial.oxygen_reserve_kg=0.;
+        d.config.crop.as_mut().unwrap().assume_maintained_conditions=true;
+        u.apply_edit(Edit::CreateHabitat {definition:Box::new(d)}).unwrap();u
+    }
+    #[test]
+    fn crop_control_branches_preserve_original_installed_state_and_catalogs() {
+        let u=installed_crop_world();let h=&u.habitats[0];
+        let before=crate::research::state_fingerprint(&u).unwrap();
+        let root=std::env::temp_dir().join(format!("cosmogon-crop-control-state-{}",std::process::id()));let _=std::fs::remove_dir_all(&root);
+        let legacy=Plan::linear(Parameter::FirmPowerW,0.,5000.,2,1,60.).unwrap();
+        assert_eq!(legacy.metrics(h),Metric::for_habitat(h).collect::<Vec<_>>());
+        assert!(legacy.configuration_assumptions().is_none());
+        for (parameter,a,b) in [(Parameter::CropMaintainedConditions,0.,1.),(Parameter::CropAuxiliaryPowerW,0.,10000.),(Parameter::CropDryCapacityKg,0.,100.),(Parameter::CropOxygenCapacityKg,0.,200.)] {
+            let p=Plan::linear(parameter,a,b,2,1,60.).unwrap();let path=root.join(parameter.id());
+            let m=execute(&u,0,&p,&path).unwrap();
+            assert_eq!(p.metrics(h).iter().filter(|m|m.is_crop()).count(),13);
+            assert!(!p.metrics(h).contains(&Metric::TotalPressure));
+            assert_eq!(m["configuration_assumptions"]["context_kind"],"crop");
+            assert_eq!(m["configuration_assumptions"]["crop_source"],crate::crop_process::source());
+            for i in 0..2 {
+                let r=Recording::read(&path.join(format!("run-{i:03}"))).unwrap();
+                assert_eq!(r.rows[0].habitat.state,h.state);assert_eq!(r.rows[0].habitat.definition,h.definition);
+                assert_eq!(r.rows[0].habitat.totals,h.totals);assert_eq!(r.rows[0].habitat.last_time,h.last_time);
+                let mut config=h.config.clone();parameter.set(&mut config,[a,b][i]).unwrap();assert_eq!(r.rows[0].habitat.config,config);
+                assert_eq!(m["runs"][i]["final_metrics"]["crop_progress"]["value"],0.);
+            }
+            let levels=parameter.illustrative_levels_for(h).unwrap();assert_ne!(levels[0],levels[1]);
+        }
+        let mut mixed=Plan::linear(Parameter::HeatCapacityJK,1e9,2e9,2,1,60.).unwrap();mixed.schema_version=2;
+        mixed.secondary=Some(crate::habitat_factorial::Secondary {parameter:Parameter::CropAuxiliaryPowerW,values:[0.,100.]});
+        assert!(mixed.metrics(h).contains(&Metric::TotalPressure));
+        assert_eq!(mixed.configuration_assumptions().unwrap()["context_kind"],"crop_and_geometry_thermal");
+        let thermal=Plan::linear(Parameter::HeatCapacityJK,1e9,2e9,2,1,60.).unwrap();assert!(!thermal.metrics(h).iter().any(|m|m.is_crop()));
+        assert_eq!(crate::research::state_fingerprint(&u).unwrap(),before);std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn paired_crop_controls_record_exact_finite_responses_and_independent_replay() {
+        let u=installed_crop_world();
+        let mut p=Plan::linear(Parameter::CropMaintainedConditions,0.,1.,2,3,43200.).unwrap();p.schema_version=2;
+        p.secondary=Some(crate::habitat_factorial::Secondary {parameter:Parameter::CropAuxiliaryPowerW,values:[0.,10000.]});
+        let root=std::env::temp_dir().join(format!("cosmogon-crop-control-replay-{}",std::process::id()));let _=std::fs::remove_dir_all(&root);
+        execute(&u,0,&p,&root).unwrap();let design=crate::habitat_factorial::read(&root).unwrap();
+        assert_eq!(design.plan().unwrap(),p);
+        let values:Vec<_>=design.recordings.iter().map(|r|Metric::CropProgress.value(r.rows.last().unwrap()).unwrap()).collect();
+        assert_eq!(values[0],0.);assert!(values[1]>0.);assert_eq!(values[2],0.);assert_eq!(values[3],0.);
+        for r in &design.recordings {assert_eq!(r.rows[0].habitat.state,u.habitats[0].state);}
+        let report=design.report_at(2).unwrap();assert_eq!(report["metrics"]["crop_progress"]["contrasts"]["responses"],serde_json::json!(values));
+        assert_eq!(report["metrics"]["crop_progress"]["contrasts"]["difference_in_differences"],-values[1]);
+        assert_eq!(crate::habitat_replay::verify(&root).unwrap()["verified"],true);
+        let mut changed:serde_json::Value=serde_json::from_slice(&std::fs::read(root.join("factorial.json")).unwrap()).unwrap();
+        changed["metrics"]["crop_progress"]["contrasts"]["average_a"]=42.into();std::fs::write(root.join("factorial.json"),serde_json::to_vec(&changed).unwrap()).unwrap();
+        assert!(crate::habitat_factorial::read(&root).is_err());std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn invalid_crop_controls_refuse_before_output_without_installing_or_discarding() {
+        let mut u=installed_crop_world();u.advance_by(86400.);
+        let h=&u.habitats[0];let crop=h.state.crop.as_ref().unwrap();assert!(crop.dry_mass_kg()>0.);assert!(h.state.oxygen_reserve_kg>0.);
+        let before=crate::research::state_fingerprint(&u).unwrap();
+        let root=std::env::temp_dir().join(format!("cosmogon-crop-control-refusal-{}",std::process::id()));let _=std::fs::remove_dir_all(&root);
+        assert!(Plan::linear(Parameter::CropMaintainedConditions,0.,1.,3,2,60.).is_err());
+        for (parameter,a,b) in [(Parameter::CropAuxiliaryPowerW,-1.,50.),(Parameter::CropDryCapacityKg,0.,100.),(Parameter::CropOxygenCapacityKg,0.,200.)] {
+            let p=Plan::linear(parameter,a,b,2,2,60.).unwrap();assert!(execute(&u,0,&p,&root).is_err());assert!(!root.exists());
+        }
+        for parameter in [Parameter::CropDryCapacityKg,Parameter::CropOxygenCapacityKg] {
+            let levels=parameter.illustrative_levels_for(h).unwrap();let p=Plan::linear(parameter,levels[0],levels[1],2,1,60.).unwrap();p.validate_world(&u,0).unwrap();
+        }
+        let p=Plan::linear(Parameter::CropMaintainedConditions,0.,1.,2,2,60.).unwrap();
+        let mut disabled=u.clone();let mut c=disabled.habitats[0].config.clone();c.crop=None;
+        disabled.apply_edit(Edit::ConfigureHabitat {system:0,id:0,config:Box::new(c)}).unwrap();
+        assert!(execute(&disabled,0,&p,&root).is_err());assert!(execute(&world(),0,&p,&root).is_err());assert!(!root.exists());
+        assert_eq!(crate::research::state_fingerprint(&u).unwrap(),before);
     }
 
 }

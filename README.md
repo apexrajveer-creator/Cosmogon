@@ -150,3 +150,5 @@ Crop research adds [finite supply studies](docs/FINITE_CROP_SUPPLIES.md): explic
 Finite installed crop engineering, actual material/electric/heat evidence and explicit model limits: [FINITE_GREENHOUSE](docs/FINITE_GREENHOUSE.md).
 
 Actual installed crop recordings support selected resource/production/energy graphs, exact-time comparisons and protected research figures; [recorded crop guide](docs/RECORDED_CROP_TRAJECTORIES.md). Supported source progress remains separate from biological age.
+
+Controlled installed crop experiment controls and exact saved response catalogs: [guide](docs/CONTROLLED_CROP_STUDIES.md), [design](docs/CONTROLLED_CROP_STUDIES_DESIGN.md).

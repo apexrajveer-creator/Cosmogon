@@ -1,3 +1,8 @@
+## Unreleased — controlled installed crop studies
+
+- Four typed ordinary-edit controls for ideal chamber assumptions, auxiliary power and finite dry/shared oxygen capacity; exact retained original state, strict boolean/no-discard preflight and plan-dependent actual crop responses.
+- Shared native/CLI single and paired studies, explicit crop/thermal source context and restored staged controls. Previous metric catalogs, simulation/save state and golden stay unchanged.
+
 ## Unreleased — recorded actual crop trajectories
 
 - Add explicit retained crop progress/stocks/material/electric/chemical curves, signed heat debit selections, aligned-origin/completed-time comparisons and protected source-context research figures through existing native/CLI tools. Keep actual zeros distinct from absent state, disclose ideal chamber/source progress limits and preserve immutable saved catalogs, old analyses, solver/save state and golden `0xf2c4140a45ae509b`. Write optional crop CSV before habitat completion manifest. No graphics/dependency or calibrated biology claim.

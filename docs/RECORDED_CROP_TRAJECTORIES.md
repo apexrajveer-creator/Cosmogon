@@ -22,7 +22,7 @@ Comparisons and four-branch contrasts require exact stored timestamps plus align
 
 Reopening also refuses a changing installation origin, reversed cumulative crop counters, disappearing crop state or reversed harvest inside a trajectory. Per-row source/material validation remains separate from these continuity checks; neither establishes cryptographic authenticity or independent replay.
 
-Existing recorded summaries, sweep/factorial metric catalogs and aggregate trajectory exports stay unchanged. Select a new crop metric explicitly and export a research figure to retain its original responses and selected paired effect. No hidden rewrite of previous analyses.
+Existing recorded summaries, sweep/factorial metric catalogs and aggregate trajectory exports stay unchanged. New [typed installed-crop control plans](CONTROLLED_CROP_STUDIES.md) explicitly declare additional crop response catalogs without rewriting previous studies. Select a new crop metric explicitly and export a research figure to retain its original responses and selected paired effect. No hidden rewrite of previous analyses.
 
 A complete reusable layout:
 

@@ -374,6 +374,9 @@ impl Study {
             let recordings = if self.factorial_mode { self.paired.as_ref().map(|d| d.recordings.iter().collect::<Vec<_>>()).unwrap_or_else(|| vec![r]) } else { std::iter::once(r).chain(self.comparison.as_ref()).collect() };
             metadata["heat_trajectory_context"] = cosmogon_sim::habitat_heat_trajectory::context(&recordings);
         }
+        if self.experiment_mode && (self.sweep.parameter.crop() || self.sweep.paired && self.sweep.secondary_parameter.crop()) {
+            metadata["staged_crop_plan"] = serde_json::json!({"parameter":self.sweep.parameter.id(),"values_text":self.sweep.values,"paired":self.sweep.paired,"secondary_parameter":self.sweep.secondary_parameter.id(),"secondary_values_text":self.sweep.secondary_values,"samples":self.sweep.samples,"interval_hours":self.sweep.interval_hours,"new_output":self.sweep.output,"scope":"Editable inputs for a new installed crop assumption study; completed recording inputs remain separate"});
+        }
         if self.metric.has_crop_context() {
             let recordings = if self.factorial_mode { self.paired.as_ref().map(|d| d.recordings.iter().collect::<Vec<_>>()).unwrap_or_else(|| vec![r]) } else { std::iter::once(r).chain(self.comparison.as_ref()).collect() };
             metadata["crop_trajectory_context"] = cosmogon_sim::habitat_crop_trajectory::context(&recordings);
@@ -799,8 +802,8 @@ fn paired_results(ui:&mut egui::Ui,study:&mut Study) {
     ui.label(egui::RichText::new("Stored model results · gaps remain unavailable · sources/export in Files & method").small().color(MUTED));
 }
 
-fn example_levels(ui:&mut egui::Ui,parameter:Parameter,config:&cosmogon_sim::habitat::Config,values:&mut String) {
-    if let Some(levels)=parameter.illustrative_levels(config) {
+fn example_levels(ui:&mut egui::Ui,parameter:Parameter,habitat:&cosmogon_sim::habitat::Habitat,values:&mut String) {
+    if let Some(levels)=parameter.illustrative_levels_for(habitat) {
         ui.horizontal_wrapped(|ui| {
             if ui.small_button("Use illustrative levels").clicked() {*values=format!("{}, {}",levels[0],levels[1]);}
             ui.label(egui::RichText::new(format!("{}, {} {} · editable assumptions",levels[0],levels[1],parameter.unit())).small().color(MUTED));
@@ -808,10 +811,17 @@ fn example_levels(ui:&mut egui::Ui,parameter:Parameter,config:&cosmogon_sim::hab
     }
 }
 fn assumptions(ui:&mut egui::Ui,note:&serde_json::Value) {
-    ui.colored_label(ACCENT,"Fixed initial stocks and temperature · assumed geometry/thermal properties");
+    ui.colored_label(ACCENT,match note["context_kind"].as_str() {
+        Some("crop") => "Fixed installed crop and stocks · assumed chamber, power and capacity",
+        Some("crop_and_geometry_thermal") => "Fixed installed crop and stocks · assumed crop and geometry/thermal properties",
+        _ => "Fixed initial stocks and temperature · assumed geometry/thermal properties",
+    });
     egui::CollapsingHeader::new("What these changes mean").show(ui,|ui| {
         if let Some(settings)=note["settings"].as_array() {for setting in settings {ui.label(setting["assumption"].as_str().unwrap_or(""));}}
+        ui.label(note["initial_controls"].as_str().unwrap_or(""));
         ui.label(note["capacity_scope"].as_str().unwrap_or(""));
+        if let Some(scope) = note["initial_crop_controls"].as_str() {ui.label(scope);}
+        if let Some(scope) = note["crop_scope"].as_str() {ui.label(scope);}
         if let Some(sources)=note["sources"].as_array() {for source in sources {ui.hyperlink_to(source["scope"].as_str().unwrap_or("Source"),source["url"].as_str().unwrap_or(""));}}
         ui.label(note["limits"].as_str().unwrap_or(""));
     });
@@ -854,7 +864,7 @@ fn experiment(
     ));
     ui.text_edit_singleline(&mut study.sweep.values);
     if let Some(h)=habitat_id.and_then(|id|world.habitats.iter().find(|h|h.id==id)) {
-        example_levels(ui,study.sweep.parameter,&h.config,&mut study.sweep.values);
+        example_levels(ui,study.sweep.parameter,h,&mut study.sweep.values);
     }
     ui.checkbox(&mut study.sweep.paired,"Pair with a second setting (four combinations)");
     if study.sweep.paired {
@@ -864,7 +874,7 @@ fn experiment(
         ui.label(format!("Exactly two levels for each setting · second levels ({})",study.sweep.secondary_parameter.unit()));
         ui.text_edit_singleline(&mut study.sweep.secondary_values);
         if let Some(h)=habitat_id.and_then(|id|world.habitats.iter().find(|h|h.id==id)) {
-            example_levels(ui,study.sweep.secondary_parameter,&h.config,&mut study.sweep.secondary_values);
+            example_levels(ui,study.sweep.secondary_parameter,h,&mut study.sweep.secondary_values);
         }
     }
 
@@ -1164,6 +1174,32 @@ mod tests {
         assert!(run_sweep(u,0,invalid,root.join("bad").to_string_lossy().into_owned(),None).is_err());
         assert_eq!(study.metadata(),before);assert!(!root.join("bad").exists());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn crop_worker_restores_typed_controls_and_keeps_completed_inputs_separate() {
+        let mut u=Universe::new(cosmogon_sim::UniverseSettings {scenario:cosmogon_sim::Scenario::SolarSystemLab,..Default::default()});
+        let mut d=cosmogon_sim::crop_process::definition_at(cosmogon_sim::BodyRef {system:0,body:3},0.,0.);
+        d.config.crew=0;d.config.solar_area_m2=0.;d.config.firm_power_w=5000.;d.initial.battery_j=0.;
+        u.apply_edit(cosmogon_sim::sandbox::Edit::CreateHabitat {definition:Box::new(d)}).unwrap();
+        let root=std::env::temp_dir().join(format!("cosmogon-native-crop-controls-{}",std::process::id()));let _=std::fs::remove_dir_all(&root);
+        let mut p=Plan::linear(Parameter::CropMaintainedConditions,0.,1.,2,3,3600.).unwrap();p.schema_version=2;
+        p.secondary=Some(cosmogon_sim::habitat_factorial::Secondary {parameter:Parameter::CropAuxiliaryPowerW,values:[0.,10000.]});
+        let result=run_sweep(u.clone(),0,p.clone(),root.join("good").to_string_lossy().into_owned(),Some(2)).unwrap();
+        let mut study=Study {keep_experiment_at_launch:true,..Default::default()};study.commit_sweep(result).unwrap();
+        assert!(study.experiment_mode);assert_eq!(study.sweep.parameter,p.parameter);assert_eq!(parse_levels(&study.sweep.values).unwrap(),p.values);
+        assert_eq!(study.sweep.secondary_parameter,Parameter::CropAuxiliaryPowerW);assert!(study.sweep.output.is_empty());
+        study.metric=Metric::CropProgress;
+        let completed=study.metadata().unwrap()["paired_selected_analysis"].clone();
+        assert!(completed["metrics"].get("crop_progress").is_some());assert!(completed["metrics"].get("total_pressure").is_none());
+        assert_eq!(study.metadata().unwrap()["staged_crop_plan"]["parameter"],"crop_maintained_conditions");
+        study.sweep.values="1, 0".into();study.path="unopened-other-folder".into();
+        assert_eq!(study.metadata().unwrap()["paired_selected_analysis"],completed);
+        study.factorial_mode=true;
+        assert_eq!(study.prepare_figure().unwrap().crop_trajectory_context.as_ref().unwrap()["series"].as_array().unwrap().len(),4);
+        let invalid=Plan::linear(Parameter::CropAuxiliaryPowerW,-1.,50.,2,3,3600.).unwrap();
+        assert!(run_sweep(u,0,invalid,root.join("bad").to_string_lossy().into_owned(),None).is_err());assert!(!root.join("bad").exists());
+        assert_eq!(study.metadata().unwrap()["paired_selected_analysis"],completed);std::fs::remove_dir_all(root).unwrap();
     }
 
 }
