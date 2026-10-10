@@ -77,3 +77,7 @@ pub mod supply_vehicle;
 pub mod world_vehicle;
 
 pub mod world_vehicle_recording;
+
+pub mod vehicle_arrival;
+
+pub mod vehicle_arrival_recording;

@@ -8,6 +8,8 @@ use cosmogon_sim::{
     sandbox::Edit,
     save,
     supply_vehicle::Plan,
+    vehicle_arrival::{Approach, GeographicStart},
+    vehicle_arrival_recording::Report as ArrivalReport,
     world_vehicle::{Definition, Flight, Phase},
     world_vehicle_recording::{self as recording, Bundle, Study},
     Universe,
@@ -38,9 +40,19 @@ pub struct FlightUi {
     requested_row: Option<usize>,
     request: Option<Value>,
     live_observation: Option<recording::Observation>,
+    geographic_start: GeographicStart,
+    arrival_result: Option<ArrivalReport>,
+    arrival_task: Option<Task<Result<ArrivalReport, String>>>,
+    arrival_requested: bool,
+    arrival_status: Option<String>,
+    arrival_output: String,
+    live_approach: Option<Value>,
 }
 impl FlightUi {
     pub fn initialize(&mut self, args: &crate::args::Args) {
+        self.arrival_requested =
+            args.panel.as_deref() == Some("vehicle-arrival") || args.arrival_output.is_some();
+        self.arrival_output = args.arrival_output.clone().unwrap_or_default();
         self.samples = 121;
         self.interval_s = 1.;
         self.output = args.flight_output.clone().unwrap_or_default();
@@ -76,12 +88,31 @@ impl FlightUi {
         }
     }
     pub fn pending(&self) -> bool {
-        self.task.is_some() || self.queued_output.is_some()
+        self.task.is_some() || self.queued_output.is_some() || self.arrival_task.is_some()
     }
     pub fn metadata(&self) -> Value {
-        json!({"live_observation":self.live_observation,"staged_flight":self.draft,"request":self.request,"pending":self.pending(),"source":self.source,"selected_vehicle":self.selected_vehicle,"selected_observation":self.selected_row,"selected_row":self.result.as_ref().and_then(|r|r.rows.get(self.selected_row)),"complete_manifest":self.result.as_ref().map(|r|&r.manifest),"status":self.status,"scope":"Actual live-world craft edits, plus independent pinned-world flight studies; no physical cargo delivery"})
+        json!({"live_approach":self.live_approach,"arrival_context":cosmogon_sim::vehicle_arrival::context(),"geographic_start":self.geographic_start,"arrival_pending":self.arrival_task.is_some(),"arrival_selected_row":self.arrival_result.as_ref().and_then(|r|r.points.get(self.selected_row)),"arrival_manifest":self.arrival_result.as_ref().map(|r|&r.manifest),"arrival_status":self.arrival_status,"live_observation":self.live_observation,"staged_flight":self.draft,"request":self.request,"pending":self.pending(),"source":self.source,"selected_vehicle":self.selected_vehicle,"selected_observation":self.selected_row,"selected_row":self.result.as_ref().and_then(|r|r.rows.get(self.selected_row)),"complete_manifest":self.result.as_ref().map(|r|&r.manifest),"status":self.status,"scope":"Actual live-world craft edits, plus independent pinned-world flight studies; no physical cargo delivery"})
     }
     pub fn poll(&mut self) {
+        if let Some(result) = self
+            .arrival_task
+            .as_mut()
+            .and_then(|t| block_on(future::poll_once(t)))
+        {
+            self.arrival_task = None;
+            match result {
+                Ok(report) => {
+                    self.arrival_result = Some(report);
+                    self.arrival_status = Some(
+                        "Replayed rotating approach evidence retained; contact is not a landing."
+                            .into(),
+                    );
+                }
+                Err(e) => {
+                    self.arrival_status = Some(format!("Approach calculation failed: {e}"));
+                }
+            }
+        }
         if let Some(result) = self
             .task
             .as_mut()
@@ -109,6 +140,10 @@ impl FlightUi {
                     self.opened_directory = Path::new(&source).is_dir().then_some(source.clone());
                     self.source = source;
                     self.result = Some(bundle);
+                    self.arrival_result = None;
+                    if self.arrival_requested {
+                        self.start_arrival();
+                    }
                     self.status=Some("Exact flight observations and the complete world branch retained; live world unchanged.".into());
                 }
                 Err(e) => {
@@ -120,7 +155,7 @@ impl FlightUi {
                 }
             }
         }
-        if self.task.is_none() {
+        if self.task.is_none() && self.arrival_task.is_none() {
             if let Some(path) = self.queued_output.take() {
                 self.export(path);
             }
@@ -217,8 +252,104 @@ impl FlightUi {
         match pane {
             4 => self.live(ui, sim, plan, now),
             5 => self.recorded(ui, &sim.universe),
+            7 => self.arrival(ui, sim, plan, now),
             _ => self.files(ui, &sim.universe),
         }
+    }
+    fn start_arrival(&mut self) {
+        if self.task.is_some() || self.arrival_task.is_some() {
+            return;
+        }
+        let Some(bundle) = self.result.clone() else {
+            return;
+        };
+        let directory = self.opened_directory.clone();
+        let expected = bundle.manifest.clone();
+        let output = self.arrival_output.trim().to_string();
+        self.arrival_status =
+            Some("Replaying the complete original branch and rotating source frames…".into());
+        self.arrival_task=Some(AsyncComputeTaskPool::get().spawn(async move {
+            let bundle=if let Some(directory)=directory {let loaded=Bundle::read(Path::new(&directory))?;if loaded.manifest!=expected {return Err("Opened flight source changed on disk; reopen it before deriving approach evidence".into());}loaded} else {bundle};
+            let report=ArrivalReport::run(&bundle,bundle.study.flight.parent)?;
+            if !output.is_empty() {report.export(Path::new(&output))?;return ArrivalReport::read(Path::new(&output));}
+            Ok(report)
+        }));
+    }
+    fn arrival(&mut self, ui: &mut egui::Ui, sim: &mut Sim, plan: &Plan, now: f64) {
+        ui.strong("Rotating surface-relative approach");
+        ui.label("Ground motion includes body translation and spin. Geographic altitude is above the spherical flight boundary; overview terrain is a separate reading.");
+        if let Some(status) = &self.arrival_status {
+            ui.add(egui::Label::new(status).wrap());
+        }
+        if let Some(report) = &self.arrival_result {
+            ui.label(format!(
+                "Recorded target {} · {} actual samples",
+                report.flight.origin.body(report.definition.target).name,
+                report.points.len()
+            ));
+            ui.add(
+                egui::Slider::new(&mut self.selected_row, 0..=report.points.len() - 1)
+                    .text("Observation"),
+            );
+            let point = &report.points[self.selected_row];
+            ui.label(format!(
+                "World sample {:.6} s · {}",
+                point.world_time_s,
+                if point.historical {
+                    "original contact frame retained"
+                } else {
+                    "source frame observed in actual replay"
+                }
+            ));
+            if let Some(reading) = &point.reading {
+                arrival_readings(ui, reading);
+            } else if let Some(reason) = &point.unavailable_reason {
+                ui.colored_label(ACCENT, reason);
+            }
+        } else if let Some(flight) = self
+            .selected_vehicle
+            .and_then(|id| sim.universe.vehicles.iter().find(|c| c.id == id))
+            .or_else(|| sim.universe.vehicles.first())
+        {
+            let value = Approach::live(&sim.universe, flight, flight.definition.parent);
+            self.live_approach = Some(match &value {
+                Ok(reading) => {
+                    json!({"reading":reading,"scope":"Actual active live craft at its resolved clock"})
+                }
+                Err(reason) => json!({"unavailable_reason":reason}),
+            });
+            match value {
+                Ok(reading) => arrival_readings(ui, &reading),
+                Err(reason) => {
+                    ui.colored_label(ACCENT, reason);
+                }
+            }
+        } else {
+            self.live_approach = None;
+            ui.label("Create a finite live craft or reopen a complete flight recording to observe approach.");
+        }
+        ui.collapsing("Geographic initial conditions",|ui| {
+            ui.label("Explicit authored starting position and ground-relative east/north/up velocity. No surface launch, landing or stock loading is implied.");
+            for (label,value) in [("North latitude (°)",&mut self.geographic_start.latitude_deg),("East longitude (°)",&mut self.geographic_start.longitude_east_deg),("Above spherical radius (m)",&mut self.geographic_start.spherical_altitude_m),("East velocity (m/s)",&mut self.geographic_start.east_velocity_m_s),("North velocity (m/s)",&mut self.geographic_start.north_velocity_m_s),("Up velocity (m/s)",&mut self.geographic_start.up_velocity_m_s)] {
+                ui.horizontal(|ui|{ui.label(label);ui.add(egui::DragValue::new(value).speed(0.1).max_decimals(9));});
+            }
+            let target=match sim.selected {Some(Target::Body(r))=>Some(r),_=>None};
+            let candidate=target.ok_or_else(||"Select a solid starting body".to_string()).and_then(|r|self.geographic_start.flight(&sim.universe,r,plan.clone()));
+            if let Err(reason)=&candidate {ui.colored_label(ACCENT,reason);}
+            if ui.add_enabled(candidate.is_ok(),egui::Button::new("Stage these geographic conditions for a recorded study")).clicked() {
+                self.draft=candidate.as_ref().ok().cloned();self.status=Some(format!("Geographic vectors staged at world {:.6} s; reuse this paused world for the same longitude, or explicitly recompute before creation.",sim.universe.time));
+            }
+            if ui.add_enabled(candidate.is_ok() && !sim.is_reference(),egui::Button::new("Create geographic craft at the current world clock")).clicked() {
+                match sim.edit(Edit::CreateVehicle {definition:Box::new(candidate.unwrap())},now) {Ok(_)=>{self.selected_vehicle=sim.universe.vehicles.last().map(|c|c.id);self.arrival_result=None;self.arrival_status=Some("Geographic craft created through an undoable edit using the actual current frame.".into());},Err(e)=>self.arrival_status=Some(e)}
+            }
+        });
+        ui.collapsing("Recorded approach evidence and files",|ui| {
+            ui.label("Uses the complete original flight and starting body; independently resolves every frame. Historical contact keeps its first observed frame.");
+            ui.label("Fresh approach output folder (optional)");ui.text_edit_singleline(&mut self.arrival_output);
+            if ui.add_enabled(!self.pending() && self.result.is_some(),egui::Button::new("Replay approach from retained flight")).clicked() {self.arrival_requested=true;self.start_arrival();}
+            ui.hyperlink_to("JPL NAIF rotation and state transforms","https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/req/rotation.html");
+            ui.label("Relative kinetic energy is not landing-gear force, stability or safety. Source velocity is the derivative of the modeled ephemeris; spherical-contact centre interpolation and overview terrain registration remain approximate.");
+        });
     }
     fn live(&mut self, ui: &mut egui::Ui, sim: &mut Sim, plan: &Plan, now: f64) {
         ui.label(format!(
@@ -535,6 +666,41 @@ impl FlightUi {
         }
     }
 }
+fn arrival_readings(ui: &mut egui::Ui, r: &Approach) {
+    ui.label(format!(
+        "Craft {:.6} s · frame observed at world {:.6} s",
+        r.craft_time_s, r.world_time_s
+    ));
+    ui.label(format!(
+        "Latitude {:.7}° · east longitude {}",
+        r.latitude_deg,
+        r.longitude_east_deg
+            .map(|x| format!("{x:.7}°"))
+            .unwrap_or_else(|| "undefined at pole".into())
+    ));
+    ui.label(format!(
+        "Above sphere {:.6} m · overview terrain clearance {}",
+        r.spherical_altitude_m,
+        r.terrain_clearance_m
+            .map(|x| format!("{x:.6} m"))
+            .unwrap_or_else(|| "unavailable at pole".into())
+    ));
+    ui.label(format!(
+        "Up velocity {:+.6} m/s · horizontal {:.6} m/s · ground-relative speed {:.6} m/s",
+        r.radial_velocity_m_s, r.horizontal_speed_m_s, r.surface_relative_speed_m_s
+    ));
+    ui.label(format!(
+        "Actual mass {:.6} kg · radial kinetic energy {:.6} J · horizontal {:.6} J",
+        r.current_mass_kg, r.radial_kinetic_energy_j, r.horizontal_kinetic_energy_j
+    ));
+    ui.colored_label(
+        ACCENT,
+        "Spherical contact does not establish a terrain landing, attachment or cargo delivery.",
+    );
+    ui.collapsing("Complete rotating frame and terrain support", |ui| {
+        ui.add(egui::Label::new(serde_json::to_string_pretty(r).unwrap()).wrap());
+    });
+}
 fn readings(ui: &mut egui::Ui, f: &Flight, world_time: f64) {
     let p = &f.propulsion;
     let d = &f.definition.plan.definition;
@@ -639,6 +805,13 @@ fn plot(ui: &mut egui::Ui, b: &Bundle, metric: usize, selected: usize) {
 pub fn preflight(args: &crate::args::Args) -> Result<(), String> {
     if let Some(path) = &args.flight_recording {
         let bundle = Bundle::read(Path::new(path))?;
+        if args.panel.as_deref() == Some("vehicle-arrival") || args.arrival_output.is_some() {
+            cosmogon_sim::vehicle_arrival::SurfaceFrame::at(
+                &bundle.origin,
+                bundle.study.flight.parent,
+                bundle.origin.time,
+            )?;
+        }
         if args
             .flight_observation
             .is_some_and(|i| i >= bundle.rows.len())
@@ -653,6 +826,13 @@ pub fn preflight(args: &crate::args::Args) -> Result<(), String> {
                 .ok_or("Flight definition requires its original world")?,
         ))?;
         study.validate(&world)?;
+        if args.panel.as_deref() == Some("vehicle-arrival") || args.arrival_output.is_some() {
+            cosmogon_sim::vehicle_arrival::SurfaceFrame::at(
+                &world,
+                study.flight.parent,
+                world.time,
+            )?;
+        }
         if args.flight_observation.is_some_and(|i| i >= study.samples) {
             return Err("Flight observation is outside the actual definition".into());
         }
@@ -663,6 +843,21 @@ pub fn preflight(args: &crate::args::Args) -> Result<(), String> {
         .is_some_and(|p| Path::new(p.trim()).exists())
     {
         return Err("Existing flight output is protected; choose a new folder".into());
+    }
+    if args
+        .arrival_output
+        .as_ref()
+        .is_some_and(|p| Path::new(p.trim()).exists())
+    {
+        return Err("Existing approach output is protected; choose a new folder".into());
+    }
+    if args
+        .arrival_output
+        .as_ref()
+        .zip(args.flight_output.as_ref())
+        .is_some_and(|(a, b)| Path::new(a.trim()) == Path::new(b.trim()))
+    {
+        return Err("Flight and approach exports need separate fresh folders".into());
     }
     Ok(())
 }
@@ -693,6 +888,47 @@ mod tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
+    }
+    #[test]
+    fn arrival_worker_freezes_exact_source_keeps_drafts_and_preflights_protected_output() {
+        AsyncComputeTaskPool::get_or_init(bevy::tasks::TaskPool::new);
+        let (world, d) = setup();
+        let bundle = Bundle::run(&world, Study::new(&world, d, 5, 1.).unwrap()).unwrap();
+        let root =
+            std::env::temp_dir().join(format!("cosmogon-native-arrival-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        bundle.export(&root.join("flight")).unwrap();
+        let mut form = FlightUi {
+            result: Some(bundle.clone()),
+            opened_directory: Some(root.join("flight").to_string_lossy().into()),
+            arrival_output: root.join("arrival").to_string_lossy().into(),
+            ..Default::default()
+        };
+        form.start_arrival();
+        form.geographic_start.latitude_deg = 23.;
+        finish(&mut form);
+        assert_eq!(form.geographic_start.latitude_deg, 23.);
+        assert_eq!(form.arrival_result.as_ref().unwrap().points.len(), 5);
+        assert_eq!(
+            ArrivalReport::read(&root.join("arrival")).unwrap().manifest,
+            form.arrival_result.as_ref().unwrap().manifest
+        );
+        let mut args = crate::args::Args {
+            flight_recording: Some(root.join("flight").to_string_lossy().into()),
+            arrival_output: Some(root.join("arrival").to_string_lossy().into()),
+            panel: Some("vehicle-arrival".into()),
+            ..Default::default()
+        };
+        assert!(preflight(&args).is_err());
+        args.arrival_output = Some(root.join("new").to_string_lossy().into());
+        assert!(preflight(&args).is_ok());
+        std::fs::write(root.join("flight/observations.json"), "[]").unwrap();
+        form.arrival_output = root.join("refused").to_string_lossy().into();
+        form.start_arrival();
+        finish(&mut form);
+        assert!(!root.join("refused").exists());
+        assert!(form.arrival_status.as_ref().unwrap().contains("failed"));
+        std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn flight_workers_pin_world_and_controls_preserve_later_drafts_and_cancel_failed_exports() {

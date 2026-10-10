@@ -1,3 +1,7 @@
+## Unreleased — rotating vehicle arrival
+
+- Add rotating spacecraft approach frames, derivative-aware geographic initial conditions and original-branch approach recordings with native/CLI exact evidence, finite mass/energy, historical contact frames and explicit pole/terrain support. World/save/physics/old flight formats and golden are unchanged; terrain touchdown/gear response, delivery and graphics remain incomplete.
+
 ## Unreleased — physical finite vehicle flight
 
 - Connect authored finite propellant/cargo to optional actual world spacecraft, fixed deterministic gravity/variable-mass motion, explicit spherical first contacts and retained unsupported-state reasons. Ordinary create/remove edits, undo/redo, saves and model/source pins share the authoritative world.

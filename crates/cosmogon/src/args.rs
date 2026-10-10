@@ -38,6 +38,7 @@ pub struct Args {
     pub flight_origin:Option<String>,
     pub flight_recording:Option<String>,
     pub flight_output:Option<String>,
+    pub arrival_output:Option<String>,
     pub flight_observation:Option<usize>,
     pub vehicle_plan:Option<String>,
     pub vehicle_recording:Option<String>,
@@ -196,6 +197,7 @@ impl Args {
                 "--flight-origin" => a.flight_origin=Some(val()),
                 "--flight-recording" => a.flight_recording=Some(val()),
                 "--flight-output" => a.flight_output=Some(val()),
+                "--arrival-output" => a.arrival_output=Some(val()),
                 "--flight-observation" => a.flight_observation=Some(val().parse().unwrap_or(usize::MAX)),
                 "--vehicle-plan" => a.vehicle_plan=Some(val()),
                 "--vehicle-recording" => a.vehicle_recording=Some(val()),
@@ -246,13 +248,13 @@ impl Args {
     }
 
     fn validate_surface(&self) -> Result<(), String> {
-        for (value,label) in [(&self.flight_definition,"flight definition"),(&self.flight_origin,"flight original world"),(&self.flight_recording,"flight recording"),(&self.flight_output,"new flight output")] {
+        for (value,label) in [(&self.flight_definition,"flight definition"),(&self.flight_origin,"flight original world"),(&self.flight_recording,"flight recording"),(&self.flight_output,"new flight output"),(&self.arrival_output,"new approach output")] {
             if value.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err(format!("Choose a nonempty {label} path"));}
         }
         let flight=self.flight_definition.is_some() || self.flight_recording.is_some();
         if self.flight_definition.is_some() && self.flight_recording.is_some() {return Err("Choose one pinned flight definition or complete flight recording".into());}
         if self.flight_definition.is_some() != self.flight_origin.is_some() {return Err("A flight definition requires its exact --flight-origin world; origin alone is not a study".into());}
-        if (self.flight_output.is_some() || self.flight_observation.is_some()) && !flight {return Err("Flight output/observation requires an explicit definition and origin or complete recording".into());}
+        if (self.flight_output.is_some() || self.arrival_output.is_some() || self.flight_observation.is_some()) && !flight {return Err("Flight output/observation requires an explicit definition and origin or complete recording".into());}
         if self.flight_observation.is_some_and(|i|i>=4096) {return Err("Flight observation must be an integer inside the actual 0–4095 recording bounds".into());}
         if flight && (self.vehicle_plan.is_some() || self.vehicle_recording.is_some() || self.menu.is_some() || self.habitat_audio_export.is_some() || self.habitat_definition.is_some() || self.habitat_sweep.is_some() || self.habitat_recording.is_some() || self.greenhouse_definition.is_some() || self.crop_chemistry.is_some() || self.greenhouse_supplies.is_some() || self.research_recording.is_some() || self.research_export.is_some() || self.research_batch.is_some() || self.terrain_section.is_some()) {return Err("Choose one automated flight, propulsion, cabin or research workspace".into());}
         for (value,label) in [(&self.vehicle_plan,"vehicle plan"),(&self.vehicle_recording,"vehicle recording"),(&self.vehicle_output,"new vehicle output")] {
@@ -448,6 +450,11 @@ mod tests {
         assert!(Args::parse_from(["--habitat-sweep","p","--load","s","--habitat-study-output","o","--habitat-sample","24"].into_iter().map(String::from)).validate_surface().is_ok());
     }
 
+    #[test]
+    fn arrival_outputs_need_explicit_flight_inputs_and_nonempty_paths() {
+        for flags in [vec!["--arrival-output","new"],vec!["--flight-recording","r","--arrival-output"," "]] {assert!(Args::parse_from(flags.into_iter().map(String::from)).validate_surface().is_err());}
+        let args=Args::parse_from(["--flight-recording","r","--arrival-output","new","--panel","vehicle-arrival"].into_iter().map(String::from));assert!(args.validate_surface().is_ok());assert_eq!(args.arrival_output.as_deref(),Some("new"));
+    }
     #[test]
     fn flight_launches_require_exact_origins_and_refuse_ignored_controls() {
         for flags in [vec!["--flight-definition",""],vec!["--flight-definition","d"],vec!["--flight-origin","s"],vec!["--flight-recording"," "],vec!["--flight-output","new"],vec!["--flight-observation","0"],vec!["--flight-recording","r","--flight-definition","d","--flight-origin","s"],vec!["--flight-recording","r","--flight-observation","NaN"],vec!["--flight-recording","r","--flight-observation","4096"],vec!["--flight-recording","r","--vehicle-plan","p"],vec!["--flight-recording","r","--habitat-recording","h"],vec!["--flight-recording","r","--menu","new"]] {

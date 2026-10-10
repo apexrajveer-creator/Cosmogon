@@ -1,5 +1,7 @@
 # Cosmogon
 
+Development now includes [rotating spacecraft approach](docs/VEHICLE_ARRIVAL.md): geographic starts, ground-relative motion and independently replayed approach evidence. Physical terrain touchdown and cargo delivery remain in development.
+
 **A free universe sandbox that remembers.** Throw planets and black holes, watch stars live and die, pull
 back from a city street to the cosmic web — and see what happens to the people. Start from the real Solar
 System (NASA/JPL data); every change runs through orbits, climate, life and civilizations that discover

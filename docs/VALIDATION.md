@@ -116,3 +116,6 @@ Finite supply-vehicle checkpoint (2026-10-10): **446 passed plus one existing ig
 
 
 Physical finite world-flight checkpoint (2026-10-10): **467 passed plus one existing ignored**, 63 distinct cases, nine inspected packaged layouts, six required checks and a 48.296151-second ordinary packaged run. [Evidence and limits](WORLD_VEHICLE_FLIGHT_VALIDATION.md). Enabled craft state changes with model pins; absent legacy golden remains `0xf2c4140a45ae509b`. Landing, delivery, graphics and the full directive remain incomplete.
+
+
+Rotating vehicle arrival checkpoint (2026-10-10): **479 passed plus one existing ignored**, 50 distinct cases, six inspected packaged layouts, six required checks and a 48.312429-second ordinary packaged run. [Evidence and limits](VEHICLE_ARRIVAL_VALIDATION.md). Exact prior flight/propulsion evidence, world/save/physics and golden remain unchanged; landing/delivery, graphics and the full directive remain incomplete.
