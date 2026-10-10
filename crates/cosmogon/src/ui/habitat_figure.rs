@@ -51,6 +51,7 @@ impl View {
         self.request = Some(
             json!({"output":output,"layout":figure.layout,"mode":figure.mode,"source_summaries":figure.source_summaries,"scope":"Actual immutable inputs captured when export was requested; current display choices may subsequently differ"}),
         );
+        if let Some(context)=&figure.single_design_context {if let Some(request)=&mut self.request {request["single_design_context"]=context.clone();}}
         self.complete = None;
         self.task = Some(
             AsyncComputeTaskPool::get()

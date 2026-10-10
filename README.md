@@ -152,3 +152,5 @@ Finite installed crop engineering, actual material/electric/heat evidence and ex
 Actual installed crop recordings support selected resource/production/energy graphs, exact-time comparisons and protected research figures; [recorded crop guide](docs/RECORDED_CROP_TRAJECTORIES.md). Supported source progress remains separate from biological age.
 
 Controlled installed crop experiment controls and exact saved response catalogs: [guide](docs/CONTROLLED_CROP_STUDIES.md), [design](docs/CONTROLLED_CROP_STUDIES_DESIGN.md).
+
+Complete saved single-setting studies retain every branch and support selected comparisons, exact figures and independent whole-design replay: [guide](docs/SAVED_SINGLE_HABITAT_DESIGNS.md). CLI `--branches A,B` selects single-design figure inputs; native `--habitat-branches A,B` selects actual retained branches.

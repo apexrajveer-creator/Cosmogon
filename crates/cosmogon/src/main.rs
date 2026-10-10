@@ -76,11 +76,23 @@ fn main() -> bevy::app::AppExit {
         let path=std::path::Path::new(args.habitat_recording.as_deref().expect("validated pressure recording"));
         if let Err(e)=ui::habitat_recordings::check_input(path,Some(index)) {eprintln!("Cannot select pressure reference: {e}");return AppExit::error();}
     }
+    if let Some(selection)=&args.habitat_branches {
+        let checked=(||->Result<(),String>{
+            let pair=cosmogon_sim::habitat_design::parse_branches(selection)?;
+            let plan=if let Some(path)=&args.habitat_recording {
+                let d=cosmogon_sim::habitat_design::read_single(std::path::Path::new(path))?;d.selected(pair[0],pair[1])?;d.plan()?
+            }else{cosmogon_sim::habitat_sweep::Plan::read(std::path::Path::new(args.habitat_sweep.as_deref().expect("validated plan")))?};
+            if plan.secondary.is_some() || pair.iter().any(|i|*i>=plan.branch_count()){return Err("Branches require indices inside a single-setting design/plan".into());}Ok(())
+        })();
+        if let Err(e)=checked{eprintln!("Cannot select saved branches: {e}");return AppExit::error();}
+    }
     if args.habitat_effect.is_some() || args.habitat_verify {
-        let paired=if let Some(path)=&args.habitat_recording {cosmogon_sim::habitat_factorial::read(std::path::Path::new(path)).map(|_|())}
-        else if let Some(path)=&args.habitat_sweep {cosmogon_sim::habitat_sweep::Plan::read(std::path::Path::new(path)).and_then(|p|if p.secondary.is_some(){Ok(())}else{Err("Paired effect/replay selection requires a paired plan".into())})}
-        else {Err("Paired effect/replay selection requires a complete paired design or paired plan".into())};
-        if let Err(e)=paired {eprintln!("Cannot select paired analysis: {e}");return AppExit::error();}
+        let checked=(||->Result<(),String>{
+            let plan=if let Some(path)=&args.habitat_recording {cosmogon_sim::habitat_design::read(std::path::Path::new(path))?.plan()?}
+                else {cosmogon_sim::habitat_sweep::Plan::read(std::path::Path::new(args.habitat_sweep.as_deref().ok_or("Verification requires a complete design or plan")?))?};
+            if args.habitat_effect.is_some() && plan.secondary.is_none(){return Err("Paired effects require a paired plan".into());}Ok(())
+        })();
+        if let Err(e)=checked {eprintln!("Cannot select saved analysis: {e}");return AppExit::error();}
     }
     // Reject invalid automated inputs before starting the renderer. Early GPU teardown
     // can otherwise wait for a render task that still needs the main-thread executor.

@@ -223,3 +223,5 @@ Finite installed crop setup, strict CLI harvest and packaged `habitat-crop` pane
 Recorded actual crop trajectories use explicit `crop_progress`, dry stock, feed/product/electricity and optional signed heat-debit selections in ordinary/paired graphs and protected figures. Saved aggregate catalogs remain unchanged. See [guide](docs/RECORDED_CROP_TRAJECTORIES.md).
 
 Controlled installed crop experiment controls and exact saved response catalogs: [guide](docs/CONTROLLED_CROP_STUDIES.md), [design](docs/CONTROLLED_CROP_STUDIES_DESIGN.md).
+
+Complete saved single-setting studies retain every branch and support selected comparisons, exact figures and independent whole-design replay: [guide](docs/SAVED_SINGLE_HABITAT_DESIGNS.md). CLI `--branches A,B` selects single-design figure inputs; native `--habitat-branches A,B` selects actual retained branches.

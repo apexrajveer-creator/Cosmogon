@@ -1,5 +1,7 @@
-//! Recompute a saved four-branch design. Reproducibility is not empirical validation.
-use crate::{habitat, habitat_factorial, research, sandbox::Edit, save};
+//! Recompute every branch of a complete saved design. Reproducibility is not empirical validation.
+use crate::{habitat, research, sandbox::Edit, save};
+#[cfg(test)]
+use crate::habitat_factorial;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{path::Path, time::Duration};
@@ -83,9 +85,9 @@ pub fn verify_with(
     path: &Path,
     mut progress: impl FnMut(Progress) -> Result<(), String>,
 ) -> Result<Value, String> {
-    let design = habitat_factorial::read(path)?;
+    let design = crate::habitat_design::read(path)?;
     let plan = design.plan()?;
-    let id = design.manifest["habitat_id"]
+    let id = design.manifest()["habitat_id"]
         .as_u64()
         .ok_or("Missing habitat identity")?;
     let base = save::from_json(&crate::habitat_recording::read(
@@ -102,13 +104,13 @@ pub fn verify_with(
         .definition
         .body
         .system;
-    let total_rows = plan.samples * 4;
+    let total_rows = plan.samples * plan.branch_count();
     let mut checked_rows = 0;
     let mut mismatched_rows = 0;
     let mut mismatches = Vec::new();
     let mut branches = Vec::new();
     for (branch, config) in configurations.into_iter().enumerate() {
-        let stored = &design.recordings[branch];
+        let stored = &design.recordings()[branch];
         let mut world = base.clone();
         world.apply_edit(Edit::ConfigureHabitat {
             system,
@@ -184,8 +186,8 @@ pub fn verify_with(
     let verified = branches.iter().all(|b| b["verified"] == true);
     Ok(
         json!({"format":"cosmogon-habitat-replay-verification","schema_version":1,"complete":true,"verified":verified,
-        "engine_version":env!("CARGO_PKG_VERSION"),"methodological_context":{"source":METHODOLOGY_SOURCE,"version":"NASA-STD-7009B 5 March 2024","sections":"4.2.3–4.2.6, Appendix E.3.3–E.3.4","scope":"Verification/validation distinction motivates explicit evidence/scope; this replay mechanism is an engineering reproducibility test, not a claim of NASA-standard compliance"},"plan":plan,"habitat_id":id,"common_state_fingerprint":design.manifest["common_state_fingerprint"],
-        "common_data_versions":design.manifest["common_data_versions"],"recordings":design.recordings.iter().map(|r|&r.summary).collect::<Vec<_>>(),
+        "engine_version":env!("CARGO_PKG_VERSION"),"methodological_context":{"source":METHODOLOGY_SOURCE,"version":"NASA-STD-7009B 5 March 2024","sections":"4.2.3–4.2.6, Appendix E.3.3–E.3.4","scope":"Verification/validation distinction motivates explicit evidence/scope; this replay mechanism is an engineering reproducibility test, not a claim of NASA-standard compliance"},"plan":plan,"habitat_id":id,"common_state_fingerprint":design.manifest()["common_state_fingerprint"],
+        "common_data_versions":design.manifest()["common_data_versions"],"recordings":design.recordings().iter().map(|r|&r.summary).collect::<Vec<_>>(),
         "checked_rows":checked_rows,"total_rows":total_rows,"matched_rows":checked_rows-mismatched_rows,"sample_mismatch_count":mismatched_rows,
         "branches":branches,"mismatches":mismatches,"mismatch_details_limit":16,"diagnostic_preview_scope":"Up to eight fields per differing observation; long text/compound values use bounded previews. Exact comparison uses complete canonical typed samples.",
         "method":"Reopen the source-pinned common world; apply each ordinary configuration edit; recompute fixed scheduler steps at every exact plan time; compare complete canonical Sample bytes and initial/final Universe fingerprints/source versions. Original observations remain read-only.",

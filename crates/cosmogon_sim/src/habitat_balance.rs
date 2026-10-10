@@ -349,16 +349,16 @@ impl Bundle {
     }
     pub fn read(path: &Path, from: Option<usize>, to: Option<usize>) -> Result<Self, String> {
         if path.join("plan.json").exists() {
-            let d = crate::habitat_factorial::read(path)?;
-            let last = d
-                .recordings
-                .first()
-                .ok_or("No recorded branches")?
-                .rows
-                .len()
-                .checked_sub(1)
-                .ok_or("No stored observations")?;
-            Self::paired(&d, from.unwrap_or(0), to.unwrap_or(last))
+            match crate::habitat_design::read(path)? {
+                crate::habitat_design::Design::Paired(d)=>{
+                    let last=d.recordings[0].rows.len()-1;
+                    Self::paired(&d,from.unwrap_or(0),to.unwrap_or(last))
+                },
+                crate::habitat_design::Design::Single(d)=>{
+                    let r=&d.recordings[0];
+                    Self::ordinary(r,from.unwrap_or(0),to.unwrap_or(r.rows.len()-1))
+                },
+            }
         } else {
             let r = Recording::read(path)?;
             let last = r

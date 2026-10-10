@@ -1,3 +1,8 @@
+## Unreleased — complete saved single-setting habitat designs
+
+- Reopen all independent common-state branches with strict plan/source/edit/time/catalog checks, actual branch choices, restored fresh-output controls and protected all-branch trajectories/selected figures.
+- Independently replay every retained branch and observation through shared native/CLI tools; preserve old paired reports and ordinary figure serialization, solver/saves and golden. Long paired setting descriptions wrap within the pane.
+
 ## Unreleased — controlled installed crop studies
 
 - Four typed ordinary-edit controls for ideal chamber assumptions, auxiliary power and finite dry/shared oxygen capacity; exact retained original state, strict boolean/no-discard preflight and plan-dependent actual crop responses.

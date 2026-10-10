@@ -42,6 +42,8 @@ pub struct Figure {
     pub heat_trajectory_context: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub crop_trajectory_context: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub single_design_context: Option<Value>,
     pub limits: &'static str,
 }
 impl Figure {
@@ -113,6 +115,7 @@ impl Figure {
                 .is_heat()
                 .then(|| crate::habitat_heat_trajectory::context(&recordings)),
             crop_trajectory_context: metric.has_crop_context().then(|| crate::habitat_crop_trajectory::context(&recordings)),
+            single_design_context: None,
             limits: LIMITS,
         })
     }
@@ -177,6 +180,7 @@ impl Figure {
                 crate::habitat_heat_trajectory::context(&d.recordings.iter().collect::<Vec<_>>())
             }),
             crop_trajectory_context: metric.has_crop_context().then(|| crate::habitat_crop_trajectory::context(&d.recordings.iter().collect::<Vec<_>>())),
+            single_design_context: None,
             limits: LIMITS,
         })
     }
@@ -187,9 +191,12 @@ impl Figure {
     ) -> Result<Self, String> {
         if recording.join("plan.json").exists() {
             if reference.is_some() {
-                return Err("Paired figures use the actual four design branches; an extra reference is not supported".into());
+                return Err("Design figures use their retained branches; an extra reference is not supported".into());
             }
-            Self::paired(&crate::habitat_factorial::read(recording)?, layout)
+            match crate::habitat_design::read(recording)? {
+                crate::habitat_design::Design::Paired(d) => Self::paired(&d,layout),
+                crate::habitat_design::Design::Single(d) => d.figure(0,d.recordings.len()-1,layout),
+            }
         } else {
             let a = Recording::read(recording)?;
             let b = reference.map(Recording::read).transpose()?;
@@ -272,9 +279,11 @@ impl Figure {
             out.push_str(&xml(crate::habitat_heat_trajectory::SCOPE));
         }
         if self.crop_trajectory_context.is_some() { out.push_str(&xml(crate::habitat_crop_trajectory::SCOPE)); }
+        if self.single_design_context.is_some() {out.push_str(" Selected independent single-setting branches; typed setting/unit, complete plan and common source identity are in figure.json.");}
         out.push_str("</desc>");
         let mut metadata=json!({"format":self.format,"schema_version":self.schema_version,"layout":self.layout,"mode":self.mode,"source_summaries":self.source_summaries,"full_inputs":"figure.json","numeric_values":"points.csv","heat_trajectory_context":self.heat_trajectory_context});
         if let Some(c)=&self.crop_trajectory_context {metadata["crop_trajectory_context"]=c.clone();}
+        if let Some(c)=&self.single_design_context {metadata["single_design_context"]=c.clone();}
         let _=write!(out,"<metadata>{}</metadata>",xml(&metadata.to_string()));
         out.push_str("<rect width=\"1000\" height=\"720\" fill=\"white\"/><g font-family=\"sans-serif\" fill=\"#18212c\">");
         text(&mut out, 110., 38., 24., "start", self.metric);
@@ -450,6 +459,11 @@ impl Figure {
         );
         text(&mut out,110.,658.,13.,"start","Source/model identity, exact inputs and assumptions: figure.json; original numbers: points.csv.");
         text(&mut out,110.,681.,13.,"start","Model sensitivity only; no measured-hardware accuracy or predictive uncertainty claimed.");
+        if let Some(context)=&self.single_design_context {
+            let name=context["manifest"]["parameter"].as_str().and_then(|id|crate::habitat_sweep::Parameter::parse(id).ok()).map(|p|p.label()).unwrap_or("saved setting");
+            let unit=context["manifest"]["unit"].as_str().unwrap_or("");
+            text(&mut out,110.,704.,12.,"start",&format!("Varied setting: {name} ({unit}); branch values are in the legend."));
+        }
         out.push_str("</g></svg>\n");
         out
     }

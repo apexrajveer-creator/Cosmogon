@@ -50,6 +50,7 @@ pub struct Args {
     pub habitat_verify: bool,
     pub habitat_graph: Option<String>,
     pub habitat_sample: Option<usize>,
+    pub habitat_branches: Option<String>,
     pub habitat_pressure_reference:Option<usize>,
     pub greenhouse_definition: Option<String>,
     pub crop_chemistry: Option<String>,
@@ -169,6 +170,7 @@ impl Args {
                 "--habitat-graph" => a.habitat_graph=Some(val()),
                 "--habitat-verify" => a.habitat_verify=true,
                 "--habitat-pressure-reference" => {a.habitat_pressure_reference=Some(val().parse().unwrap_or(usize::MAX));},
+                "--habitat-branches" => a.habitat_branches=Some(val()),
                 "--habitat-sample" => {let v=val();a.habitat_sample=Some(v.parse().unwrap_or(usize::MAX));},
                 "--crop-chemistry" => a.crop_chemistry=Some(val()),
                 "--crop-chemistry-output" => a.crop_chemistry_output=Some(val()),
@@ -272,6 +274,10 @@ impl Args {
         if let Some(metric)=&self.habitat_metric {cosmogon_sim::habitat_recording::Metric::parse(metric)?;}
         if self.habitat_pressure_reference.is_some() && self.habitat_recording.is_none() {return Err("--habitat-pressure-reference requires --habitat-recording".into());}
         if self.habitat_pressure_reference.is_some_and(|n|n>=1024) {return Err("--habitat-pressure-reference must be an index between 0 and 1023".into());}
+        if let Some(branches)=&self.habitat_branches {
+            cosmogon_sim::habitat_design::parse_branches(branches)?;
+            if self.habitat_compare.is_some() || self.habitat_recording.is_none() && self.habitat_sweep.is_none() {return Err("--habitat-branches requires a single-setting design/plan without an external comparison".into());}
+        }
         if self.habitat_sample.is_some_and(|n|n>=1024) {return Err("--habitat-sample must be an index between 0 and 1023".into());}
 
         if self.mars_terrain.as_deref().is_some_and(|v|!matches!(v,"4"|"16")) {return Err("--mars-terrain requires 4 or 16 pixels per degree".into());}

@@ -23,6 +23,7 @@ struct Args {
     output: Option<String>,
     initial: Option<String>,
     recording: Option<String>,
+    branches: Option<[usize;2]>,
     observation: Option<usize>,
     reference_index: Option<usize>,
     from_index: Option<usize>,
@@ -65,6 +66,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         output: None,
         initial: None,
         recording: None,
+        branches: None,
         observation: None,
         reference_index: None,
         from_index: None,
@@ -126,7 +128,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if matches!(a.cmd.as_str(),"habitat-diagnose"|"habitat-crop-harvest") && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
         if a.cmd=="habitat-verify" && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a habitat replay verification option"));}
         if a.cmd=="habitat-balance" && !matches!(flag.as_str(),"--recording"|"--from-index"|"--observation"|"--output") {return Err(format!("{flag} is not a recorded balance option"));}
-        if a.cmd=="habitat-figure" && !matches!(flag.as_str(),"--recording"|"--reference"|"--definition"|"--output") {return Err(format!("{flag} is not a recorded figure option"));}
+        if a.cmd=="habitat-figure" && !matches!(flag.as_str(),"--recording"|"--reference"|"--definition"|"--output"|"--branches") {return Err(format!("{flag} is not a recorded figure option"));}
         if a.cmd=="habitat-pressure" && !matches!(flag.as_str(),"--recording"|"--observation"|"--reference-index"|"--output") {return Err(format!("{flag} is not a recorded pressure option"));}
         if a.cmd=="habitat-inspect" && !matches!(flag.as_str(),"--recording"|"--observation"|"--output") {return Err(format!("{flag} is not a habitat inspection option"));}
         if a.cmd=="habitat" && !matches!(flag.as_str(),"--definition"|"--habitat-id"|"--initial"|"--output"|"--samples"|"--interval-days"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat study option"));}
@@ -151,6 +153,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--latitude" => { a.latitude = number(val()?, &flag)?; explicit_coordinates = true; },
             "--longitude" => { a.longitude = number(val()?, &flag)?; explicit_coordinates = true; },
             "--reference" => a.reference = Some(val()?),
+            "--branches" => {if a.cmd!="habitat-figure"{return Err("--branches requires habitat-figure with a saved single-setting design".into());}a.branches=Some(cosmogon_sim::habitat_design::parse_branches(&val()?)?);},
             "--recording" => a.recording = Some(val()?),
             "--observation" => {if !matches!(a.cmd.as_str(),"habitat-inspect"|"habitat-pressure"|"habitat-balance") {return Err("--observation requires habitat-inspect or habitat-pressure".into());}let n=number::<usize>(val()?,&flag)?;if n>=1024 {return Err("Observation index must be between 0 and 1023".into());}a.observation=Some(n);},
             "--from-index" => {if a.cmd!="habitat-balance" {return Err("--from-index requires habitat-balance".into());} let n=number::<usize>(val()?,&flag)?;if n>=1024{return Err("Initial index must be between 0 and 1023".into());}a.from_index=Some(n);},
@@ -403,7 +406,11 @@ fn main() {
         }
         "habitat-figure" => {
             let result=(|| {let layout=cosmogon_sim::habitat_graph::Layout::read(std::path::Path::new(a.definition.as_deref().expect("validated layout")))?;
-                let figure=cosmogon_sim::habitat_figure::Figure::read(std::path::Path::new(a.recording.as_deref().expect("validated recording")),a.reference.as_deref().map(std::path::Path::new),&layout)?;
+                let recording=std::path::Path::new(a.recording.as_deref().expect("validated recording"));
+                let figure=if let Some([left,right])=a.branches {
+                    if a.reference.is_some(){return Err("Design branch selection does not accept an external reference".into());}
+                    cosmogon_sim::habitat_design::read_single(recording)?.figure(left,right,&layout)?
+                } else {cosmogon_sim::habitat_figure::Figure::read(recording,a.reference.as_deref().map(std::path::Path::new),&layout)?};
                 figure.export(std::path::Path::new(a.output.as_deref().expect("validated output")))})();
             match result {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).unwrap()),Err(e)=>{eprintln!("Recorded figure failed: {e}");std::process::exit(1);}}
         },
@@ -810,10 +817,18 @@ fn habitat_pressure(a:&Args)->Result<serde_json::Value,String> {
 fn habitat_inspect(a:&Args)->Result<serde_json::Value,String> {
     let path=std::path::Path::new(a.recording.as_deref().expect("validated recording"));
     if path.join("plan.json").exists() {
-        let design=cosmogon_sim::habitat_factorial::read(path)?;
-        let report=if let Some(index)=a.observation {design.report_at(index)?} else {design.analysis.clone()};
-        if let Some(output)=&a.output {design.export_trajectories(std::path::Path::new(output))?;}
-        Ok(report)
+        match cosmogon_sim::habitat_design::read(path)? {
+            cosmogon_sim::habitat_design::Design::Paired(design)=>{
+                let report=if let Some(index)=a.observation {design.report_at(index)?} else {design.analysis.clone()};
+                if let Some(output)=&a.output {design.export_trajectories(std::path::Path::new(output))?;}
+                Ok(report)
+            },
+            cosmogon_sim::habitat_design::Design::Single(design)=>{
+                let report=if let Some(index)=a.observation {design.report_at(index)?} else {design.manifest.clone()};
+                if let Some(output)=&a.output {design.export_trajectories(std::path::Path::new(output))?;}
+                Ok(report)
+            },
+        }
     } else {
         if a.observation.is_some() || a.output.is_some() {return Err("--observation/--output require a complete paired design folder".into());}
         Ok(cosmogon_sim::habitat_recording::Recording::read(path)?.summary)

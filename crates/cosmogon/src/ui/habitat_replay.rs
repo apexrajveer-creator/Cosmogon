@@ -56,7 +56,7 @@ impl View {
             })
         }));
         self.status = Some(
-            "Reopening pinned sources and independently recomputing all four branches…".into(),
+            "Reopening pinned sources and independently recomputing all retained branches…".into(),
         );
     }
     pub fn poll(&mut self) {
@@ -90,7 +90,7 @@ impl View {
             if ui
                 .add_enabled(
                     !other_pending && !self.pending(),
-                    egui::Button::new("Verify all four branches"),
+                    egui::Button::new("Verify all retained branches"),
                 )
                 .clicked()
             {

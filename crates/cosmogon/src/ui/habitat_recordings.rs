@@ -17,15 +17,20 @@ fn parse_levels(s: &str) -> Result<Vec<f64>,String> {
     s.split(',').map(|s|s.trim().parse::<f64>().map_err(|_|"Enter finite comma-separated values".into())).collect()
 }
 pub fn check_input(path: &std::path::Path,sample: Option<usize>) -> Result<(),String> {
-    let count=if path.join("plan.json").exists() {cosmogon_sim::habitat_factorial::read(path)?.recordings[0].rows.len()} else {Recording::read(path)?.rows.len()};
+    let count=if path.join("plan.json").exists() {cosmogon_sim::habitat_design::read(path)?.recordings()[0].rows.len()} else {Recording::read(path)?.rows.len()};
     if sample.is_some_and(|i|i>=count) {return Err("Requested habitat observation is outside the recording".into());}
     Ok(())
 }
 fn open_design(location:std::path::PathBuf,path:String,sample:Option<usize>) -> Result<SweepResult,String> {
-    let design=cosmogon_sim::habitat_factorial::read(&location)?;
-    let a=design.recordings[0].clone();
-    let b=design.recordings[3].clone();
-    Ok(SweepResult {a,b,manifest:design.manifest.clone(),paired:Some(design),path,sample})
+    let design=cosmogon_sim::habitat_design::read(&location)?;
+    let a=design.recordings()[0].clone();
+    let b=design.recordings().last().ok_or("Empty design")?.clone();
+    let manifest=design.manifest().clone();
+    let (single,paired)=match design {
+        cosmogon_sim::habitat_design::Design::Single(d)=>(Some(d),None),
+        cosmogon_sim::habitat_design::Design::Paired(d)=>(None,Some(d)),
+    };
+    Ok(SweepResult {a,b,manifest,paired,single,path,sample})
 }
 pub struct Launch {
     pub plan: Plan,
@@ -41,26 +46,15 @@ fn run_sweep(
     path: String,
     sample: Option<usize>,
 ) -> Result<SweepResult, String> {
-    let manifest = habitat_sweep::execute(&base, id, &plan, std::path::Path::new(&path))?;
-    if plan.secondary.is_some() { return open_design(std::path::PathBuf::from(&path),path,sample); }
-    let a = Recording::read(&std::path::Path::new(&path).join("run-000"))?;
-    let b = Recording::read(
-        &std::path::Path::new(&path).join(format!("run-{:03}", plan.branch_count() - 1)),
-    )?;
-    Ok(SweepResult {
-        a,
-        b,
-        manifest,
-        paired:None,
-        path,
-        sample,
-    })
+    habitat_sweep::execute(&base, id, &plan, std::path::Path::new(&path))?;
+    open_design(std::path::PathBuf::from(&path),path,sample)
 }
 struct SweepResult {
     a: Recording,
     b: Recording,
     manifest: serde_json::Value,
     paired: Option<Design>,
+    single: Option<cosmogon_sim::habitat_design::Single>,
     path: String,
     sample: Option<usize>,
 }
@@ -99,6 +93,9 @@ pub struct Study {
     pub paired_pane: usize,
     pub effect: Effect,
     paired: Option<Design>,
+    single: Option<cosmogon_sim::habitat_design::Single>,
+    single_source: String,
+    branches: [usize;2],
     paired_curve: Option<(Metric, Vec<Point>)>,
     paired_output: String,
     paired_source: String,
@@ -123,6 +120,7 @@ pub struct Study {
     sweep: SweepForm,
     pub sweep_manifest: Option<serde_json::Value>,
     pub launch: Option<Launch>,
+    pub requested_branches: Option<[usize;2]>,
     pub metric: Metric,
     pub selected: usize,
     path: String,
@@ -151,9 +149,8 @@ impl Study {
     pub fn start(&mut self, path: String, sample: Option<usize>) {
         let location = std::path::PathBuf::from(&path);
         if location.join("plan.json").exists() {
-            self.factorial_mode = true;
             self.sweep_task=Some(AsyncComputeTaskPool::get().spawn(async move {open_design(location,path,sample)}));
-            self.status=Some("Checking all four common-state branches and response analysis…".into());
+            self.status=Some("Checking all retained common-state branches and design identity…".into());
             return;
         }
         self.task =
@@ -224,7 +221,7 @@ impl Study {
             }
         }
     }
-    fn commit_sweep(&mut self, result: SweepResult) -> Result<(), String> {
+    fn commit_sweep(&mut self, mut result: SweepResult) -> Result<(), String> {
         let index = result.sample.unwrap_or(0);
         if index >= result.a.rows.len() {
             return Err("Requested observation index is outside the completed sweep".into());
@@ -234,10 +231,15 @@ impl Study {
             .filter(|runs| runs.len() >= 2)
             .ok_or("Missing completed runs")?
             .len();
+        let branches=self.requested_branches.unwrap_or([0,count-1]);
+        if let Some(pair)=self.requested_branches {
+            let d=result.single.as_ref().ok_or("Branch selection requires a single-setting design")?;
+            let (a,b)=d.selected(pair[0],pair[1])?;result.a=a.clone();result.b=b.clone();
+        }
         // Keep all four actual recordings. First/last copies preserve the existing comparison API.
         let curve=result.paired.as_ref().map(|d|d.curve(self.metric)).transpose()?;
-        let path = format!("{}/run-000", result.path);
-        let comparison_path = format!("{}/run-{:03}", result.path, count - 1);
+        let path = format!("{}/run-{:03}", result.path,branches[0]);
+        let comparison_path = format!("{}/run-{:03}", result.path, branches[1]);
         self.loaded_path=path.clone();
         self.path = path;
         self.comparison_path = comparison_path;
@@ -260,15 +262,19 @@ impl Study {
         self.recording = Some(result.a);
         self.comparison = Some(result.b);
         self.selected = index;
-        self.factorial_mode = (self.factorial_mode || self.graph_mode) && result.manifest["factorial_analysis"].is_object();
+        self.factorial_mode = result.paired.is_some();
         self.paired_curve=curve.map(|points|(self.metric,points));
         self.replay.reset();
         self.paired_source=if result.paired.is_some() {result.path.clone()}else{String::new()};
+        self.single_source=if result.single.is_some(){result.path.clone()}else{String::new()};
+        self.branches=branches;
+        self.requested_branches=None;
+        self.single=result.single;
         self.paired=result.paired;
         self.sweep_manifest = Some(result.manifest);
         self.status = Some(format!(
-            "Completed sweep in {}. First and last runs opened; every branch is retained.",
-            result.path
+            "Completed sweep in {}. Runs {} and {} opened; every branch is retained.",
+            result.path,branches[0],branches[1]
         ));
         Ok(())
     }
@@ -279,7 +285,7 @@ impl Study {
         }
         self.balance.reset();
         self.sweep_manifest = None;
-        self.paired=None;self.paired_curve=None;self.replay.reset();
+        self.paired=None;self.single=None;self.single_source.clear();self.paired_curve=None;self.replay.reset();
         self.factorial_mode = false;
         self.recording = Some(r);
         self.loaded_path=path.clone();
@@ -321,7 +327,7 @@ impl Study {
                 Ok(r) => {
                     self.balance.reset();
                     self.sweep_manifest = None;
-                    self.paired=None;self.paired_curve=None;self.replay.reset();
+                    self.paired=None;self.single=None;self.single_source.clear();self.paired_curve=None;self.replay.reset();
                     self.factorial_mode = false;
                     self.comparison = Some(r);
                     self.comparison_path = self.pending_comparison_path.clone();
@@ -351,8 +357,8 @@ impl Study {
         if self.figure.launch && self.launch.is_none() && self.task.is_none() && self.sweep_task.is_none() && self.comparison_task.is_none() {
             let figure=self.prepare_figure();self.figure.start(figure);
         }
-        if self.replay.launch && self.paired.is_some() && self.task.is_none() && self.comparison_task.is_none() && self.sweep_task.is_none() {
-            self.replay.start(self.paired_source.clone());
+        if self.replay.launch && (self.paired.is_some() || self.single.is_some()) && self.task.is_none() && self.comparison_task.is_none() && self.sweep_task.is_none() {
+            self.replay.start(if self.single.is_some(){self.single_source.clone()}else{self.paired_source.clone()});
         }
     }
     fn prepare_balance(&self)->Result<cosmogon_sim::habitat_balance::Bundle,String> {
@@ -364,7 +370,19 @@ impl Study {
     fn prepare_figure(&self)->Result<cosmogon_sim::habitat_figure::Figure,String> {
         let mut layout=self.graph.layout.clone();layout.metric=self.metric.id().into();layout.effect=self.effect.id().into();layout.alignment=match self.alignment {Alignment::Elapsed=>"elapsed",Alignment::World=>"world"}.into();
         if self.factorial_mode {cosmogon_sim::habitat_figure::Figure::paired(self.paired.as_ref().ok_or("Open a paired design first")?,&layout)}
+        else if let Some(d)=&self.single {d.figure(self.branches[0],self.branches[1],&layout)}
         else {cosmogon_sim::habitat_figure::Figure::ordinary(self.recording.as_ref().ok_or("Open a recording first")?,self.comparison.as_ref(),&layout)}
+    }
+    fn select_branches(&mut self, branches: [usize;2]) -> Result<(),String> {
+        let d=self.single.as_ref().ok_or("Open a single-setting design first")?;
+        let (a,b)=d.selected(branches[0],branches[1])?;
+        let (a,b)=(a.clone(),b.clone());
+        self.loaded_path=format!("{}/run-{:03}",self.single_source,branches[0]);
+        self.path=self.loaded_path.clone();
+        self.comparison_path=format!("{}/run-{:03}",self.single_source,branches[1]);
+        self.recording=Some(a);self.comparison=Some(b);self.branches=branches;
+        self.balance.reset();
+        Ok(())
     }
     pub fn metadata(&self) -> Option<serde_json::Value> {
         let r = self.recording.as_ref()?;
@@ -381,6 +399,7 @@ impl Study {
             let recordings = if self.factorial_mode { self.paired.as_ref().map(|d| d.recordings.iter().collect::<Vec<_>>()).unwrap_or_else(|| vec![r]) } else { std::iter::once(r).chain(self.comparison.as_ref()).collect() };
             metadata["crop_trajectory_context"] = cosmogon_sim::habitat_crop_trajectory::context(&recordings);
         }
+        if let Some(d)=&self.single {metadata["single_design"]=serde_json::json!({"source":self.single_source,"manifest":d.manifest,"selected_branches":self.branches,"observation":d.report_at(self.selected).ok()});}
         Some(metadata)
     }
 }
@@ -450,6 +469,25 @@ pub fn panel(
             study.why_mode=chosen==1;
             if chosen<=2 {study.factorial_mode=chosen==2;}
         }
+    }
+    if study.single.is_some() && !study.experiment_mode {
+        let mut branches=study.branches;
+        let d=study.single.as_ref().unwrap();
+        ui.add(egui::Label::new(egui::RichText::new(format!("Saved single-setting design: {}",study.single_source)).small().color(MUTED)).wrap());
+        let plan=d.plan().expect("checked design plan");
+        ui.add(egui::Label::new(format!("Varied setting: {} ({})",plan.parameter.label(),plan.parameter.unit())).wrap());
+        ui.horizontal_wrapped(|ui| {
+            for (side,branch) in branches.iter_mut().enumerate() {
+                let label=|i:usize|format!("{}: run-{i:03} · {} {}",if side==0{"A"}else{"B"},plan.values[i],plan.parameter.unit());
+                egui::ComboBox::from_id_salt(("saved-single-branch",side)).selected_text(label(*branch)).show_ui(ui,|ui| {
+                    for i in 0..d.recordings.len(){ui.selectable_value(branch,i,label(i));}
+                });
+            }
+        });
+        if branches!=study.branches {if let Err(e)=study.select_branches(branches){study.status=Some(e);}}
+        egui::CollapsingHeader::new("Verify complete saved design").show(ui,|ui| {
+            study.replay.show(ui,&study.single_source,study.task.is_some() || study.sweep_task.is_some() || study.comparison_task.is_some());
+        });
     }
     if study.balance_mode && !study.experiment_mode {
         let source=if study.paired.is_some(){study.paired_source.clone()}else{study.loaded_path.clone()};let count=study.recording.as_ref().map_or(0,|r|r.rows.len());
@@ -747,9 +785,9 @@ fn paired_results(ui:&mut egui::Ui,study:&mut Study) {
     study.selected=study.selected.min(plan.samples-1);
     ui.strong("Paired settings · four actual recorded responses");
     ui.horizontal(|ui| {ui.selectable_value(&mut study.paired_pane,0,"Time curves");ui.selectable_value(&mut study.paired_pane,1,"Four-response table");ui.selectable_value(&mut study.paired_pane,2,"Files & method");ui.selectable_value(&mut study.paired_pane,3,"Replay");});
-    ui.label(format!("A: {} · {:?} {}",plan.parameter.label(),plan.values,plan.parameter.unit()));
+    ui.add(egui::Label::new(format!("A: {} · {:?} {}",plan.parameter.label(),plan.values,plan.parameter.unit())).wrap());
     let second=plan.secondary.as_ref().expect("verified paired design");
-    ui.label(format!("B: {} · {:?} {}",second.parameter.label(),second.values,second.parameter.unit()));
+    ui.add(egui::Label::new(format!("B: {} · {:?} {}",second.parameter.label(),second.values,second.parameter.unit())).wrap());
     if study.paired_pane==3 {
         let pending=study.task.is_some() || study.sweep_task.is_some() || study.comparison_task.is_some() || study.paired_export.is_some();
         study.replay.show(ui,&study.paired_source,pending);return;
@@ -1074,6 +1112,7 @@ mod tests {
             b: r.clone(),
             manifest,
             paired:None,
+            single:None,
             path: "new".into(),
             sample,
         };
@@ -1200,6 +1239,28 @@ mod tests {
         let invalid=Plan::linear(Parameter::CropAuxiliaryPowerW,-1.,50.,2,3,3600.).unwrap();
         assert!(run_sweep(u,0,invalid,root.join("bad").to_string_lossy().into_owned(),None).is_err());assert!(!root.join("bad").exists());
         assert_eq!(study.metadata().unwrap()["paired_selected_analysis"],completed);std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn saved_single_worker_retains_all_branches_controls_and_source_independent_of_drafts() {
+        let mut u=Universe::new(cosmogon_sim::UniverseSettings{scenario:cosmogon_sim::Scenario::SolarSystemLab,..Default::default()});
+        u.apply_edit(cosmogon_sim::sandbox::Edit::CreateHabitat{definition:Box::new(cosmogon_sim::habitat::Definition::at(cosmogon_sim::BodyRef{system:0,body:3},0.,0.))}).unwrap();
+        u.advance_to(u.time+86410.25,None,None);
+        let root=std::env::temp_dir().join(format!("cosmogon-native-single-{}",std::process::id()));let _=std::fs::remove_dir_all(&root);
+        let p=Plan::linear(Parameter::VolumeM3,250.,1000.,3,3,3600.).unwrap();
+        habitat_sweep::execute(&u,0,&p,&root).unwrap();
+        let mut study=Study{requested_branches:Some([1,2]),keep_experiment_at_launch:true,..Default::default()};
+        study.commit_sweep(open_design(root.clone(),root.to_string_lossy().into_owned(),Some(1)).unwrap()).unwrap();
+        assert!(!study.factorial_mode);assert!(study.paired.is_none());assert_eq!(study.single.as_ref().unwrap().recordings.len(),3);
+        assert_eq!(study.branches,[1,2]);assert!(study.sweep.output.is_empty());assert_eq!(parse_levels(&study.sweep.values).unwrap(),p.values);
+        let original=study.metadata().unwrap()["single_design"].clone();study.path="unopened".into();study.sweep.values="12, 13".into();
+        assert_eq!(study.metadata().unwrap()["single_design"],original);
+        assert_eq!(study.prepare_figure().unwrap().single_design_context.unwrap()["selected_branches"],serde_json::json!([1,2]));
+        study.select_branches([2,0]).unwrap();assert_eq!(study.recording.as_ref().unwrap().rows,study.single.as_ref().unwrap().recordings[2].rows);
+        let before=study.metadata();assert!(study.select_branches([3,0]).is_err());assert_eq!(study.metadata(),before);
+        let mut m:serde_json::Value=serde_json::from_slice(&std::fs::read(root.join("manifest.json")).unwrap()).unwrap();m["complete"]=false.into();std::fs::write(root.join("manifest.json"),serde_json::to_vec(&m).unwrap()).unwrap();
+        assert!(open_design(root.clone(),root.to_string_lossy().into_owned(),None).is_err());assert_eq!(study.metadata(),before);
+        assert!(check_input(&root,Some(0)).is_err());std::fs::remove_dir_all(root).unwrap();
     }
 
 }
