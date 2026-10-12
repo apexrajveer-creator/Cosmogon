@@ -150,6 +150,9 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if a.cmd=="vehicle-definition" && flag!="--output" {return Err(format!("{flag} is not a vehicle-definition option"));}
         if a.cmd=="vehicle-study" && !matches!(flag.as_str(),"--definition"|"--output") {return Err(format!("{flag} is not a finite vehicle study option"));}
         if a.cmd=="vehicle-inspect" && flag!="--recording" {return Err(format!("{flag} is not a vehicle recording inspection option"));}
+        if a.cmd=="cargo-epochs-definition" && flag!="--output" {return Err(format!("{flag} is not a cargo-epochs-definition option"));}
+        if a.cmd=="cargo-epochs-study" && !matches!(flag.as_str(),"--definition"|"--output") {return Err(format!("{flag} is not a cargo-epochs study option"));}
+        if a.cmd=="cargo-epochs-inspect" && flag!="--recording" {return Err(format!("{flag} is not a cargo-epochs inspection option"));}
     if a.cmd=="habitat-rerun" && !matches!(flag.as_str(),"--recording"|"--definition"|"--output"){return Err(format!("{flag} is not a saved-origin habitat rerun option"));}
         if a.cmd=="habitat-verify" && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a habitat replay verification option"));}
         if a.cmd=="habitat-balance" && !matches!(flag.as_str(),"--recording"|"--from-index"|"--observation"|"--output") {return Err(format!("{flag} is not a recorded balance option"));}
@@ -241,6 +244,9 @@ if a.geographic_start.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err
         if a.cmd=="vehicle-inspect" && a.recording.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err("vehicle-inspect requires --recording COMPLETE_DIR".into());}
     if matches!(a.cmd.as_str(),"vehicle-definition"|"vehicle-study") && a.output.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Vehicle output requires a nonempty new file/folder".into());}
     if a.cmd=="vehicle-study" && a.definition.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Choose a nonempty vehicle plan file".into());}
+    if a.cmd=="cargo-epochs-inspect" && a.recording.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err("cargo-epochs-inspect requires --recording COMPLETE_DIR".into());}
+    if matches!(a.cmd.as_str(),"cargo-epochs-definition"|"cargo-epochs-study") && a.output.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Cargo-epochs output requires a nonempty new file/folder".into());}
+    if a.cmd=="cargo-epochs-study" && a.definition.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Choose a nonempty cargo-epochs plan file".into());}
     if matches!(a.cmd.as_str(),"flight-definition"|"contact-hardware"|"habitat"|"habitat-definition"|"habitat-crop-definition") && a.initial.is_some() && (explicit_scenario || explicit_seed) {return Err("Choose saved --initial world or new --scenario/--seed, not both".into());}
     if matches!(a.cmd.as_str(),"greenhouse"|"greenhouse-supplies") && a.habitat_id.is_some() && a.initial.is_none() {return Err("Greenhouse habitat context requires --initial saved world".into());}
     if a.cmd=="habitat-sweep" {
@@ -305,6 +311,7 @@ fn help() {
     eprintln!("cosmogon-cli arrival-start [--output NEW_FILE]\ncosmogon-cli flight-approach --recording COMPLETE_FLIGHT_DIR [--target BODY --output NEW_DIR]\ncosmogon-cli approach-inspect --recording COMPLETE_APPROACH_DIR\nGeographic flight-definition starts: --geographic-start FILE (explicit spherical altitude and east/north/up velocities)");
     eprintln!("cosmogon-cli flight-definition [--initial WORLD --definition PROPULSION_PLAN --target Mars --samples 121 --interval-seconds 1 --output NEW_FILE]\ncosmogon-cli flight-study --definition PINNED_STUDY [--initial WORLD --output NEW_DIR]\ncosmogon-cli flight-inspect --recording COMPLETE_DIR   # exact full-world flight replay, no cargo delivery");
     eprintln!("cosmogon-cli vehicle-definition [--output NEW_FILE]   # explicit assumed finite vehicle and burn plan\ncosmogon-cli vehicle-study [--definition PLAN --output NEW_DIR]   # ideal free-space finite propulsion, no launch/delivery\ncosmogon-cli vehicle-inspect --recording COMPLETE_DIR   # exact independent numeric/source replay");
+    eprintln!("cosmogon-cli cargo-epochs-definition [--output NEW_FILE]   # explicit burn → species removal → burn sequence\ncosmogon-cli cargo-epochs-study [--definition PLAN --output NEW_DIR]   # piecewise mass epochs, no world delivery\ncosmogon-cli cargo-epochs-inspect --recording COMPLETE_DIR   # exact independent epoch replay");
     eprintln!("cosmogon-cli habitat-rerun --recording COMPLETE_DESIGN --output NEW_DIR [--definition NEW_TYPED_PLAN]   # exact original common starting world");
     eprintln!("cosmogon-cli habitat-balance --recording FOLDER [--from-index N] [--observation N] [--output NEW_DIR]");
     eprintln!("cosmogon-cli habitat-figure --recording FOLDER --definition GRAPH_LAYOUT --output NEW_DIR [--reference ORDINARY_B]");
@@ -550,6 +557,19 @@ fn main() {
                 if let Some(output)=&a.output {plan.export(std::path::Path::new(output))}else{plan.summary()}
             })();
             match result {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).expect("finite validated result")),Err(e)=>{eprintln!("Vehicle study failed: {e}");std::process::exit(1);}}
+        },
+        "cargo-epochs-definition" => {
+            let plan=cosmogon_sim::vehicle_cargo_mass::Plan::example();
+            if let Some(path)=&a.output {if let Err(e)=plan.write(std::path::Path::new(path)){eprintln!("Cargo-epochs definition failed: {e}");std::process::exit(1);}}
+            println!("{}",serde_json::to_string_pretty(&plan).expect("finite validated example sequence"));
+        },
+        "cargo-epochs-study" | "cargo-epochs-inspect" => {
+            let result=(||->Result<serde_json::Value,String>{
+                if a.cmd=="cargo-epochs-inspect" {return cosmogon_sim::vehicle_cargo_mass::read_recording(std::path::Path::new(a.recording.as_deref().expect("validated recording")));}
+                let plan=if let Some(path)=&a.definition {cosmogon_sim::vehicle_cargo_mass::Plan::read(std::path::Path::new(path))?}else{cosmogon_sim::vehicle_cargo_mass::Plan::example()};
+                if let Some(output)=&a.output {plan.export(std::path::Path::new(output))}else{plan.summary()}
+            })();
+            match result {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).expect("finite validated cargo-epochs result")),Err(e)=>{eprintln!("Cargo-epochs study failed: {e}");std::process::exit(1);}}
         },
         "habitat-rerun" => {if let Err(e)=habitat_rerun(&a){eprintln!("Saved-origin rerun failed: {e}");std::process::exit(1);}},
         "habitat-sweep" => {if let Err(e)=habitat_sweep(&a) {eprintln!("Habitat sweep failed: {e}");std::process::exit(1);}},
@@ -1065,6 +1085,8 @@ mod argument_tests {
     fn vehicle_commands_refuse_missing_recordings_and_unrelated_world_controls() {
         for v in [vec!["vehicle-inspect"],vec!["vehicle-inspect","--recording"," "],vec!["vehicle-study","--initial","s"],vec!["vehicle-study","--samples","5"],vec!["vehicle-definition","--seed","2"],vec!["vehicle-study","--output"," "],vec!["vehicle-inspect","--recording","x","--output","y"]] {assert!(args(&v).is_err());}
         assert!(args(&["vehicle-study","--definition","plan","--output","new"]).is_ok());assert!(args(&["vehicle-definition","--output","new"]).is_ok());assert!(args(&["vehicle-inspect","--recording","study"]).is_ok());
+        for v in [vec!["cargo-epochs-inspect"],vec!["cargo-epochs-inspect","--recording"," "],vec!["cargo-epochs-study","--initial","s"],vec!["cargo-epochs-definition","--seed","2"],vec!["cargo-epochs-study","--output"," "],vec!["cargo-epochs-study","--definition"," "],vec!["cargo-epochs-inspect","--recording","x","--output","y"]] {assert!(args(&v).is_err());}
+        assert!(args(&["cargo-epochs-study","--definition","plan","--output","new"]).is_ok());assert!(args(&["cargo-epochs-definition","--output","new"]).is_ok());assert!(args(&["cargo-epochs-inspect","--recording","study"]).is_ok());
     }
     #[test]
     fn saved_origin_reruns_refuse_ignored_or_incomplete_inputs() {

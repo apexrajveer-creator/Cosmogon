@@ -117,7 +117,7 @@ pub struct Command {
     pub direction: [f64; 3],
 }
 impl Command {
-    fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), String> {
         bounds(self.duration_s, 0., 1e7, "Command duration")?;
         bounds(self.throttle, 0., 1., "Command throttle")?;
         if self

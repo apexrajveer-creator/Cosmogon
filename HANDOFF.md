@@ -1,5 +1,7 @@
 # Handoff
 
+For the complete original master directive combined with the owner graphics supplement and current next-agent prompt, see [the master engineer continuation prompt](docs/MASTER_ENGINEER_CONTINUATION_PROMPT.md). The shorter [current-state handoff](docs/CONTINUATION_HANDOFF.md) records verified status and next implementation steps. The released 1.0 baseline and general operating instructions below remain applicable.
+
 For anyone — human or AI agent — picking up Cosmogon. Read this first, then
 [ARCHITECTURE.md](ARCHITECTURE.md) and [BUILDING.md](BUILDING.md).
 

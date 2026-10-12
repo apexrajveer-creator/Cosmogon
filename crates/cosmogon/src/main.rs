@@ -38,6 +38,7 @@ fn main() -> bevy::app::AppExit {
     let args = args::Args::parse();
     if let Err(e)=ui::world_vehicle::preflight(&args){eprintln!("Cannot open finite world flight: {e}");return AppExit::error();}
     if let Err(e)=ui::vehicle::preflight(&args){eprintln!("Cannot open supply vehicle design: {e}");return AppExit::error();}
+    if let Err(e)=ui::vehicle_cargo::preflight(&args){eprintln!("Cannot open cargo mass epochs: {e}");return AppExit::error();}
     if let Some(path)=&args.habitat_definition {if let Err(e)=cosmogon_sim::habitat::Definition::read(std::path::Path::new(path)) {eprintln!("Cannot open habitat definition: {e}");return bevy::app::AppExit::error();}}
     if let Some(path)=&args.crop_chemistry {if let Err(e)=cosmogon_sim::crop_chemistry::read(std::path::Path::new(path)) {eprintln!("Cannot open crop chemistry: {e}");return bevy::app::AppExit::error();}}
     if args.crop_chemistry_output.as_ref().is_some_and(|p|std::path::Path::new(p.trim()).exists()) {eprintln!("Existing crop chemistry files are protected; choose a new folder");return bevy::app::AppExit::error();}
