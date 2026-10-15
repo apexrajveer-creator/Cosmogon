@@ -1,6 +1,6 @@
 # Cosmogon: A Reproducible Living-Universe Sandbox
 
-**Author:** [Add the exact name you want associated with this work]  
+**Author:** Ashwin Dandotiya
 **Project:** Cosmogon  
 **Document type:** Project and software overview (not a peer-reviewed research paper)  
 **Version:** Draft  
@@ -8,7 +8,7 @@
 
 **Release context:** Cosmogon 1.0.0 was released on 4 October 2026. The newer vehicle and research work described here is post-release development on the public `main` branch, described at commit `9eb830d` (15 October 2026); it is not part of the 1.0.0 release.
 
-> Before public release, replace the author placeholder, verify every linked source and version-specific claim, and export a versioned copy alongside the code release. This article describes the software and its engineering evidence; it does not claim that all of its scientific models are validated research instruments.
+> Before public release, verify every linked source and version-specific claim, decide the AI-assistance disclosure, and export a versioned copy alongside the code release. This article describes the software and its engineering evidence; it does not claim that all of its scientific models are validated research instruments.
 
 ## Abstract
 
@@ -70,7 +70,7 @@ Cosmogon source code, documentation, and release downloads are available from th
 
 **Suggested software citation (complete before publication):**
 
-> [Author name]. (2026). *Cosmogon* (Version [release]). [Repository URL]. [DOI, if archived].
+> Dandotiya, A. (2026). *Cosmogon: A Reproducible Living-Universe Sandbox* (development snapshot `9eb830d`). [Project repository](https://github.com/ashvyagni/SpaceRender). [DOI, if archived].
 
 ## References and project records
 
