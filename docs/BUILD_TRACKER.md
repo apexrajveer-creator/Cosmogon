@@ -10,7 +10,7 @@ provisional groupings that may renumber when a build starts.
 
 ---
 
-## Done — 47 builds
+## Done — 48 builds
 
 | # | Build | Status | Evidence |
 | --- | --- | --- | --- |
@@ -60,7 +60,8 @@ provisional groupings that may renumber when a build starts.
 | 44 | Solver-integrated surface-operation window | ✅ | gap 44, VEHICLE_OPERATION.md (539 tests) |
 | 45 | Cargo mass in authoritative world flight | ✅ | gap 45, VEHICLE_CARGO_FLIGHT.md, `c03f9d3` (548 tests) |
 | 46 | Finite handling equipment and recipient storage capacity | ✅ | gap 46, VEHICLE_HANDLING_CAPACITY.md (562 tests), `24eef17` |
-| 47 | Atomic co-located habitat transfer | ✅ | gap 47, VEHICLE_TRANSFER.md (575 tests) |
+| 47 | Atomic co-located habitat transfer | ✅ | gap 47, VEHICLE_TRANSFER.md (575 tests), `74ee286` |
+| 48 | Authored finite surface launch | ✅ | gap 48, VEHICLE_LAUNCH.md (584 tests) |
 
 Released baselines: v0.3.0, v0.5.0, **v1.0.0** (`0411e9d`) — all preserved; tags untouched.
 
@@ -73,8 +74,8 @@ Released baselines: v0.3.0, v0.5.0, **v1.0.0** (`0411e9d`) — all preserved; ta
 | # | Build | Status |
 | --- | --- | --- |
 | 47 | ~~Atomic co-located habitat transfer: species `Edit`s, operation-window gate, conservation both sides, undo/save/replay, CLI/native agreement — the first real delivery~~ | ✅ **DONE** |
-| 48 | Authored finite launch from a surface (engine, structural/thermal limits, trajectory evidence) | ⬜ **NEXT** |
-| 49 | Orbital flight, transfer and rendezvous/approach | ⬜ |
+| 48 | ~~Authored finite launch from a surface (engine, structural/thermal limits, trajectory evidence)~~ | ✅ **DONE** |
+| 49 | Orbital flight, transfer and rendezvous/approach | ⬜ **NEXT** |
 | 50 | Entry, heating/thermal limits and terminal landing completion | ⬜ |
 | 51 | End-to-end supply-mission closeout: one scripted launch → orbit → transfer → landing → delivery scenario with full evidence | ⬜ |
 
@@ -147,7 +148,7 @@ Released baselines: v0.3.0, v0.5.0, **v1.0.0** (`0411e9d`) — all preserved; ta
 
 ---
 
-**Totals:** 47 done / ~42 remaining (≈89 builds total; remaining ≈240–340 focused hours, graphics
+**Totals:** 48 done / ~41 remaining (≈89 builds total; remaining ≈240–340 focused hours, graphics
 the dominant wildcard). Cluster sizes in sections B–G are estimates and renumber as builds land;
 section A never renumbers. Update this file in the same commit as each build, and append the new
 gap entry to [MASTER_GAP_ANALYSIS](MASTER_GAP_ANALYSIS.md) when the build is accepted.

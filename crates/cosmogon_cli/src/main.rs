@@ -27,6 +27,12 @@ struct Args {
     contact_hardware: Option<String>,
     cargo_ledgers: bool,
     handling: bool,
+    launch: Option<String>,
+    thrust_time: Option<f64>,
+    thrust_newtons: Option<f64>,
+    maximum_acceleration: Option<f64>,
+    liftoff_altitude: Option<f64>,
+    maximum_start_altitude: Option<f64>,
     static_shear: bool,
     operation_window: Option<f64>,
     branches: Option<[usize;2]>,
@@ -76,6 +82,12 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         contact_hardware: None,
         cargo_ledgers: false,
         handling: false,
+        launch: None,
+        thrust_time: None,
+        thrust_newtons: None,
+        maximum_acceleration: None,
+        liftoff_altitude: None,
+        maximum_start_altitude: None,
         static_shear: false,
         operation_window: None,
         branches: None,
@@ -121,6 +133,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if a.cmd=="flight-approach" {a.target.clear();}
         if a.cmd=="habitat-sweep" {a.parameter="firm_power_w".into();}
         if matches!(a.cmd.as_str(),"habitat-definition"|"habitat-crop-definition"|"habitat-setup") {a.scenario=Scenario::SolarSystemLab;a.target="Mars".into();}
+        if a.cmd=="launch-definition" {a.scenario=Scenario::SolarSystemLab;a.target="Mars".into();}
     }
     if matches!(a.cmd.as_str(), "--help" | "-h" | "help") {
         a.cmd = "help".into();
@@ -141,7 +154,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if matches!(a.cmd.as_str(),"crop-chemistry"|"crop-chemistry-inspect"|"greenhouse-supply-inspect") && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a crop supply/chemistry inspection option"));}
         if matches!(a.cmd.as_str(),"habitat-diagnose"|"habitat-crop-harvest") && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
         if a.cmd=="contact-hardware" && !matches!(flag.as_str(),"--initial"|"--target"|"--seed"|"--scenario"|"--output"|"--geographic-start"|"--static-shear"|"--operation-window") {return Err(format!("{flag} is not a contact hardware option"));}
-        if a.cmd=="flight-definition" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output"|"--target"|"--seed"|"--scenario"|"--samples"|"--interval-seconds"|"--geographic-start"|"--contact-hardware"|"--cargo-ledgers"|"--handling") {return Err(format!("{flag} is not a world flight definition option"));}
+        if a.cmd=="flight-definition" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output"|"--target"|"--seed"|"--scenario"|"--samples"|"--interval-seconds"|"--geographic-start"|"--contact-hardware"|"--cargo-ledgers"|"--handling"|"--launch") {return Err(format!("{flag} is not a world flight definition option"));}
+        if a.cmd=="launch-definition" && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario"|"--thrust-time"|"--thrust-newtons"|"--maximum-acceleration"|"--liftoff-altitude"|"--maximum-start-altitude") {return Err(format!("{flag} is not a launch-definition option"));}
         if a.cmd=="flight-study" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output") {return Err(format!("{flag} is not a world flight study option"));}
         if matches!(a.cmd.as_str(),"arrival-start"|"contact-start") && flag!="--output" {return Err(format!("{flag} is not a geographic start option"));}
         if a.cmd=="flight-approach" && !matches!(flag.as_str(),"--recording"|"--target"|"--output") {return Err(format!("{flag} is not a recorded approach option"));}
@@ -180,6 +194,32 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--contact-hardware" if a.cmd=="flight-definition" => a.contact_hardware=Some(val()?),
             "--cargo-ledgers" if a.cmd=="flight-definition" => a.cargo_ledgers=true,
             "--handling" if a.cmd=="flight-definition" => a.handling=true,
+            "--launch" if a.cmd=="flight-definition" => a.launch=Some(val()?),
+            "--thrust-time" if a.cmd=="launch-definition" => {
+                let seconds=number::<f64>(val()?,&flag)?;
+                if !seconds.is_finite() || !(0.0..=1.0e7).contains(&seconds) {return Err("--thrust-time requires a finite duration between 0 and 1e7 seconds".into());}
+                a.thrust_time=Some(seconds);
+            },
+            "--thrust-newtons" if a.cmd=="launch-definition" => {
+                let newtons=number::<f64>(val()?,&flag)?;
+                if !newtons.is_finite() || !(0.0..=1.0e9).contains(&newtons) {return Err("--thrust-newtons requires a finite thrust between 0 and 1e9 N".into());}
+                a.thrust_newtons=Some(newtons);
+            },
+            "--maximum-acceleration" if a.cmd=="launch-definition" => {
+                let accel=number::<f64>(val()?,&flag)?;
+                if !accel.is_finite() || !(0.0..=1.0e4).contains(&accel) {return Err("--maximum-acceleration requires a finite bound between 0 and 1e4 m/s²".into());}
+                a.maximum_acceleration=Some(accel);
+            },
+            "--liftoff-altitude" if a.cmd=="launch-definition" => {
+                let altitude=number::<f64>(val()?,&flag)?;
+                if !altitude.is_finite() || !(0.0..=1.0e5).contains(&altitude) {return Err("--liftoff-altitude requires a finite height between 0 and 1e5 m".into());}
+                a.liftoff_altitude=Some(altitude);
+            },
+            "--maximum-start-altitude" if a.cmd=="launch-definition" => {
+                let altitude=number::<f64>(val()?,&flag)?;
+                if !altitude.is_finite() || !(0.0..=1.0e5).contains(&altitude) {return Err("--maximum-start-altitude requires a finite height between 0 and 1e5 m".into());}
+                a.maximum_start_altitude=Some(altitude);
+            },
             "--geographic-start" if matches!(a.cmd.as_str(),"flight-definition"|"contact-hardware") => a.geographic_start=Some(val()?),
             "--samples" => {
                 let requested=number::<usize>(val()?,&flag)?;explicit_samples=true;
@@ -253,6 +293,14 @@ if a.geographic_start.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err
     if matches!(a.cmd.as_str(),"flight-definition"|"flight-study") {
         if [&a.initial,&a.definition,&a.output].iter().any(|p|p.as_deref().is_some_and(|s|s.trim().is_empty())) {return Err("Flight files require nonempty paths".into());}
         if a.cmd=="flight-study" && a.definition.is_none() {return Err("flight-study requires --definition PINNED_STUDY".into());}
+        if a.launch.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Launch definition requires a nonempty file".into());}
+        if a.cmd=="flight-definition" && a.launch.is_some() && (a.geographic_start.is_some() || a.contact_hardware.is_some() || a.definition.is_some()) {return Err("Choose one --launch definition file or circular/geographic flight options, not both".into());}
+    }
+    if a.cmd=="launch-definition" {
+        if [&a.initial,&a.output].iter().any(|p|p.as_deref().is_some_and(|s|s.trim().is_empty())) {return Err("Launch definition files require nonempty paths".into());}
+        if a.output.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err("launch-definition requires --output NEW_FILE".into());}
+        if a.thrust_time.is_none_or(|t| t <= 0.) {return Err("launch-definition requires a positive --thrust-time".into());}
+        if a.thrust_newtons.is_none_or(|t| t <= 0.) {return Err("launch-definition requires a positive --thrust-newtons".into());}
     }
         if a.cmd=="vehicle-inspect" && a.recording.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err("vehicle-inspect requires --recording COMPLETE_DIR".into());}
     if matches!(a.cmd.as_str(),"vehicle-definition"|"vehicle-study") && a.output.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Vehicle output requires a nonempty new file/folder".into());}
@@ -260,7 +308,7 @@ if a.geographic_start.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err
     if a.cmd=="cargo-epochs-inspect" && a.recording.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err("cargo-epochs-inspect requires --recording COMPLETE_DIR".into());}
     if matches!(a.cmd.as_str(),"cargo-epochs-definition"|"cargo-epochs-study") && a.output.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Cargo-epochs output requires a nonempty new file/folder".into());}
     if a.cmd=="cargo-epochs-study" && a.definition.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Choose a nonempty cargo-epochs plan file".into());}
-    if matches!(a.cmd.as_str(),"flight-definition"|"contact-hardware"|"habitat"|"habitat-definition"|"habitat-crop-definition"|"habitat-setup") && a.initial.is_some() && (explicit_scenario || explicit_seed) {return Err("Choose saved --initial world or new --scenario/--seed, not both".into());}
+    if matches!(a.cmd.as_str(),"flight-definition"|"contact-hardware"|"habitat"|"habitat-definition"|"habitat-crop-definition"|"habitat-setup"|"launch-definition") && a.initial.is_some() && (explicit_scenario || explicit_seed) {return Err("Choose saved --initial world or new --scenario/--seed, not both".into());}
     if a.cmd=="habitat-setup" && a.output.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err("habitat-setup requires --output NEW_FILE".into());}
     if matches!(a.cmd.as_str(),"greenhouse"|"greenhouse-supplies") && a.habitat_id.is_some() && a.initial.is_none() {return Err("Greenhouse habitat context requires --initial saved world".into());}
     if a.cmd=="habitat-sweep" {
@@ -323,7 +371,8 @@ fn help() {
     eprintln!("cosmogon-cli contact-start [--output NEW_FILE]\ncosmogon-cli contact-hardware [--static-shear --operation-window SECONDS --initial WORLD --target Mars --geographic-start FILE --output NEW_FILE]\nflight-definition --contact-hardware FILE explicitly enables versioned terrain/rigid-body motion; --operation-window adds the modeled solver-integrated surface-operation ledger; no safe landing or delivery");
     eprintln!("cosmogon-cli support-definition [--output NEW_FILE]\ncosmogon-cli flight-support --recording COMPLETE_FLIGHT_DIR [--definition LIMITS_FILE --output NEW_DIR]\ncosmogon-cli support-inspect --recording COMPLETE_SUPPORT_DIR\nConditional actual footprint/force evidence; no attachment or cargo permission");
     eprintln!("cosmogon-cli arrival-start [--output NEW_FILE]\ncosmogon-cli flight-approach --recording COMPLETE_FLIGHT_DIR [--target BODY --output NEW_DIR]\ncosmogon-cli approach-inspect --recording COMPLETE_APPROACH_DIR\nGeographic flight-definition starts: --geographic-start FILE (explicit spherical altitude and east/north/up velocities)");
-    eprintln!("cosmogon-cli flight-definition [--initial WORLD --definition PROPULSION_PLAN --target Mars --samples 121 --interval-seconds 1 --cargo-ledgers --handling --output NEW_FILE]\ncosmogon-cli flight-study --definition PINNED_STUDY [--initial WORLD --output NEW_DIR]\ncosmogon-cli flight-inspect --recording COMPLETE_DIR   # exact full-world flight replay; --cargo-ledgers opts into retained cargo mass ledgers; --handling opts into finite surface-handling equipment for co-located habitat transfers");
+    eprintln!("cosmogon-cli flight-definition [--initial WORLD --definition PROPULSION_PLAN --target Mars --samples 121 --interval-seconds 1 --cargo-ledgers --handling --launch FILE --output NEW_FILE]\ncosmogon-cli flight-study --definition PINNED_STUDY [--initial WORLD --output NEW_DIR]\ncosmogon-cli flight-inspect --recording COMPLETE_DIR   # exact full-world flight replay; --cargo-ledgers opts into retained cargo mass ledgers; --handling opts into finite surface-handling equipment for co-located habitat transfers; --launch FILE consumes an authored surface-launch definition");
+    eprintln!("cosmogon-cli launch-definition --thrust-time SECONDS --thrust-newtons N [--maximum-acceleration M_S2 --liftoff-altitude M --maximum-start-altitude M --initial WORLD --target Mars --latitude N --longitude E --seed N --scenario S] --output NEW_FILE   # authored surface launch definition: fixed inertial zenith burn on contact gear with structural specific-force limits and liftoff/burnout/apogee evidence");
     eprintln!("cosmogon-cli habitat-setup [--initial WORLD --target Mars --latitude N --longitude E --seed N --scenario S] --output NEW_FILE   # world containing one finite habitat, for flight transfer studies");
     eprintln!("cosmogon-cli vehicle-definition [--output NEW_FILE]   # explicit assumed finite vehicle and burn plan\ncosmogon-cli vehicle-study [--definition PLAN --output NEW_DIR]   # ideal free-space finite propulsion, no launch/delivery\ncosmogon-cli vehicle-inspect --recording COMPLETE_DIR   # exact independent numeric/source replay");
     eprintln!("cosmogon-cli cargo-epochs-definition [--output NEW_FILE]   # explicit burn → species removal → burn sequence\ncosmogon-cli cargo-epochs-study [--definition PLAN --output NEW_DIR]   # piecewise mass epochs, no world delivery\ncosmogon-cli cargo-epochs-inspect --recording COMPLETE_DIR   # exact independent epoch replay");
@@ -546,6 +595,12 @@ fn main() {
                 let world=if let Some(path)=&a.initial {flight::read_world(std::path::Path::new(path))?} else {Universe::new(UniverseSettings {scenario:a.scenario,seed:a.seed,..Default::default()})};
                 if a.cmd=="flight-definition" {
                     let parent=world.systems.iter().enumerate().find_map(|(i,s)|s.find_body(&a.target).map(|j|cosmogon_sim::BodyRef {system:i as u32,body:j as u32})).ok_or("No matching flight starting body")?;
+                    let d=if let Some(path)=&a.launch {
+                        let mut d=world_vehicle::Definition::read(std::path::Path::new(path))?;
+                        if a.cargo_ledgers {d=d.with_cargo_ledgers()?;}
+                        if a.handling {d=d.with_handling()?;}
+                        d
+                    } else {
                     let plan=if let Some(path)=&a.definition {cosmogon_sim::supply_vehicle::Plan::read(std::path::Path::new(path))?} else {cosmogon_sim::supply_vehicle::Plan::example()};
                     let hardware=a.contact_hardware.as_ref().map(|path|cosmogon_sim::vehicle_contact_dynamics::Hardware::read(std::path::Path::new(path))).transpose()?;
                     let d=if let Some(path)=&a.geographic_start {
@@ -553,7 +608,8 @@ fn main() {
                         if let Some(h)=hardware {start.contact_flight(&world,parent,plan,h)?} else {start.flight(&world,parent,plan)?}
                     } else {let d=world_vehicle::Definition::circular_example(&world,parent,plan)?;if let Some(h)=hardware {d.with_contact(&world,h)?} else {d}};
                     let d=if a.cargo_ledgers {d.with_cargo_ledgers()?} else {d};
-                    let d=if a.handling {d.with_handling()?} else {d};
+                    if a.handling {d.with_handling()?} else {d}
+                    };
                     let study=flight::Study::new(&world,d,a.samples,a.interval_days*86400.)?;
                     if let Some(path)=&a.output {study.write(&world,std::path::Path::new(path))?;}
                     return serde_json::to_value(&study).map_err(|e|e.to_string());
@@ -596,6 +652,7 @@ fn main() {
         "habitat-compare" => {if let Err(e)=habitat_compare(&a) {eprintln!("Habitat comparison failed: {e}");std::process::exit(1);}},
         "habitat-definition"|"habitat-crop-definition" => {if let Err(e)=habitat_definition(&a) {eprintln!("Habitat definition failed: {e}");std::process::exit(1);}},
         "habitat-setup" => {if let Err(e)=habitat_setup(&a) {eprintln!("Habitat setup failed: {e}");std::process::exit(1);}},
+        "launch-definition" => {if let Err(e)=launch_definition(&a) {eprintln!("Launch definition failed: {e}");std::process::exit(1);}},
         "habitat" => {if let Err(e)=habitat(&a) {eprintln!("Habitat study failed: {e}");std::process::exit(1);}},
         "section" => {if let Err(e)=section(&a) {eprintln!("Terrain section failed: {e}");std::process::exit(1);}},
         "sites" => println!("{}", serde_json::to_string_pretty(&cosmogon_sim::planet::landing::registry()).unwrap()),
@@ -1079,6 +1136,59 @@ fn habitat_setup(a:&Args)->Result<(),String> {
     println!("{}",serde_json::to_string_pretty(&serde_json::json!({"format":"cosmogon-habitat-setup","schema_version":1,"target":u.systems[r.system as usize].bodies[r.body as usize].name,"latitude_north_deg":a.latitude,"longitude_east_deg":a.longitude,"habitat_id":habitat.id,"habitat":habitat.report(),"world":path.display().to_string()})).map_err(|e|e.to_string())?);Ok(())
 }
 
+fn launch_definition(a:&Args)->Result<(),String> {
+    use cosmogon_sim::supply_vehicle::{Command,Plan};
+    let world=if let Some(path)=&a.initial {cosmogon_sim::world_vehicle_recording::read_world(std::path::Path::new(path))?} else {Universe::new(settings(a,a.seed))};
+    let parent=world.systems.iter().enumerate().find_map(|(i,s)|s.find_body(&a.target).map(|j|cosmogon_sim::BodyRef {system:i as u32,body:j as u32})).ok_or("No matching launch starting body")?;
+    let thrust_time=a.thrust_time.ok_or("launch-definition requires --thrust-time")?;
+    let thrust_newtons=a.thrust_newtons.ok_or("launch-definition requires --thrust-newtons")?;
+    // Resolve the pad on the actual local terrain: probe the site, then start
+    // a small fixed clearance above the terrain along the local radial.
+    let mut start=cosmogon_sim::vehicle_arrival::GeographicStart::contact_example();
+    start.latitude_deg=a.latitude;
+    start.longitude_east_deg=a.longitude;
+    start.east_velocity_m_s=0.;
+    start.north_velocity_m_s=0.;
+    start.up_velocity_m_s=0.;
+    start.spherical_altitude_m=10000.;
+    let above=start.absolute(&world,parent)?;
+    let probe=cosmogon_sim::vehicle_contact::Surface::sample(&world,parent,world.time,above.position_m,1.)?;
+    start.spherical_altitude_m=10000.-probe.radial_clearance_m+1.6;
+    let pad=start.absolute(&world,parent)?;
+    let surface=cosmogon_sim::vehicle_contact::Surface::sample(&world,parent,world.time,pad.position_m,1.)?;
+    let up=surface.outward_normal;
+    let mut plan=Plan::example();
+    plan.definition.rated_thrust_n=thrust_newtons;
+    plan.commands=vec![Command {duration_s:thrust_time,throttle:1.,direction:[up.x,up.y,up.z]}];
+    let hardware=cosmogon_sim::vehicle_contact_dynamics::Hardware::example(&world,parent,pad.position_m)?;
+    let mut definition=start.contact_flight(&world,parent,plan,hardware)?;
+    let limits=cosmogon_sim::vehicle_launch::Limits {
+        maximum_acceleration_m_s2:a.maximum_acceleration.unwrap_or(15.),
+        liftoff_altitude_m:a.liftoff_altitude.unwrap_or(1.),
+        maximum_start_altitude_m:a.maximum_start_altitude.unwrap_or(100.),
+    };
+    let peak=thrust_newtons/definition.plan.definition.inert_mass_kg();
+    if peak>limits.maximum_acceleration_m_s2 {
+        return Err(format!("Authored thrust {thrust_newtons} N on inert mass {} kg senses {peak:.3} m/s², above the structural limit {} m/s²; lower --thrust-newtons or raise --maximum-acceleration",definition.plan.definition.inert_mass_kg(),limits.maximum_acceleration_m_s2));
+    }
+    definition.launch=Some(limits);
+    definition.validate(&world)?;
+    cosmogon_sim::world_vehicle::Flight::new(0,definition.clone(),&world)?;
+    let path=std::path::Path::new(a.output.as_deref().ok_or("--output NEW_FILE required")?);
+    if let Some(parent)=path.parent().filter(|p|!p.as_os_str().is_empty()) {std::fs::create_dir_all(parent).map_err(|e|e.to_string())?;}
+    definition.write(path)?;
+    println!("{}",serde_json::to_string_pretty(&serde_json::json!({
+        "format":"cosmogon-launch-definition","schema_version":1,
+        "target":world.systems[parent.system as usize].bodies[parent.body as usize].name,
+        "latitude_north_deg":a.latitude,"longitude_east_deg":a.longitude,
+        "thrust_time_s":thrust_time,"thrust_newtons":thrust_newtons,
+        "burn_direction":"Fixed inertial local zenith at ignition; no attitude controller",
+        "limits":definition.launch.expect("written limits"),
+        "definition":path.display().to_string(),
+        "scope":"Authored engine-specific-force limits and trajectory evidence on the existing contact solver; not atmospheric ascent losses, pad hazards or mission feasibility"
+    })).map_err(|e|e.to_string())?);Ok(())
+}
+
 fn habitat_definition(a:&Args)->Result<(),String> {
     use std::io::Write;
     let u=if let Some(p)=&a.initial {save::read_file(std::path::Path::new(p)).map_err(|e|e.to_string())?} else {Universe::new(settings(a,a.seed))};
@@ -1133,6 +1243,19 @@ mod argument_tests {
         let a=args(&["habitat-setup","--target","Mars","--latitude","-4.59","--longitude","137.44","--output","world.cosmo"]).unwrap();
         assert_eq!(a.target,"Mars");assert_eq!(a.latitude,-4.59);assert_eq!(a.longitude,137.44);assert_eq!(a.output.as_deref(),Some("world.cosmo"));
         assert!(args(&["flight-definition","--initial","w","--handling","--cargo-ledgers","--geographic-start","g"]).is_ok());
+    }
+    #[test]
+    fn launch_arguments_are_explicit_and_refuse_ignored_flags() {
+        for v in [vec!["launch-definition"],vec!["launch-definition","--thrust-time","10"],vec!["launch-definition","--output","o"],vec!["launch-definition","--output","o","--thrust-time","10"],vec!["launch-definition","--output","o","--thrust-time","10","--thrust-newtons","-1"],vec!["launch-definition","--output","o","--thrust-time","10","--thrust-newtons","25000","--samples","3"],vec!["launch-definition","--output","o","--thrust-time","10","--thrust-newtons","25000","--initial","s","--seed","2"]] {assert!(args(&v).is_err(),"{v:?}");}
+        let a=args(&["launch-definition","--output","launch.json","--thrust-time","10","--thrust-newtons","25000","--maximum-acceleration","15","--latitude","0","--longitude","0"]).unwrap();
+        assert_eq!(a.output.as_deref(),Some("launch.json"));
+        assert_eq!(a.thrust_time,Some(10.));assert_eq!(a.thrust_newtons,Some(25000.));assert_eq!(a.maximum_acceleration,Some(15.));
+        assert_eq!(a.target,"Mars");
+        assert!(args(&["flight-definition","--launch","launch.json"]).is_ok());
+        assert!(args(&["flight-definition","--launch","launch.json","--geographic-start","g"]).is_err());
+        assert!(args(&["flight-definition","--launch","launch.json","--contact-hardware","h"]).is_err());
+        assert!(args(&["flight-definition","--launch","launch.json","--definition","p"]).is_err());
+        assert!(args(&["flight-study","--definition","d","--launch","launch.json"]).is_err());
     }
     #[test]
     fn vehicle_commands_refuse_missing_recordings_and_unrelated_world_controls() {

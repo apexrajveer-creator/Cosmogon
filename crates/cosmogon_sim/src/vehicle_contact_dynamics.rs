@@ -1247,7 +1247,22 @@ pub(crate) fn advance(flight: &mut Flight, world: &Universe, to: f64) -> Result<
         {
             return Err("Contact substep is below represented flight-clock precision".into());
         }
+        let launch_throttle = command.throttle;
+        let launch_thrust_acceleration_m_s2 =
+            d.rated_thrust_n * command.throttle / d.inert_mass_kg();
         next = substep(&next, world, &h, step, command)?;
+        if next.definition.launch.is_some() {
+            let sample_time = next.last_time_s;
+            let elapsed_s = next.propulsion.elapsed_s;
+            crate::vehicle_launch::observe(
+                &mut next,
+                world,
+                sample_time,
+                launch_throttle,
+                launch_thrust_acceleration_m_s2,
+                elapsed_s,
+            )?;
+        }
         count += 1;
     }
     while let Some(index) = next.pending_authored_removal() {
@@ -1345,6 +1360,7 @@ mod tests {
             cargo_ledgers: false,
             cargo_removals: vec![],
             handling: None,
+            launch: None,
         };
         d.validate(&world).unwrap();
         (world, d)

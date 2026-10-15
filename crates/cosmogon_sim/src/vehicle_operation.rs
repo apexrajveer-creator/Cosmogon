@@ -348,6 +348,7 @@ mod tests {
             cargo_ledgers: false,
             cargo_removals: vec![],
             handling: None,
+            launch: None,
         };
         d.validate(&world).unwrap();
         (world, d)

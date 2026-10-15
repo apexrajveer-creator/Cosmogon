@@ -686,6 +686,7 @@ pub(crate) fn fixture() -> (Universe, crate::world_vehicle::Definition) {
         cargo_ledgers: false,
         cargo_removals: vec![],
         handling: None,
+        launch: None,
     };
     d.validate(&world).unwrap();
     (world, d)

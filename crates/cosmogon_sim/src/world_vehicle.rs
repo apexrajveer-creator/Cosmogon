@@ -46,6 +46,10 @@ pub struct Definition {
     /// Opt-in finite surface handling equipment; absent legacy definitions stay exact.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handling: Option<crate::vehicle_handling::Equipment>,
+    /// Opt-in finite launch structural limits and trajectory evidence; absent
+    /// legacy definitions stay exact. Launch-limited craft require contact gear.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch: Option<crate::vehicle_launch::Limits>,
 }
 /// One authored, timed finite species-removal request in the craft-relative frame.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -80,6 +84,7 @@ impl Definition {
             cargo_ledgers: false,
             cargo_removals: vec![],
             handling: None,
+            launch: None,
         };
         d.validate(u)?;
         Ok(d)
@@ -98,6 +103,29 @@ impl Definition {
         self.handling = Some(equipment);
         self.validate_structure()?;
         Ok(self)
+    }
+    /// Read a versioned world-flight definition file, validating its
+    /// world-independent structure before returning it.
+    pub fn read(path: &std::path::Path) -> Result<Self, String> {
+        let definition: Self = serde_json::from_str(&crate::habitat_recording::read(
+            path,
+            1024 * 1024,
+        )?)
+        .map_err(|e| e.to_string())?;
+        definition.validate_structure()?;
+        Ok(definition)
+    }
+    /// Write this definition to a new protected file.
+    pub fn write(&self, path: &std::path::Path) -> Result<(), String> {
+        use std::io::Write;
+        self.validate_structure()?;
+        let bytes = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(|e| format!("Existing definitions are protected: {e}"))?;
+        file.write_all(&bytes).map_err(|e| e.to_string())
     }
     pub fn validate_structure(&self) -> Result<(), String> {
         if self.frame != FRAME || !matches!((self.model.as_str(), &self.contact), (MODEL, None) | (CONTACT_MODEL | SHEAR_MODEL, Some(_))) {
@@ -133,6 +161,12 @@ impl Definition {
                 return Err(
                     "Handling equipment requires authored contact surface-operation hardware".into(),
                 );
+            }
+        }
+        if let Some(l) = &self.launch {
+            l.validate()?;
+            if self.contact.is_none() {
+                return Err("Launch limits require authored contact landing gear".into());
             }
         }
         self.plan.validate()?;
@@ -255,6 +289,10 @@ pub struct Flight {
     /// and a matching habitat receipt. Absent legacy flights stay byte-exact.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transfers: Vec<crate::vehicle_transfer::Transfer>,
+    /// Opt-in launch trajectory evidence; created with launch-limited
+    /// definitions. Absent legacy flights stay byte-exact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_ledger: Option<crate::vehicle_launch::Ledger>,
 }
 /// World-side evidence for one cargo removal from an authoritative flight.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -294,6 +332,30 @@ impl Flight {
             );
         }
         supported_motion(position, velocity)?;
+        let launch_ledger = match &d.launch {
+            Some(limits) => {
+                limits.validate()?;
+                let clearance = crate::vehicle_contact::Surface::sample(
+                    u,
+                    d.parent,
+                    u.time,
+                    position,
+                    1.,
+                )?
+                .radial_clearance_m;
+                if clearance > limits.maximum_start_altitude_m {
+                    return Err(format!(
+                        "Launch definitions require a surface start at or below {} m above the local terrain (current {clearance} m)",
+                        limits.maximum_start_altitude_m
+                    ));
+                }
+                Some(crate::vehicle_launch::Ledger::new(
+                    d.plan.definition.initial_propellant_kg,
+                    clearance,
+                ))
+            }
+            None => None,
+        };
         let propulsion = State::new(&d.plan.definition)?;
         let cargo = if d.cargo_ledgers {
             Some(crate::vehicle_cargo_mass::Ledger::new(&d.plan.definition)?)
@@ -318,6 +380,7 @@ impl Flight {
             cargo,
             cargo_events: vec![],
             transfers: vec![],
+            launch_ledger,
         })
     }
     /// Actual current vehicle mass: dry + held cargo (ledger epoch) + remaining propellant.
@@ -652,6 +715,23 @@ impl Flight {
         }
         crate::vehicle_transfer::validate_transfers(self, u)
             .map_err(|e| format!("Invalid retained transfer records: {e}"))?;
+        match (&self.definition.launch, &self.launch_ledger) {
+            (Some(limits), Some(ledger)) => {
+                limits
+                    .validate()
+                    .map_err(|e| format!("Invalid retained launch limits: {e}"))?;
+                ledger
+                    .validate()
+                    .map_err(|e| format!("Invalid retained launch ledger: {e}"))?;
+            }
+            (Some(_), None) => {
+                return Err("Launch-limited flights require a retained launch ledger".into())
+            }
+            (None, Some(_)) => {
+                return Err("Retained launch ledgers require authored launch limits".into())
+            }
+            (None, None) => {}
+        }
         let clock_tolerance =
             (64. * f64::EPSILON * self.last_time_s.abs().max(self.launched_at_s.abs())).max(1e-6);
         if !u.time.is_finite()

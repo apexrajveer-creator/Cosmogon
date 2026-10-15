@@ -633,6 +633,10 @@ pub fn context_for(definition: &Definition) -> Value {
         result["operation_window"]=crate::vehicle_operation::context();
         result["operation_required_window_s"]=json!(operation.required_window_s);
     }
+    if let Some(limits)=&definition.launch {
+        result["launch"]=crate::vehicle_launch::context();
+        result["launch_limits"]=json!({"maximum_acceleration_m_s2":limits.maximum_acceleration_m_s2,"liftoff_altitude_m":limits.liftoff_altitude_m,"maximum_start_altitude_m":limits.maximum_start_altitude_m});
+    }
     result["gravity"]=json!("Existing Newtonian test-particle sources; target point-mass field evaluated outside modeled terrain even where overview relief lies below the spherical base. Other-source hull intersections are unsupported, conservatively refused.");
     result
 }

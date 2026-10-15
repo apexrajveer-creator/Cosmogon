@@ -154,6 +154,9 @@ pub fn data_versions(u: &Universe) -> std::collections::BTreeMap<String, String>
     if u.vehicles.iter().any(|v| !v.transfers.is_empty()) || u.habitats.iter().any(|h| !h.receipts.is_empty()) || u.edits.iter().any(|r| matches!(&r.edit, crate::sandbox::Edit::TransferVehicleCargoToHabitat {..})) {
         m.insert("cosmogon-vehicle-transfer".into(),crate::vehicle_transfer::MODEL.into());
     }
+    if u.vehicles.iter().any(|v| v.definition.launch.is_some() || v.launch_ledger.is_some()) || u.edits.iter().any(|r| matches!(&r.edit, crate::sandbox::Edit::CreateVehicle {definition} if definition.launch.is_some())) {
+        m.insert("cosmogon-vehicle-launch".into(),crate::vehicle_launch::MODEL.into());
+    }
     m
 }
 
@@ -206,7 +209,7 @@ pub fn from_json(s: &str) -> Result<Universe, SaveError> {
             if h.id>=u.next_habitat_id || !ids.insert(h.id) || u.systems.get(h.definition.body.system as usize).and_then(|s|s.bodies.get(h.definition.body.body as usize)).is_none() {return Err(SaveError::Model("Duplicate habitat identifier or invalid world reference".into()));}
         }
     }
-    for (id,model) in [("cosmogon-finite-world-vehicle",crate::world_vehicle::MODEL),("cosmogon-supply-vehicle-reference",crate::supply_vehicle::MODEL),("cosmogon-finite-terrain-contact",crate::vehicle_contact::MODEL),("cosmogon-world-vehicle-contact-capability",crate::world_vehicle::CONTACT_MODEL),("cosmogon-finite-foot-shear",crate::vehicle_shear::MODEL),("cosmogon-persistent-terrain-contact",crate::vehicle_contact_dynamics::SHEAR_MODEL),("cosmogon-world-vehicle-shear-capability",crate::world_vehicle::SHEAR_MODEL),("cosmogon-vehicle-surface-operation",crate::vehicle_operation::MODEL),("cosmogon-vehicle-cargo-flight",crate::vehicle_cargo_mass::MODEL),("cosmogon-vehicle-handling",crate::vehicle_handling::MODEL),("cosmogon-vehicle-transfer",crate::vehicle_transfer::MODEL)] {
+    for (id,model) in [("cosmogon-finite-world-vehicle",crate::world_vehicle::MODEL),("cosmogon-supply-vehicle-reference",crate::supply_vehicle::MODEL),("cosmogon-finite-terrain-contact",crate::vehicle_contact::MODEL),("cosmogon-world-vehicle-contact-capability",crate::world_vehicle::CONTACT_MODEL),("cosmogon-finite-foot-shear",crate::vehicle_shear::MODEL),("cosmogon-persistent-terrain-contact",crate::vehicle_contact_dynamics::SHEAR_MODEL),("cosmogon-world-vehicle-shear-capability",crate::world_vehicle::SHEAR_MODEL),("cosmogon-vehicle-surface-operation",crate::vehicle_operation::MODEL),("cosmogon-vehicle-cargo-flight",crate::vehicle_cargo_mass::MODEL),("cosmogon-vehicle-handling",crate::vehicle_handling::MODEL),("cosmogon-vehicle-transfer",crate::vehicle_transfer::MODEL),("cosmogon-vehicle-launch",crate::vehicle_launch::MODEL)] {
         if (expected.contains_key(id) || terrain_versions.get(id).is_some()) && terrain_versions.get(id).and_then(Value::as_str) != Some(model) {
             return Err(SaveError::Vehicle(format!("Missing or mismatched {id} model pin")));
         }
@@ -383,6 +386,7 @@ mod tests {
             cargo_ledgers: true,
             cargo_removals: vec![],
             handling: Some(crate::vehicle_handling::Equipment::example()),
+            launch: None,
         };
         definition.validate(&world).unwrap();
         world
@@ -449,6 +453,37 @@ mod tests {
         assert!(matches!(from_json(&stripped.to_string()), Err(SaveError::Vehicle(_))));
         let mut tampered: Value = serde_json::from_str(&json).unwrap();
         tampered["header"]["data_versions"]["cosmogon-vehicle-transfer"] = serde_json::json!("wrong/9");
+        assert!(matches!(from_json(&tampered.to_string()), Err(SaveError::Vehicle(_))));
+    }
+
+    #[test]
+    fn launch_pin_is_conditional_and_enforced() {
+        let settings = UniverseSettings { scenario: Scenario::SolarSystemLab, ..Default::default() };
+        let plain = Universe::new(settings);
+        let header = serde_json::to_value(header_for(&plain, "plain")).unwrap();
+        assert!(header["data_versions"].get("cosmogon-vehicle-launch").is_none());
+
+        let world = crate::vehicle_launch::tests::launch_world(
+            50.,
+            crate::vehicle_launch::Limits::example(),
+            None,
+            1.6,
+        );
+        let header = serde_json::to_value(header_for(&world, "launch")).unwrap();
+        assert_eq!(
+            header["data_versions"]["cosmogon-vehicle-launch"].as_str(),
+            Some(crate::vehicle_launch::MODEL)
+        );
+        let json = to_json(&world, "launch").unwrap();
+        assert!(from_json(&json).is_ok());
+        let mut stripped: Value = serde_json::from_str(&json).unwrap();
+        stripped["header"]["data_versions"]
+            .as_object_mut()
+            .unwrap()
+            .remove("cosmogon-vehicle-launch");
+        assert!(matches!(from_json(&stripped.to_string()), Err(SaveError::Vehicle(_))));
+        let mut tampered: Value = serde_json::from_str(&json).unwrap();
+        tampered["header"]["data_versions"]["cosmogon-vehicle-launch"] = serde_json::json!("wrong/9");
         assert!(matches!(from_json(&tampered.to_string()), Err(SaveError::Vehicle(_))));
     }
 }

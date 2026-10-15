@@ -723,6 +723,32 @@ impl FlightUi {
                         }
                     }
                 }
+                if let Some(limits)=&flight.definition.launch {
+                    ui.separator();
+                    ui.strong("Launch limits and trajectory evidence");
+                    ui.label(format!(
+                        "Structural specific-force bound {:.3} m/s² · liftoff above start +{:.3} m · surface start within {:.3} m",
+                        limits.maximum_acceleration_m_s2, limits.liftoff_altitude_m, limits.maximum_start_altitude_m
+                    ));
+                    if let Some(ledger)=&flight.launch_ledger {
+                        ui.label(format!(
+                            "Peak acceleration {:.3} m/s² · propellant consumed {:.3} kg · substeps {}",
+                            ledger.peak_acceleration_m_s2, ledger.propellant_consumed_kg, ledger.substeps_observed
+                        ));
+                        match (ledger.liftoff_elapsed_s, ledger.burnout_elapsed_s) {
+                            (Some(l), Some(b)) => ui.label(format!(
+                                "Liftoff at {l:.3} s · burnout at {b:.3} s · apogee {:.3} m above local terrain",
+                                ledger.apogee_altitude_m
+                            )),
+                            (Some(l), None) => ui.label(format!(
+                                "Liftoff at {l:.3} s · still powered or no burnout yet · apogee {:.3} m above local terrain",
+                                ledger.apogee_altitude_m
+                            )),
+                            _ => ui.label("On the pad; no liftoff evidence yet."),
+                        };
+                    }
+                    ui.label(egui::RichText::new("Evidence is accepted-substep geometry on the propulsion clock; no atmospheric ascent losses or attitude controller are modeled.").small().color(MUTED));
+                }
             }
         }
         ui.label(egui::RichText::new("Live state is saved with the sandbox. Active flight resolves one-second tasks; high time warp may lag. Use a separate recorded branch for controlled studies.").small().color(MUTED));

@@ -481,6 +481,7 @@ pub(crate) mod tests {
             cargo_ledgers: true,
             cargo_removals: vec![],
             handling: Some(equipment),
+            launch: None,
         }
     }
 
