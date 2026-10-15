@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Cosmogon"
+type: software
+authors:
+  - family-names: Dandotiya
+    given-names: Ashwin
+version: 1.0.0
+date-released: 2026-10-04
+url: "https://github.com/ashvyagni/SpaceRender"
+repository-code: "https://github.com/ashvyagni/SpaceRender"
+repository-artifact: "https://github.com/ashvyagni/SpaceRender/releases"
+license: "MIT OR Apache-2.0"
+abstract: >-
+  Cosmogon is a native, open-source living-universe sandbox that connects
+  physical, biological and engineering processes across astronomical scales
+  in one deterministic, replayable simulation. It provides a 3D universe
+  viewer, editable planetary systems, finite habitat and spacecraft models,
+  and research workflows with typed inputs, provenance, protected recordings
+  and reproducible numeric exports.
+keywords:
+  - simulation
+  - scientific-visualization
+  - planetary-science
+  - reproducibility
+  - rust
