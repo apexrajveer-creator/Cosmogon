@@ -4,6 +4,7 @@ For the complete original master directive combined with the owner graphics supp
 
 For anyone — human or AI agent — picking up Cosmogon. Read this first, then
 [ARCHITECTURE.md](ARCHITECTURE.md) and [BUILDING.md](BUILDING.md).
+Build-by-build progress (done vs remaining) is tracked in [docs/BUILD_TRACKER.md](docs/BUILD_TRACKER.md).
 
 ## Active development directive (2026-10-05)
 
