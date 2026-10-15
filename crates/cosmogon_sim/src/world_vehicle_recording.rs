@@ -220,6 +220,15 @@ impl Bundle {
                 "events":last.flight.cargo_events,"authored_removals":study.flight.cargo_removals,
                 "scope":"Studies replay authored removals only; interactive removals are save-level evidence"});
         }
+        if let Some(handling) = study.flight.handling.as_ref() {
+            manifest["handling"] = json!({"model":handling.model,
+                "per_species_limit_kg":handling.per_species_limit_kg,"total_limit_kg":handling.total_limit_kg,
+                "oxygen_interface_limit_kg":handling.oxygen_interface_limit_kg,
+                "power_w":handling.power_w,"thermal_rejection_w":handling.thermal_rejection_w,
+                "required_operation_window_s":handling.required_operation_window_s,
+                "current_window_s":rows.last().and_then(|r|r.flight.operation_ledger.as_ref()).map(|l|l.current_window_s),
+                "scope":"Authored handling limits and operation-window evidence only; no transfer, receipt or delivery occurs"});
+        }
         Ok(Self {
             study,
             origin: initial.clone(),

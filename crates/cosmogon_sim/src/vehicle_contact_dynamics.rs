@@ -1344,6 +1344,7 @@ mod tests {
             contact: Some(Hardware::example(&world, target, position).unwrap()),
             cargo_ledgers: false,
             cargo_removals: vec![],
+            handling: None,
         };
         d.validate(&world).unwrap();
         (world, d)

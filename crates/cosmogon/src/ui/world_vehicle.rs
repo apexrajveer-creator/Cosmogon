@@ -981,6 +981,12 @@ fn readings(ui: &mut egui::Ui, f: &Flight, world_time: f64) {
             ui.add(egui::Label::new(serde_json::to_string_pretty(r).unwrap()).wrap());
         });
     }
+    if let Some(h)=&f.definition.handling {
+        ui.strong("Finite surface handling equipment");
+        ui.label(format!("Species limit {:.0} kg · total {:.0} kg · shared O₂ interface {:.0} kg · required window {:.3} s",h.per_species_limit_kg,h.total_limit_kg,h.oxygen_interface_limit_kg,h.required_operation_window_s));
+        ui.label(format!("Declared draw {:.0} W · thermal rejection {:.0} W (assumptions; no craft power bus or thermal integration) · current supported window {}",h.power_w,h.thermal_rejection_w,f.operation_ledger.as_ref().map(|l|format!("{:.3} s",l.current_window_s)).unwrap_or("none".into())));
+        ui.label("Handling is authorize-only: this build never transfers, receives or delivers cargo.");
+    }
     ui.collapsing("Position, velocity and complete numeric readings",|ui|{
         ui.label(format!("System-local position [{:.6}, {:.6}, {:.6}] m",f.position_m.x,f.position_m.y,f.position_m.z));
         ui.label(format!("System-frame velocity [{:.9}, {:.9}, {:.9}] m/s",f.velocity_m_s.x,f.velocity_m_s.y,f.velocity_m_s.z));

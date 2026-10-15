@@ -178,6 +178,13 @@ fn config(ui: &mut egui::Ui, c: &mut Config) {
         number(ui,"Recycler load (W)",&mut c.recycler_power_w,0.0,1.0e6);number(ui,"Wastewater processing (kg/s)",&mut c.recycler_rate_kg_s,0.0,100.0);number(ui,"Recovered water fraction (assumed)",&mut c.water_recovery_fraction,0.0,1.0);
         ui.label(egui::RichText::new("Zero equipment power disables that processor. Recovery fraction does not establish contaminant removal or potable-water quality.").small().color(MUTED));
     });
+    egui::CollapsingHeader::new("Finite supply storage").show(ui,|ui| {
+        number(ui,"O₂ reserve tank (kg)",&mut c.oxygen_reserve_capacity_kg,0.0,1.0e7);
+        number(ui,"Potable water tank (kg)",&mut c.potable_water_capacity_kg,0.0,1.0e7);
+        number(ui,"Dry food store (kg)",&mut c.food_dry_capacity_kg,0.0,1.0e7);
+        number(ui,"Food water store (kg)",&mut c.food_water_capacity_kg,0.0,1.0e7);
+        ui.label(egui::RichText::new("Each tank is a finite general store for one transferable supply species. Oxygen reserve is never cabin pressure; food-bound water is not potable liquid; dry food implies no energy credit. Stored stock can never exceed its tank.").small().color(MUTED));
+    });
     egui::CollapsingHeader::new("Thermal controls").show(ui, |ui| {
         number(
             ui,
@@ -322,7 +329,7 @@ pub fn panel(
                 egui::Grid::new("habitat-budgets").num_columns(2).spacing([24.0,7.0]).striped(true).show(ui,|ui| {
                     for (label,value) in [
                         ("Cabin temperature",format!("{:.2} K",s.temperature_k)),("Total pressure",format!("{:.2} kPa",s.pressure_pa(c)/1000.0)),("Oxygen partial pressure",format!("{:.2} kPa",s.oxygen_pa(c)/1000.0)),("CO₂ partial pressure",format!("{:.2} Pa",s.co2_pa(c))),
-                        ("Battery",format!("{:.3} / {:.3} kWh",s.battery_j/3.6e6,c.battery_capacity_j/3.6e6)),("Power generated / served",format!("{:.1} / {:.1} W",b.generated_w,b.delivered_w)),("Unserved electrical demand",format!("{:.1} W",b.unserved_w)),("Stored oxygen",format!("{:.3} kg",s.oxygen_reserve_kg)),("Potable / wastewater",format!("{:.3} / {:.3} kg",s.potable_water_kg,s.wastewater_kg)),("Dry food / food water",format!("{:.3} / {:.3} kg",s.food_dry_kg,s.food_water_kg)),("Captured CO₂",format!("{:.3} / {:.3} kg",s.captured_co2_kg,c.capture_capacity_kg)),("Unserved nominal crew demand",format!("{:.3} person-hours",h.totals.unserved_person_seconds/3600.0))] {ui.label(label);ui.strong(value);ui.end_row();}
+                        ("Battery",format!("{:.3} / {:.3} kWh",s.battery_j/3.6e6,c.battery_capacity_j/3.6e6)),("Power generated / served",format!("{:.1} / {:.1} W",b.generated_w,b.delivered_w)),("Unserved electrical demand",format!("{:.1} W",b.unserved_w)),("Stored oxygen",format!("{:.3} / {:.0} kg tank",s.oxygen_reserve_kg,c.oxygen_reserve_capacity_kg)),("Potable / wastewater",format!("{:.3} / {:.3} kg",s.potable_water_kg,s.wastewater_kg)),("Dry food / food water",format!("{:.3} / {:.3} kg",s.food_dry_kg,s.food_water_kg)),("Free tank space (O₂ · water · food · food water)",{let free=h.available_cargo();format!("{:.1} · {:.1} · {:.1} · {:.1} kg",free.oxygen_reserve_kg,free.potable_water_kg,free.food_dry_kg,free.food_water_kg)}),("Captured CO₂",format!("{:.3} / {:.3} kg",s.captured_co2_kg,c.capture_capacity_kg)),("Unserved nominal crew demand",format!("{:.3} person-hours",h.totals.unserved_person_seconds/3600.0))] {ui.label(label);ui.strong(value);ui.end_row();}
                 });
                 egui::CollapsingHeader::new("Interval flows and numerical residuals").show(ui,|ui| {
                     ui.label(format!("O₂ makeup {:.6} kg · CO₂ captured {:.6} kg · water processed/recovered {:.6}/{:.6} kg",b.oxygen_makeup_kg,b.co2_captured_kg,b.water_processed_kg,b.water_recovered_kg));

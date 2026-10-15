@@ -1,3 +1,10 @@
+## Unreleased — finite handling equipment and recipient storage capacity
+
+- Add four optional finite habitat general storage tanks (defaulting to the historical 1e7 kg bound, byte-exact for legacy definitions) that bound initial stock, held stock and reconfiguration per transferable species, with an O₂-tank-above-installed-equipment-capacity coupling and potable-recovery clamping that keeps overflow as brine; add `Habitat::held_cargo`/`storage_capacity_cargo`/`available_cargo` queries.
+- Add opt-in authored craft handling equipment (`cosmogon-vehicle-handling/1`) with per-species, total, shared oxygen-interface and required-operation-window limits plus declared-but-unmodeled power/thermal assumptions (structurally requiring cargo ledgers and surface-operation hardware), and a pure request/accept/reject preflight with a deterministic trim order that keeps rejected stock explicit on the craft. Nothing transfers, is received or delivered.
+- Add conditional `manifest["handling"]` study evidence with exact `flight-inspect` replay, a native tanks/readout exposure and a conditional `cosmogon-vehicle-handling` save pin. Legacy worlds serialize byte-exactly and the golden remains `0xf2c4140a45ae509b`.
+- Verify 562 release tests plus one existing ignored, no new clippy warnings in touched files, a fresh CLI release build and a seven-case end-to-end loop (contact-study handling manifest, geographic landing with a real 9.38671875 s supported window, replay-exact inspect, legacy stability, four negative cases). [Guide](docs/VEHICLE_HANDLING_CAPACITY.md), [verification](docs/VEHICLE_HANDLING_CAPACITY_VALIDATION.md).
+
 ## Unreleased — cargo mass in authoritative world flight
 
 - Add opt-in strictly versioned per-flight cargo mass ledgers (`cosmogon-vehicle-cargo-mass-epochs/1`) so held cargo is part of the craft's real mass in every integration step of both the spherical and rigid-contact solvers, with `Flight::mass_kg()` as the single authoritative accessor and epoch-correct thrust/mass-flow/force/inertia substeps.

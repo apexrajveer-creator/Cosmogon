@@ -69,6 +69,22 @@ pub struct Config {
     pub moisture: Option<crate::moisture::Config>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub breach: Option<crate::breach::Config>,
+    /// Finite general storage for the four transferable supply stocks. Absent legacy
+    /// definitions keep the historical 1e7 kg general bound byte-exactly.
+    #[serde(default = "default_storage_capacity", skip_serializing_if = "is_default_storage_capacity")]
+    pub oxygen_reserve_capacity_kg: f64,
+    #[serde(default = "default_storage_capacity", skip_serializing_if = "is_default_storage_capacity")]
+    pub potable_water_capacity_kg: f64,
+    #[serde(default = "default_storage_capacity", skip_serializing_if = "is_default_storage_capacity")]
+    pub food_dry_capacity_kg: f64,
+    #[serde(default = "default_storage_capacity", skip_serializing_if = "is_default_storage_capacity")]
+    pub food_water_capacity_kg: f64,
+}
+fn default_storage_capacity() -> f64 {
+    1.0e7
+}
+fn is_default_storage_capacity(v: &f64) -> bool {
+    *v == 1.0e7
 }
 impl Default for Config {
     fn default() -> Self {
@@ -109,6 +125,10 @@ impl Default for Config {
             sabatier: None,
             moisture: None,
             breach: None,
+            oxygen_reserve_capacity_kg: default_storage_capacity(),
+            potable_water_capacity_kg: default_storage_capacity(),
+            food_dry_capacity_kg: default_storage_capacity(),
+            food_water_capacity_kg: default_storage_capacity(),
         }
     }
 }
@@ -165,6 +185,14 @@ impl Config {
             "CO₂ capture capacity (kg)",
         )?;
         for (v, n) in [
+            (self.oxygen_reserve_capacity_kg, "O₂ reserve storage capacity"),
+            (self.potable_water_capacity_kg, "Potable water storage capacity"),
+            (self.food_dry_capacity_kg, "Dry food storage capacity"),
+            (self.food_water_capacity_kg, "Food water storage capacity"),
+        ] {
+            bounds(v, 0.0, 1.0e7, n)?;
+        }
+        for (v, n) in [
             (self.scrubber_rate_kg_s, "CO₂ capture rate"),
             (self.recycler_rate_kg_s, "Water processing rate"),
             (self.oxygen_makeup_rate_kg_s, "O₂ makeup rate"),
@@ -195,6 +223,18 @@ impl Config {
         if let Some(c) = &self.sabatier {c.validate()?;}
         if let Some(c) = &self.moisture {c.validate()?;}
         if let Some(c) = &self.breach {c.validate()?;}
+        // Internal oxygen production is gated only by equipment product capacities,
+        // so the reserve tank must at least cover every installed oxygen ceiling.
+        if let Some(c) = &self.crop {
+            if c.oxygen_capacity_kg > self.oxygen_reserve_capacity_kg {
+                return Err("O₂ reserve storage capacity is below installed crop oxygen capacity".into());
+            }
+        }
+        if let Some(e) = &self.electrolysis {
+            if e.oxygen_capacity_kg > self.oxygen_reserve_capacity_kg {
+                return Err("O₂ reserve storage capacity is below installed electrolysis oxygen capacity".into());
+            }
+        }
         Ok(())
     }
 }
@@ -291,6 +331,24 @@ impl Definition {
             (i.food_water_kg, "Food water"),
         ] {
             bounds(v, 0.0, 1.0e7, n)?;
+        }
+        for (stock, capacity, n) in [
+            (i.oxygen_reserve_kg, self.config.oxygen_reserve_capacity_kg, "Initial O₂ reserve"),
+            (
+                i.potable_water_kg,
+                self.config.potable_water_capacity_kg,
+                "Initial potable water",
+            ),
+            (i.food_dry_kg, self.config.food_dry_capacity_kg, "Initial dry food"),
+            (
+                i.food_water_kg,
+                self.config.food_water_capacity_kg,
+                "Initial food water",
+            ),
+        ] {
+            if stock > capacity {
+                return Err(format!("{n} exceeds its storage capacity"));
+            }
         }
         bounds(i.captured_co2_kg,0.,self.config.capture_capacity_kg,"Initial captured CO2")?;
         bounds(i.crop_nutrient_equivalent_kg,0.,1e7,"Initial crop nutrient-equivalent")?;
@@ -568,6 +626,28 @@ impl Habitat {
         ] {
             bounds(value, 0.0, 1.0e12, "Stored habitat quantity")?;
         }
+        for (stock, capacity, n) in [
+            (
+                s.oxygen_reserve_kg,
+                self.config.oxygen_reserve_capacity_kg,
+                "O₂ reserve",
+            ),
+            (
+                s.potable_water_kg,
+                self.config.potable_water_capacity_kg,
+                "Potable water",
+            ),
+            (s.food_dry_kg, self.config.food_dry_capacity_kg, "Dry food"),
+            (
+                s.food_water_kg,
+                self.config.food_water_capacity_kg,
+                "Food water",
+            ),
+        ] {
+            if stock > capacity {
+                return Err(format!("{n} exceeds its storage capacity"));
+            }
+        }
         if let Some(g)=s.escaped_gas {
             g.validate()?;
             let original=Self::new(self.id,self.definition.clone(),self.last_time)?.state.mass_kg();
@@ -722,7 +802,64 @@ impl Habitat {
             }
         }
         if let Some(m)=&c.moisture {if m.condensate_capacity_kg<self.state.condensate_kg {return Err("New condensate capacity is below held liquid; no water discarded".into());}}
+        for (held, capacity, n) in [
+            (
+                self.state.oxygen_reserve_kg,
+                c.oxygen_reserve_capacity_kg,
+                "O₂ reserve storage",
+            ),
+            (
+                self.state.potable_water_kg,
+                c.potable_water_capacity_kg,
+                "Potable water storage",
+            ),
+            (
+                self.state.food_dry_kg,
+                c.food_dry_capacity_kg,
+                "Dry food storage",
+            ),
+            (
+                self.state.food_water_kg,
+                c.food_water_capacity_kg,
+                "Food water storage",
+            ),
+        ] {
+            if capacity < held {
+                return Err(format!(
+                    "New {n} capacity is below held stock; no mass was discarded"
+                ));
+            }
+        }
         Ok(())
+    }
+    /// Current held supply stocks in the transferable species mapping.
+    pub fn held_cargo(&self) -> crate::supply_vehicle::Cargo {
+        crate::supply_vehicle::Cargo {
+            oxygen_reserve_kg: self.state.oxygen_reserve_kg,
+            potable_water_kg: self.state.potable_water_kg,
+            food_dry_kg: self.state.food_dry_kg,
+            food_water_kg: self.state.food_water_kg,
+        }
+    }
+    /// Finite general storage capacities for the same species mapping.
+    pub fn storage_capacity_cargo(&self) -> crate::supply_vehicle::Cargo {
+        crate::supply_vehicle::Cargo {
+            oxygen_reserve_kg: self.config.oxygen_reserve_capacity_kg,
+            potable_water_kg: self.config.potable_water_capacity_kg,
+            food_dry_kg: self.config.food_dry_capacity_kg,
+            food_water_kg: self.config.food_water_capacity_kg,
+        }
+    }
+    /// Free space per species: capacity minus held stock, never negative.
+    pub fn available_cargo(&self) -> crate::supply_vehicle::Cargo {
+        let capacity = self.storage_capacity_cargo();
+        let held = self.held_cargo();
+        crate::supply_vehicle::Cargo {
+            oxygen_reserve_kg: (capacity.oxygen_reserve_kg - held.oxygen_reserve_kg).max(0.0),
+            potable_water_kg: (capacity.potable_water_kg - held.potable_water_kg).max(0.0),
+            food_dry_kg: (capacity.food_dry_kg - held.food_dry_kg).max(0.0),
+            food_water_kg: (capacity.food_water_kg - held.food_water_kg).max(0.0),
+        }
     }
     pub fn uses_crop(&self)->bool {self.config.crop.is_some() || self.definition.config.crop.is_some() || self.state.crop.is_some() || self.budget.crop.is_some()}
     pub fn uses_breach(&self)->bool {self.config.breach.is_some() || self.definition.config.breach.is_some() || self.budget.breach.is_some() || self.state.escaped_gas.is_some() || self.totals.breach_enthalpy_j>0.0}
@@ -878,21 +1015,26 @@ impl Habitat {
         s.co2_kg -= captured;
         s.captured_co2_kg += captured;
         let processed = (c.recycler_rate_kg_s * dt * fraction(2)).min(s.wastewater_kg);
-        let recovered = processed * c.water_recovery_fraction;
+        // Recovery enters the finite potable tank; overflow stays in the processed
+        // stream as brine, never discarded. Default 1e7 kg tanks never bind.
+        let recovered = (processed * c.water_recovery_fraction)
+            .min((c.potable_water_capacity_kg - s.potable_water_kg).max(0.0));
         s.wastewater_kg -= processed;
-        s.potable_water_kg += recovered;
+        s.potable_water_kg = (s.potable_water_kg + recovered).min(c.potable_water_capacity_kg);
         s.brine_kg += processed - recovered;
         // Raw product needs the existing powered processing assumption, after wastewater.
         // Products generated below are unavailable here until a later interval.
         let product_processed = (c.recycler_rate_kg_s*dt*fraction(2)-processed).max(0.0).min(sabatier_start.water_kg);
-        let product_recovered = product_processed*c.water_recovery_fraction;
+        let product_recovered = (product_processed*c.water_recovery_fraction)
+            .min((c.potable_water_capacity_kg - s.potable_water_kg).max(0.0));
         s.sabatier_water_kg = (s.sabatier_water_kg-product_processed).max(0.0);
-        s.potable_water_kg += product_recovered;
+        s.potable_water_kg = (s.potable_water_kg + product_recovered).min(c.potable_water_capacity_kg);
         s.brine_kg += product_processed-product_recovered;
         let condensate_processed=(c.recycler_rate_kg_s*dt*fraction(2)-processed-product_processed).max(0.0).min(condensate_start);
-        let condensate_recovered=condensate_processed*c.water_recovery_fraction;
+        let condensate_recovered=(condensate_processed*c.water_recovery_fraction)
+            .min((c.potable_water_capacity_kg - s.potable_water_kg).max(0.0));
         s.condensate_kg=(s.condensate_kg-condensate_processed).max(0.0);
-        s.potable_water_kg+=condensate_recovered;
+        s.potable_water_kg=(s.potable_water_kg+condensate_recovered).min(c.potable_water_capacity_kg);
         s.brine_kg+=condensate_processed-condensate_recovered;
         let moisture=c.moisture.as_ref().zip(moisture_plan).map(|(m,p)|crate::moisture::Budget::from_power(m,p,supplied[7],crew_vapor,dt));
         let crew_phase=crew_vapor*crate::moisture::REFERENCE_PHASE_J_KG;
@@ -1676,5 +1818,74 @@ mod integration_tests {
         std::fs::write(root.join("bad.json"), vec![b'x'; 65_537]).unwrap();
         assert!(Definition::read(&root.join("bad.json")).is_err());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn storage_capacities_are_skipped_when_default_and_authored_when_present() {
+        let json = serde_json::to_string(&Config::default()).unwrap();
+        assert!(!json.contains("oxygen_reserve_capacity_kg"));
+        assert!(!json.contains("potable_water_capacity_kg"));
+        assert!(!json.contains("food_dry_capacity_kg"));
+        assert!(!json.contains("food_water_capacity_kg"));
+        let parsed: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, Config::default());
+        assert_eq!(parsed.oxygen_reserve_capacity_kg, 1.0e7);
+        let authored = Config {
+            potable_water_capacity_kg: 250.,
+            ..Config::default()
+        };
+        let json = serde_json::to_string(&authored).unwrap();
+        assert!(json.contains("potable_water_capacity_kg"));
+        assert!(!json.contains("oxygen_reserve_capacity_kg"));
+        let parsed: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.potable_water_capacity_kg, 250.);
+    }
+
+    #[test]
+    fn storage_capacities_bound_initial_state_and_reconfiguration() {
+        let mut d = Definition::at(BodyRef { system: 0, body: 0 }, 0.0, 0.0);
+        d.config.potable_water_capacity_kg = 100.;
+        let error = d.validate().unwrap_err();
+        assert!(error.contains("exceeds its storage capacity"), "{error}");
+        d.initial.potable_water_kg = 100.;
+        d.validate().unwrap();
+        let mut h = Habitat::new(0, d, 0.).unwrap();
+        h.validate(0.).unwrap();
+        h.state.potable_water_kg = 101.;
+        let error = h.validate(0.).unwrap_err();
+        assert!(error.contains("below held stock"), "{error}");
+        h.state.potable_water_kg = 100.;
+        let mut shrink = h.config.clone();
+        shrink.potable_water_capacity_kg = 99.;
+        let error = h.check_config(&shrink).unwrap_err();
+        assert!(error.contains("no mass was discarded"), "{error}");
+    }
+
+    #[test]
+    fn available_cargo_reports_capacity_minus_held_stock() {
+        let mut d = Definition::at(BodyRef { system: 0, body: 0 }, 0.0, 0.0);
+        d.config.oxygen_reserve_capacity_kg = 120.;
+        d.config.food_dry_capacity_kg = 50.;
+        d.initial.food_dry_kg = 60.;
+        assert!(d.validate().is_err());
+        d.initial.food_dry_kg = 45.;
+        let h = Habitat::new(0, d, 0.).unwrap();
+        assert_eq!(h.held_cargo().oxygen_reserve_kg, 100.);
+        let free = h.available_cargo();
+        assert_eq!(free.oxygen_reserve_kg, 20.);
+        assert_eq!(free.food_dry_kg, 5.);
+        assert_eq!(free.potable_water_kg, 1.0e7 - 200.);
+        assert_eq!(free.food_water_kg, 1.0e7 - 95.);
+    }
+
+    #[test]
+    fn oxygen_storage_must_cover_installed_equipment_capacity() {
+        let mut d = Definition::at(BodyRef { system: 0, body: 0 }, 0.0, 0.0);
+        d.config.electrolysis = Some(crate::electrolysis::Config::default());
+        d.config.oxygen_reserve_capacity_kg = 150.;
+        let error = d.validate().unwrap_err();
+        assert!(error.contains("below installed electrolysis"), "{error}");
+        d.config.oxygen_reserve_capacity_kg = 200.;
+        d.validate().unwrap();
     }
 }

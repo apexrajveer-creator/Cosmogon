@@ -43,6 +43,9 @@ pub struct Definition {
     /// at the first represented propulsion-clock boundary at or after each time.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cargo_removals: Vec<AuthoredCargoRemoval>,
+    /// Opt-in finite surface handling equipment; absent legacy definitions stay exact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handling: Option<crate::vehicle_handling::Equipment>,
 }
 /// One authored, timed finite species-removal request in the craft-relative frame.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -76,6 +79,7 @@ impl Definition {
             contact: None,
             cargo_ledgers: false,
             cargo_removals: vec![],
+            handling: None,
         };
         d.validate(u)?;
         Ok(d)
@@ -108,6 +112,17 @@ impl Definition {
             {
                 return Err(
                     "Authored cargo removals require a finite 0–1e7 s clock, supported cargo and a bounded relative ejection velocity".into(),
+                );
+            }
+        }
+        if let Some(h) = &self.handling {
+            h.validate()?;
+            if !self.cargo_ledgers {
+                return Err("Handling equipment requires cargo ledgers".into());
+            }
+            if !self.contact.as_ref().is_some_and(|c| c.operation.is_some()) {
+                return Err(
+                    "Handling equipment requires authored contact surface-operation hardware".into(),
                 );
             }
         }

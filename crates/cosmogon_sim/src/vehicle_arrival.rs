@@ -283,7 +283,7 @@ impl GeographicStart {
         let centre=world.systems[target.system as usize].body_state(target.body as usize,world.time);
         let result=Definition {model:hardware.flight_model().into(),frame:crate::world_vehicle::FRAME.into(),parent:target,plan,
             initial_relative_position_m:absolute.position_m-centre.pos,initial_relative_velocity_m_s:absolute.velocity_m_s-centre.vel,contact:Some(hardware),
-            cargo_ledgers:false,cargo_removals:vec![]};
+            cargo_ledgers:false,cargo_removals:vec![],handling:None};
         Flight::new(world.next_vehicle_id,result.clone(),world)?;Ok(result)
     }
     pub fn validate(&self) -> Result<(), String> {
@@ -337,6 +337,7 @@ impl GeographicStart {
             contact: None,
             cargo_ledgers: false,
             cargo_removals: vec![],
+            handling: None,
         };
         result.validate(world)?;
         // The ordinary creation path also checks other contact sources.
