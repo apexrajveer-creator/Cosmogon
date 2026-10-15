@@ -70,7 +70,7 @@ Cosmogon source code, documentation, and release downloads are available from th
 
 **Suggested software citation (complete before publication):**
 
-> Dandotiya, A. (2026). *Cosmogon: A Reproducible Living-Universe Sandbox* (development snapshot `9eb830d`). [Project repository](https://github.com/ashvyagni/SpaceRender). [DOI, if archived].
+> Ashwin Dandotiya (2026). *Cosmogon: A Reproducible Living-Universe Sandbox* (development snapshot `9eb830d`). [Project repository](https://github.com/ashvyagni/SpaceRender). [DOI, if archived].
 
 ## References and project records
 
