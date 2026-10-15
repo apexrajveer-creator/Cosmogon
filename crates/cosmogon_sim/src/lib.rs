@@ -90,3 +90,4 @@ pub mod vehicle_operation;
 pub mod vehicle_shear;
 pub mod vehicle_support;
 pub mod vehicle_support_recording;
+pub mod vehicle_transfer;

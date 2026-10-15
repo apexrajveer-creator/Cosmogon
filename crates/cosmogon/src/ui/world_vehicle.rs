@@ -59,6 +59,9 @@ pub struct FlightUi {
     live_support:Option<Value>,
     cargo_removal_kg: f64,
     cargo_removal_relative: [f64; 3],
+    transfer_habitat: Option<u64>,
+    transfer_cargo: [f64; 4],
+    transfer_status: Option<String>,
 
 }
 impl FlightUi {
@@ -629,6 +632,95 @@ impl FlightUi {
                             "Cargo removed through an undoable world edit; momentum and ledger evidence retained.".into(),
                         ),
                         Err(e) => self.status = Some(e),
+                    }
+                }
+                let same_system: Vec<_> = sim.universe
+                    .habitats
+                    .iter()
+                    .filter(|h| h.definition.body.system == flight.definition.parent.system)
+                    .collect();
+                if !same_system.is_empty() {
+                    ui.separator();
+                    ui.strong("Co-located habitat transfer");
+                    ui.label("Atomic move of held cargo into finite habitat storage. Reach, rate and remaining capacity are checked; nothing is modeled if the craft is not co-located with the habitat within the handling reach.");
+                    egui::ComboBox::from_id_salt("live-transfer-habitat")
+                        .selected_text(
+                            self.transfer_habitat
+                                .and_then(|id| same_system.iter().find(|h| h.id == id))
+                                .map(|h| format!("Habitat #{} · {}", h.id, h.definition.name))
+                                .unwrap_or("Select a habitat in this system".into()),
+                        )
+                        .show_ui(ui, |ui| {
+                            for h in &same_system {
+                                ui.selectable_value(
+                                    &mut self.transfer_habitat,
+                                    Some(h.id),
+                                    format!("Habitat #{} · {}", h.id, h.definition.name),
+                                );
+                            }
+                        });
+                    for (label, index) in [
+                        ("Oxygen reserve (kg)", 0),
+                        ("Potable water (kg)", 1),
+                        ("Food dry (kg)", 2),
+                        ("Food water (kg)", 3),
+                    ] {
+                        ui.horizontal(|ui| {
+                            ui.label(label);
+                            ui.add(egui::DragValue::new(&mut self.transfer_cargo[index]).range(0.0..=1e6).speed(1.0));
+                        });
+                    }
+                    if let Some(status) = &self.transfer_status { ui.label(status.clone()); }
+                    let requested = Cargo {
+                        oxygen_reserve_kg: self.transfer_cargo[0],
+                        potable_water_kg: self.transfer_cargo[1],
+                        food_dry_kg: self.transfer_cargo[2],
+                        food_water_kg: self.transfer_cargo[3],
+                    };
+                    if ui
+                        .add_enabled(
+                            !sim.is_reference() && self.transfer_habitat.is_some(),
+                            egui::Button::new("Deliver cargo into this habitat"),
+                        )
+                        .clicked()
+                    {
+                        match sim.edit(
+                            Edit::TransferVehicleCargoToHabitat {
+                                system: flight.definition.parent.system,
+                                vehicle_id: flight.id,
+                                habitat_id: self.transfer_habitat.expect("enabled habitat"),
+                                requested,
+                            },
+                            now,
+                        ) {
+                            Ok(_) => {
+                                self.status = Some(
+                                    "Cargo delivered through an undoable world edit; craft and habitat ledgers record the atomic transfer.".into(),
+                                );
+                                self.transfer_status = Some(
+                                    "Transfer accepted; habitat stocks and receipts updated.".into(),
+                                );
+                            }
+                            Err(e) => {
+                                self.status = Some(e.clone());
+                                self.transfer_status = Some(e);
+                            }
+                        }
+                    }
+                    if !flight.transfers.is_empty() {
+                        ui.label(format!(
+                            "Retained transfer records on this craft: {}",
+                            flight.transfers.len()
+                        ));
+                        if let Some(t) = flight.transfers.last() {
+                            ui.label(format!(
+                                "Last transfer at {:.3} s world time · requested {:.6} kg → accepted {:.6} kg · trimmed {:.6} kg",
+                                t.world_time_s,
+                                t.requested.mass_kg(),
+                                t.accepted.mass_kg(),
+                                t.rejected.mass_kg(),
+                            ));
+                        }
                     }
                 }
             }

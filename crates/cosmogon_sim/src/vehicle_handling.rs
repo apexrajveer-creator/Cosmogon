@@ -7,7 +7,7 @@ use crate::world_vehicle::Flight;
 use serde::{Deserialize, Serialize};
 
 pub const MODEL: &str = "cosmogon-vehicle-handling/1";
-pub const LIMITS: &str = "Authored engineering limits for finite surface handling, not measured hardware. Per-species, total and shared oxygen-interface limits bound a single supported operation; the operation-window requirement is evaluated only from solver-integrated supported contact evidence. Declared electrical draw and thermal rejection are authored assumptions: no craft power bus and no handling thermal integration are modeled. This preflight is an accounting evaluation, not a transfer, delivery, landing or mission-feasibility claim.";
+pub const LIMITS: &str = "Authored engineering limits for finite surface handling, not measured hardware. Per-species, total and shared oxygen-interface limits bound a single supported operation; the operation-window requirement is evaluated only from solver-integrated supported contact evidence. Reach bounds the modeled spherical surface arc between craft and recipient sites; the mass rate bounds one operation as rate times the current supported window. Declared electrical draw and thermal rejection are authored assumptions: no craft power bus and no handling thermal integration are modeled. This preflight is an accounting evaluation, not a transfer, delivery, landing or mission-feasibility claim.";
 
 /// Authored finite handling equipment for one craft design.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -27,6 +27,20 @@ pub struct Equipment {
     pub thermal_rejection_w: f64,
     /// Minimum continuous supported-operation window required before any handling.
     pub required_operation_window_s: f64,
+    /// Maximum modeled spherical surface-arc separation between the craft ground
+    /// site and the recipient site for one supported operation.
+    #[serde(default = "default_reach_m")]
+    pub reach_m: f64,
+    /// Maximum total transferred mass per second of the current supported window.
+    /// The rate envelope for one operation is mass_rate_kg_s × current_window_s.
+    #[serde(default = "default_mass_rate_kg_s")]
+    pub mass_rate_kg_s: f64,
+}
+fn default_reach_m() -> f64 {
+    1.0e7
+}
+fn default_mass_rate_kg_s() -> f64 {
+    1.0e6
 }
 impl Equipment {
     pub fn example() -> Self {
@@ -38,6 +52,8 @@ impl Equipment {
             power_w: 5000.0,
             thermal_rejection_w: 5000.0,
             required_operation_window_s: 5.0,
+            reach_m: 2000.0,
+            mass_rate_kg_s: 50.0,
         }
     }
     pub fn validate(&self) -> Result<(), String> {
@@ -71,6 +87,12 @@ impl Equipment {
                 "Handling required operation window must be finite and between 0 and 1e7 s"
                     .into(),
             );
+        }
+        if !self.reach_m.is_finite() || !(0.0..=1.0e7).contains(&self.reach_m) {
+            return Err("Handling reach must be finite and between 0 and 1e7 m".into());
+        }
+        if !self.mass_rate_kg_s.is_finite() || !(0.0..=1.0e6).contains(&self.mass_rate_kg_s) {
+            return Err("Handling mass rate must be finite and between 0 and 1e6 kg/s".into());
         }
         Ok(())
     }
@@ -340,6 +362,26 @@ mod tests {
         let mut bad = Equipment::example();
         bad.required_operation_window_s = 1.0e9;
         assert!(bad.validate().is_err());
+        let mut bad = Equipment::example();
+        bad.reach_m = -1.;
+        assert!(bad.validate().is_err());
+        let mut bad = Equipment::example();
+        bad.reach_m = 1.0e8;
+        assert!(bad.validate().is_err());
+        let mut bad = Equipment::example();
+        bad.mass_rate_kg_s = f64::NAN;
+        assert!(bad.validate().is_err());
+        let mut bad = Equipment::example();
+        bad.mass_rate_kg_s = 1.0e9;
+        assert!(bad.validate().is_err());
+        // Definitions authored before reach/rate existed load at unconstrained defaults.
+        let legacy: Equipment = serde_json::from_str(
+            r#"{"model":"cosmogon-vehicle-handling/1","per_species_limit_kg":200.0,"total_limit_kg":400.0,"oxygen_interface_limit_kg":100.0,"power_w":5000.0,"thermal_rejection_w":5000.0,"required_operation_window_s":5.0}"#,
+        )
+        .unwrap();
+        assert_eq!(legacy.reach_m, 1.0e7);
+        assert_eq!(legacy.mass_rate_kg_s, 1.0e6);
+        assert!(legacy.validate().is_ok());
     }
 
     #[test]

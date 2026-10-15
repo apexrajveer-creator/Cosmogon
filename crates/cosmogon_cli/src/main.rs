@@ -26,6 +26,7 @@ struct Args {
     geographic_start: Option<String>,
     contact_hardware: Option<String>,
     cargo_ledgers: bool,
+    handling: bool,
     static_shear: bool,
     operation_window: Option<f64>,
     branches: Option<[usize;2]>,
@@ -74,6 +75,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         geographic_start: None,
         contact_hardware: None,
         cargo_ledgers: false,
+        handling: false,
         static_shear: false,
         operation_window: None,
         branches: None,
@@ -118,7 +120,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if matches!(a.cmd.as_str(),"flight-definition"|"flight-study"|"contact-hardware") {a.scenario=Scenario::SolarSystemLab;a.target="Mars".into();a.samples=121;a.interval_days=1.0/86400.0;}
         if a.cmd=="flight-approach" {a.target.clear();}
         if a.cmd=="habitat-sweep" {a.parameter="firm_power_w".into();}
-        if matches!(a.cmd.as_str(),"habitat-definition"|"habitat-crop-definition") {a.scenario=Scenario::SolarSystemLab;a.target="Mars".into();}
+        if matches!(a.cmd.as_str(),"habitat-definition"|"habitat-crop-definition"|"habitat-setup") {a.scenario=Scenario::SolarSystemLab;a.target="Mars".into();}
     }
     if matches!(a.cmd.as_str(), "--help" | "-h" | "help") {
         a.cmd = "help".into();
@@ -139,7 +141,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if matches!(a.cmd.as_str(),"crop-chemistry"|"crop-chemistry-inspect"|"greenhouse-supply-inspect") && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a crop supply/chemistry inspection option"));}
         if matches!(a.cmd.as_str(),"habitat-diagnose"|"habitat-crop-harvest") && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
         if a.cmd=="contact-hardware" && !matches!(flag.as_str(),"--initial"|"--target"|"--seed"|"--scenario"|"--output"|"--geographic-start"|"--static-shear"|"--operation-window") {return Err(format!("{flag} is not a contact hardware option"));}
-        if a.cmd=="flight-definition" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output"|"--target"|"--seed"|"--scenario"|"--samples"|"--interval-seconds"|"--geographic-start"|"--contact-hardware"|"--cargo-ledgers") {return Err(format!("{flag} is not a world flight definition option"));}
+        if a.cmd=="flight-definition" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output"|"--target"|"--seed"|"--scenario"|"--samples"|"--interval-seconds"|"--geographic-start"|"--contact-hardware"|"--cargo-ledgers"|"--handling") {return Err(format!("{flag} is not a world flight definition option"));}
         if a.cmd=="flight-study" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output") {return Err(format!("{flag} is not a world flight study option"));}
         if matches!(a.cmd.as_str(),"arrival-start"|"contact-start") && flag!="--output" {return Err(format!("{flag} is not a geographic start option"));}
         if a.cmd=="flight-approach" && !matches!(flag.as_str(),"--recording"|"--target"|"--output") {return Err(format!("{flag} is not a recorded approach option"));}
@@ -164,7 +166,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if a.cmd=="habitat-pressure" && !matches!(flag.as_str(),"--recording"|"--observation"|"--reference-index"|"--output") {return Err(format!("{flag} is not a recorded pressure option"));}
         if a.cmd=="habitat-inspect" && !matches!(flag.as_str(),"--recording"|"--observation"|"--output") {return Err(format!("{flag} is not a habitat inspection option"));}
         if a.cmd=="habitat" && !matches!(flag.as_str(),"--definition"|"--habitat-id"|"--initial"|"--output"|"--samples"|"--interval-days"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat study option"));}
-        if matches!(a.cmd.as_str(),"habitat-definition"|"habitat-crop-definition") && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat-definition option"));}
+        if matches!(a.cmd.as_str(),"habitat-definition"|"habitat-crop-definition"|"habitat-setup") && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat-definition option"));}
         if a.cmd=="habitat-sweep" && !matches!(flag.as_str(),"--definition"|"--habitat-id"|"--initial"|"--output"|"--samples"|"--interval-days"|"--parameter"|"--from"|"--to"|"--runs") {return Err(format!("{flag} is not a habitat sweep option"));}
         if a.cmd=="habitat-compare" && !matches!(flag.as_str(),"--recording"|"--reference"|"--measure"|"--alignment"|"--output") {return Err(format!("{flag} is not a habitat comparison option"));}
         if matches!(flag.as_str(),"--parameter"|"--from"|"--to"|"--runs"|"--samples"|"--interval-days") {explicit_sweep=true;}
@@ -177,6 +179,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             },
             "--contact-hardware" if a.cmd=="flight-definition" => a.contact_hardware=Some(val()?),
             "--cargo-ledgers" if a.cmd=="flight-definition" => a.cargo_ledgers=true,
+            "--handling" if a.cmd=="flight-definition" => a.handling=true,
             "--geographic-start" if matches!(a.cmd.as_str(),"flight-definition"|"contact-hardware") => a.geographic_start=Some(val()?),
             "--samples" => {
                 let requested=number::<usize>(val()?,&flag)?;explicit_samples=true;
@@ -257,7 +260,8 @@ if a.geographic_start.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err
     if a.cmd=="cargo-epochs-inspect" && a.recording.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err("cargo-epochs-inspect requires --recording COMPLETE_DIR".into());}
     if matches!(a.cmd.as_str(),"cargo-epochs-definition"|"cargo-epochs-study") && a.output.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Cargo-epochs output requires a nonempty new file/folder".into());}
     if a.cmd=="cargo-epochs-study" && a.definition.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Choose a nonempty cargo-epochs plan file".into());}
-    if matches!(a.cmd.as_str(),"flight-definition"|"contact-hardware"|"habitat"|"habitat-definition"|"habitat-crop-definition") && a.initial.is_some() && (explicit_scenario || explicit_seed) {return Err("Choose saved --initial world or new --scenario/--seed, not both".into());}
+    if matches!(a.cmd.as_str(),"flight-definition"|"contact-hardware"|"habitat"|"habitat-definition"|"habitat-crop-definition"|"habitat-setup") && a.initial.is_some() && (explicit_scenario || explicit_seed) {return Err("Choose saved --initial world or new --scenario/--seed, not both".into());}
+    if a.cmd=="habitat-setup" && a.output.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err("habitat-setup requires --output NEW_FILE".into());}
     if matches!(a.cmd.as_str(),"greenhouse"|"greenhouse-supplies") && a.habitat_id.is_some() && a.initial.is_none() {return Err("Greenhouse habitat context requires --initial saved world".into());}
     if a.cmd=="habitat-sweep" {
         if a.initial.is_none() || a.output.is_none() {return Err("habitat-sweep requires --initial SAVE and --output NEW_DIR".into());}
@@ -319,7 +323,8 @@ fn help() {
     eprintln!("cosmogon-cli contact-start [--output NEW_FILE]\ncosmogon-cli contact-hardware [--static-shear --operation-window SECONDS --initial WORLD --target Mars --geographic-start FILE --output NEW_FILE]\nflight-definition --contact-hardware FILE explicitly enables versioned terrain/rigid-body motion; --operation-window adds the modeled solver-integrated surface-operation ledger; no safe landing or delivery");
     eprintln!("cosmogon-cli support-definition [--output NEW_FILE]\ncosmogon-cli flight-support --recording COMPLETE_FLIGHT_DIR [--definition LIMITS_FILE --output NEW_DIR]\ncosmogon-cli support-inspect --recording COMPLETE_SUPPORT_DIR\nConditional actual footprint/force evidence; no attachment or cargo permission");
     eprintln!("cosmogon-cli arrival-start [--output NEW_FILE]\ncosmogon-cli flight-approach --recording COMPLETE_FLIGHT_DIR [--target BODY --output NEW_DIR]\ncosmogon-cli approach-inspect --recording COMPLETE_APPROACH_DIR\nGeographic flight-definition starts: --geographic-start FILE (explicit spherical altitude and east/north/up velocities)");
-    eprintln!("cosmogon-cli flight-definition [--initial WORLD --definition PROPULSION_PLAN --target Mars --samples 121 --interval-seconds 1 --cargo-ledgers --output NEW_FILE]\ncosmogon-cli flight-study --definition PINNED_STUDY [--initial WORLD --output NEW_DIR]\ncosmogon-cli flight-inspect --recording COMPLETE_DIR   # exact full-world flight replay, no cargo delivery; --cargo-ledgers opts into retained cargo mass ledgers with epoch-accurate world flight");
+    eprintln!("cosmogon-cli flight-definition [--initial WORLD --definition PROPULSION_PLAN --target Mars --samples 121 --interval-seconds 1 --cargo-ledgers --handling --output NEW_FILE]\ncosmogon-cli flight-study --definition PINNED_STUDY [--initial WORLD --output NEW_DIR]\ncosmogon-cli flight-inspect --recording COMPLETE_DIR   # exact full-world flight replay; --cargo-ledgers opts into retained cargo mass ledgers; --handling opts into finite surface-handling equipment for co-located habitat transfers");
+    eprintln!("cosmogon-cli habitat-setup [--initial WORLD --target Mars --latitude N --longitude E --seed N --scenario S] --output NEW_FILE   # world containing one finite habitat, for flight transfer studies");
     eprintln!("cosmogon-cli vehicle-definition [--output NEW_FILE]   # explicit assumed finite vehicle and burn plan\ncosmogon-cli vehicle-study [--definition PLAN --output NEW_DIR]   # ideal free-space finite propulsion, no launch/delivery\ncosmogon-cli vehicle-inspect --recording COMPLETE_DIR   # exact independent numeric/source replay");
     eprintln!("cosmogon-cli cargo-epochs-definition [--output NEW_FILE]   # explicit burn → species removal → burn sequence\ncosmogon-cli cargo-epochs-study [--definition PLAN --output NEW_DIR]   # piecewise mass epochs, no world delivery\ncosmogon-cli cargo-epochs-inspect --recording COMPLETE_DIR   # exact independent epoch replay");
     eprintln!("cosmogon-cli habitat-rerun --recording COMPLETE_DESIGN --output NEW_DIR [--definition NEW_TYPED_PLAN]   # exact original common starting world");
@@ -346,6 +351,8 @@ fn help() {
   habitat-crop-definition [--target Mars --output NEW_FILE]  Explicit finite crop setup; maintained assumption starts false
   habitat-definition [--target Mars --latitude N --longitude E] [--initial SAVE]
       [--output NEW_FILE]        Create a complete editable preset for this world.
+  habitat-setup [--target Mars --latitude N --longitude E --seed N --scenario S]
+      --output NEW_FILE        Save a world containing one finite habitat (transfer studies).
   habitat --definition FILE [--initial SAVE] [--output NEW_DIR]
       [--samples 1..1024 --interval-days D]  At most 30 days; default 25 hourly samples.
       --initial SAVE without definition resumes an existing habitat; --habitat-id selects among many.
@@ -546,6 +553,7 @@ fn main() {
                         if let Some(h)=hardware {start.contact_flight(&world,parent,plan,h)?} else {start.flight(&world,parent,plan)?}
                     } else {let d=world_vehicle::Definition::circular_example(&world,parent,plan)?;if let Some(h)=hardware {d.with_contact(&world,h)?} else {d}};
                     let d=if a.cargo_ledgers {d.with_cargo_ledgers()?} else {d};
+                    let d=if a.handling {d.with_handling()?} else {d};
                     let study=flight::Study::new(&world,d,a.samples,a.interval_days*86400.)?;
                     if let Some(path)=&a.output {study.write(&world,std::path::Path::new(path))?;}
                     return serde_json::to_value(&study).map_err(|e|e.to_string());
@@ -587,6 +595,7 @@ fn main() {
         "habitat-sweep" => {if let Err(e)=habitat_sweep(&a) {eprintln!("Habitat sweep failed: {e}");std::process::exit(1);}},
         "habitat-compare" => {if let Err(e)=habitat_compare(&a) {eprintln!("Habitat comparison failed: {e}");std::process::exit(1);}},
         "habitat-definition"|"habitat-crop-definition" => {if let Err(e)=habitat_definition(&a) {eprintln!("Habitat definition failed: {e}");std::process::exit(1);}},
+        "habitat-setup" => {if let Err(e)=habitat_setup(&a) {eprintln!("Habitat setup failed: {e}");std::process::exit(1);}},
         "habitat" => {if let Err(e)=habitat(&a) {eprintln!("Habitat study failed: {e}");std::process::exit(1);}},
         "section" => {if let Err(e)=section(&a) {eprintln!("Terrain section failed: {e}");std::process::exit(1);}},
         "sites" => println!("{}", serde_json::to_string_pretty(&cosmogon_sim::planet::landing::registry()).unwrap()),
@@ -1051,6 +1060,25 @@ fn habitat_crop_harvest(a:&Args)->Result<(),String> {
     println!("{}",serde_json::to_string_pretty(&u.habitats.iter().find(|h|h.id==id).expect("harvested").report()).map_err(|e|e.to_string())?);Ok(())
 }
 
+/// Create a world containing one finite habitat, saved as a protected
+/// `.cosmo` file. This is the headless entry point for habitat-bearing
+/// worlds used by flight transfer studies.
+fn habitat_setup(a:&Args)->Result<(),String> {
+    use std::io::Write;
+    let mut u=if let Some(path)=&a.initial {save::read_file(std::path::Path::new(path)).map_err(|e|e.to_string())?} else {Universe::new(settings(a,a.seed))};
+    let r=u.systems.iter().find_map(|s|s.bodies.iter().enumerate().find(|(_,b)|b.exists() && b.kind.has_surface() && b.name.eq_ignore_ascii_case(&a.target)).map(|(j,_)|cosmogon_sim::BodyRef {system:s.id,body:j as u32})).ok_or("Target must identify an existing solid world")?;
+    let d=cosmogon_sim::habitat::Definition::at(r,a.latitude,a.longitude);
+    d.validate()?;
+    u.apply_edit(cosmogon_sim::sandbox::Edit::CreateHabitat {definition:Box::new(d)})?;
+    let habitat=u.habitats.last().expect("created");
+    let bytes=save::to_json(&u,"Habitat setup world").map_err(|e|e.to_string())?;
+    let path=std::path::Path::new(a.output.as_deref().ok_or("--output NEW_FILE required")?);
+    if let Some(parent)=path.parent().filter(|p|!p.as_os_str().is_empty()) {std::fs::create_dir_all(parent).map_err(|e|e.to_string())?;}
+    let mut file=std::fs::OpenOptions::new().write(true).create_new(true).open(path).map_err(|e|format!("Existing saves are protected: {e}"))?;
+    file.write_all(bytes.as_bytes()).map_err(|e|e.to_string())?;
+    println!("{}",serde_json::to_string_pretty(&serde_json::json!({"format":"cosmogon-habitat-setup","schema_version":1,"target":u.systems[r.system as usize].bodies[r.body as usize].name,"latitude_north_deg":a.latitude,"longitude_east_deg":a.longitude,"habitat_id":habitat.id,"habitat":habitat.report(),"world":path.display().to_string()})).map_err(|e|e.to_string())?);Ok(())
+}
+
 fn habitat_definition(a:&Args)->Result<(),String> {
     use std::io::Write;
     let u=if let Some(p)=&a.initial {save::read_file(std::path::Path::new(p)).map_err(|e|e.to_string())?} else {Universe::new(settings(a,a.seed))};
@@ -1096,6 +1124,15 @@ mod argument_tests {
     fn flight_commands_refuse_missing_definitions_and_ignored_origin_controls() {
         for v in [vec!["flight-study"],vec!["flight-inspect"],vec!["flight-study","--definition"," "],vec!["flight-inspect","--recording"," "],vec!["flight-inspect","--recording","r","--output","new"],vec!["flight-study","--definition","d","--samples","3"],vec!["flight-definition","--initial","s","--seed","2"],vec!["flight-definition","--interval-days","1"]] {assert!(args(&v).is_err());}
         assert!(args(&["flight-definition","--samples","9","--interval-seconds","0.5","--target","Mars"]).is_ok());assert!(args(&["flight-study","--definition","d","--initial","s","--output","new"]).is_ok());assert!(args(&["flight-inspect","--recording","r"]).is_ok());
+    }
+    #[test]
+    fn transfer_arguments_are_opt_in_and_refuse_ignored_flags() {
+        assert!(args(&["flight-definition","--handling"]).unwrap().handling);
+        assert!(args(&["flight-study","--definition","d","--handling"]).is_err());
+        for v in [vec!["habitat-setup"],vec!["habitat-setup","--samples","3"],vec!["habitat-setup","--output","o","--habitat-id","0"],vec!["habitat-setup","--output","o","--initial","s","--seed","2"]] {assert!(args(&v).is_err(),"{v:?}");}
+        let a=args(&["habitat-setup","--target","Mars","--latitude","-4.59","--longitude","137.44","--output","world.cosmo"]).unwrap();
+        assert_eq!(a.target,"Mars");assert_eq!(a.latitude,-4.59);assert_eq!(a.longitude,137.44);assert_eq!(a.output.as_deref(),Some("world.cosmo"));
+        assert!(args(&["flight-definition","--initial","w","--handling","--cargo-ledgers","--geographic-start","g"]).is_ok());
     }
     #[test]
     fn vehicle_commands_refuse_missing_recordings_and_unrelated_world_controls() {

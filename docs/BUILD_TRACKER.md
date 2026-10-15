@@ -10,7 +10,7 @@ provisional groupings that may renumber when a build starts.
 
 ---
 
-## Done — 46 builds
+## Done — 47 builds
 
 | # | Build | Status | Evidence |
 | --- | --- | --- | --- |
@@ -59,20 +59,21 @@ provisional groupings that may renumber when a build starts.
 | 43 | Cargo mass epochs research workflow | ✅ | gap 43, CARGO_MASS_EPOCHS.md, `5943ead` (532 tests) |
 | 44 | Solver-integrated surface-operation window | ✅ | gap 44, VEHICLE_OPERATION.md (539 tests) |
 | 45 | Cargo mass in authoritative world flight | ✅ | gap 45, VEHICLE_CARGO_FLIGHT.md, `c03f9d3` (548 tests) |
-| 46 | Finite handling equipment and recipient storage capacity | ✅ | gap 46, VEHICLE_HANDLING_CAPACITY.md (562 tests) |
+| 46 | Finite handling equipment and recipient storage capacity | ✅ | gap 46, VEHICLE_HANDLING_CAPACITY.md (562 tests), `24eef17` |
+| 47 | Atomic co-located habitat transfer | ✅ | gap 47, VEHICLE_TRANSFER.md (575 tests) |
 
 Released baselines: v0.3.0, v0.5.0, **v1.0.0** (`0411e9d`) — all preserved; tags untouched.
 
 ---
 
-## Remaining — 47 onward
+## Remaining — 48 onward
 
 ### A. Supply & landing chain (firm order — the owner's active priority)
 
 | # | Build | Status |
 | --- | --- | --- |
-| 47 | Atomic co-located habitat transfer: species `Edit`s, operation-window gate, conservation both sides, undo/save/replay, CLI/native agreement — the first real delivery | ⬜ **NEXT** |
-| 48 | Authored finite launch from a surface (engine, structural/thermal limits, trajectory evidence) | ⬜ |
+| 47 | ~~Atomic co-located habitat transfer: species `Edit`s, operation-window gate, conservation both sides, undo/save/replay, CLI/native agreement — the first real delivery~~ | ✅ **DONE** |
+| 48 | Authored finite launch from a surface (engine, structural/thermal limits, trajectory evidence) | ⬜ **NEXT** |
 | 49 | Orbital flight, transfer and rendezvous/approach | ⬜ |
 | 50 | Entry, heating/thermal limits and terminal landing completion | ⬜ |
 | 51 | End-to-end supply-mission closeout: one scripted launch → orbit → transfer → landing → delivery scenario with full evidence | ⬜ |
@@ -146,7 +147,7 @@ Released baselines: v0.3.0, v0.5.0, **v1.0.0** (`0411e9d`) — all preserved; ta
 
 ---
 
-**Totals:** 46 done / ~43 remaining (≈89 builds total; remaining ≈245–345 focused hours, graphics
+**Totals:** 47 done / ~42 remaining (≈89 builds total; remaining ≈240–340 focused hours, graphics
 the dominant wildcard). Cluster sizes in sections B–G are estimates and renumber as builds land;
 section A never renumbers. Update this file in the same commit as each build, and append the new
 gap entry to [MASTER_GAP_ANALYSIS](MASTER_GAP_ANALYSIS.md) when the build is accepted.

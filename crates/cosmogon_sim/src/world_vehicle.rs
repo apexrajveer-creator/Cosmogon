@@ -90,6 +90,15 @@ impl Definition {
         self.validate_structure()?;
         Ok(self)
     }
+    /// Opt in to the versioned surface-handling equipment limits used by
+    /// preflight and co-located transfers.
+    pub fn with_handling(mut self) -> Result<Self, String> {
+        let equipment = crate::vehicle_handling::Equipment::example();
+        equipment.validate()?;
+        self.handling = Some(equipment);
+        self.validate_structure()?;
+        Ok(self)
+    }
     pub fn validate_structure(&self) -> Result<(), String> {
         if self.frame != FRAME || !matches!((self.model.as_str(), &self.contact), (MODEL, None) | (CONTACT_MODEL | SHEAR_MODEL, Some(_))) {
             return Err("Unsupported finite flight model or reference frame".into());
@@ -242,6 +251,10 @@ pub struct Flight {
     /// the uniform-gyration co-rotating angular share. One entry per ledger event.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cargo_events: Vec<CargoEvent>,
+    /// Applied atomic habitat transfers; each consumes one co-moving cargo event
+    /// and a matching habitat receipt. Absent legacy flights stay byte-exact.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transfers: Vec<crate::vehicle_transfer::Transfer>,
 }
 /// World-side evidence for one cargo removal from an authoritative flight.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -304,6 +317,7 @@ impl Flight {
             operation_ledger: None,
             cargo,
             cargo_events: vec![],
+            transfers: vec![],
         })
     }
     /// Actual current vehicle mass: dry + held cargo (ledger epoch) + remaining propellant.
@@ -636,6 +650,8 @@ impl Flight {
                 return Err("Cargo ledgers and retained cargo evidence disagree".into());
             }
         }
+        crate::vehicle_transfer::validate_transfers(self, u)
+            .map_err(|e| format!("Invalid retained transfer records: {e}"))?;
         let clock_tolerance =
             (64. * f64::EPSILON * self.last_time_s.abs().max(self.launched_at_s.abs())).max(1e-6);
         if !u.time.is_finite()

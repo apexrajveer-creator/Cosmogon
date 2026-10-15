@@ -101,6 +101,11 @@ pub enum Edit {
     /// impulse-free; any non-zero relative velocity is a dissipative ejection
     /// within MAX_CARGO_EJECTION_SPEED_M_S.
     RemoveVehicleCargo { system: u32, id: u64, requested: crate::supply_vehicle::Cargo, velocity_relative_m_s: [f64; 3] },
+    /// Atomic co-located transfer of retained craft cargo into an existing
+    /// habitat's finite storage. Consumes the handling preflight plus reach and
+    /// rate gates; the rejected remainder stays on the craft. Refusals change
+    /// neither side.
+    TransferVehicleCargoToHabitat { system: u32, vehicle_id: u64, habitat_id: u64, requested: crate::supply_vehicle::Cargo },
     CreateHabitat { definition: Box<crate::habitat::Definition> },
     ConfigureHabitat { system: u32, id: u64, config: Box<crate::habitat::Config> },
     HarvestHabitatCrop { system:u32,id:u64 },
@@ -115,7 +120,7 @@ pub enum Edit {
 impl Edit {
     pub fn system(&self) -> u32 {
         match self {
-            Edit::AddBody { system, .. } | Edit::SetStar { system, .. } | Edit::SetPhysics { system, .. } | Edit::Intervene { system, .. } | Edit::ConfigureHabitat {system,..} | Edit::RemoveHabitat {system,..} | Edit::HarvestHabitatCrop {system,..} | Edit::RemoveVehicle {system,..} | Edit::RemoveVehicleCargo {system,..} => *system,
+            Edit::AddBody { system, .. } | Edit::SetStar { system, .. } | Edit::SetPhysics { system, .. } | Edit::Intervene { system, .. } | Edit::ConfigureHabitat {system,..} | Edit::RemoveHabitat {system,..} | Edit::HarvestHabitatCrop {system,..} | Edit::RemoveVehicle {system,..} | Edit::RemoveVehicleCargo {system,..} | Edit::TransferVehicleCargoToHabitat {system,..} => *system,
             Edit::CreateHabitat {definition} => definition.body.system,
             Edit::CreateVehicle {definition} => definition.parent.system,
             Edit::RemoveBody { body } | Edit::SetState { body, .. } | Edit::Impulse { body, .. } | Edit::SetOrbit { body, .. } | Edit::SetProperty { body, .. } | Edit::SetMarsTerrain { body, .. } => body.system,
@@ -446,6 +451,22 @@ fn validate(u: &Universe, e: &Edit) -> Result<(), String> {
             let mut preview=flight.clone();
             preview.remove_cargo((*requested).clone(),relative)?;
         }
+        Edit::TransferVehicleCargoToHabitat {system,vehicle_id,habitat_id,requested} => {
+            let flight=u.vehicles.iter().find(|v|v.id == *vehicle_id && v.definition.parent.system == *system).ok_or("No such finite vehicle")?;
+            let habitat=u.habitats.iter().find(|h|h.id == *habitat_id && h.definition.body.system == *system).ok_or("No such habitat")?;
+            // Step the recipient to the edit time first so the plan's free-space
+            // and receipt validation see the same post-step stocks on both sides.
+            let t=u.time;
+            let mut preview_habitat=habitat.clone();
+            let env=u.habitat_environment(&preview_habitat.definition,t);
+            preview_habitat.step(t,env)?;
+            let plan=crate::vehicle_transfer::plan(u,flight,&preview_habitat,requested)?;
+            // Preview both commit sides without touching the world.
+            let mut preview_flight=flight.clone();
+            preview_flight.remove_cargo(plan.accepted.clone(),Vec3d::ZERO)?;
+            crate::vehicle_transfer::receive(&mut preview_habitat,t,flight.id,requested,&plan.accepted)?;
+            preview_habitat.validate(t)?;
+        }
         Edit::CreateHabitat {definition} => {
             definition.validate()?;body_ok(&definition.body)?;
             if !u.body(definition.body).kind.has_surface() {return Err("Habitat placement requires an existing solid surface".into());}
@@ -503,6 +524,7 @@ fn describe(u: &Universe, e: &Edit) -> String {
         Edit::CreateVehicle {definition} => format!("Created finite flight {} relative to {}",definition.plan.definition.name,name(&definition.parent)),
         Edit::RemoveVehicle {id,..} => format!("Removed finite vehicle {id}"),
         Edit::RemoveVehicleCargo {id,requested,..} => format!("Removed {:.3} kg of cargo from vehicle {id}",requested.mass_kg()),
+        Edit::TransferVehicleCargoToHabitat {vehicle_id,habitat_id,requested,..} => format!("Transferred up to {:.3} kg of cargo from vehicle {vehicle_id} to habitat {habitat_id}",requested.mass_kg()),
         Edit::CreateHabitat {definition} => format!("Built {} on {}",definition.name,name(&definition.body)),
         Edit::ConfigureHabitat {id,..} => format!("Configured habitat {id}"),
         Edit::HarvestHabitatCrop {id,..} => format!("Harvested completed crop in habitat {id}"),
@@ -541,7 +563,7 @@ impl Universe {
             return Ok(EditOutcome { created: None, summary });
         }
         // Habitat edits have their own conserved state; never activate orbital dynamics.
-        if matches!(edit, Edit::CreateVehicle {..} | Edit::RemoveVehicle {..} | Edit::RemoveVehicleCargo {..}) {
+        if matches!(edit, Edit::CreateVehicle {..} | Edit::RemoveVehicle {..} | Edit::RemoveVehicleCargo {..} | Edit::TransferVehicleCargoToHabitat {..}) {
             let summary = describe(self, &edit);
             let parent = match &edit {
                 Edit::CreateVehicle {definition} => {
@@ -559,6 +581,47 @@ impl Universe {
                     let flight=self.vehicles.iter_mut().find(|v|v.id == *id && v.definition.parent.system == *system).expect("validated vehicle");
                     flight.remove_cargo((*requested).clone(),relative)?;
                     flight.definition.parent
+                }
+                Edit::TransferVehicleCargoToHabitat {system,vehicle_id,habitat_id,requested} => {
+                    let t=self.time;
+                    // Step the recipient to the edit time before planning so the
+                    // accepted split and the receipt commit see identical stocks.
+                    let habitat_index=self.habitats.iter().position(|h|h.id == *habitat_id && h.definition.body.system == *system).expect("validated habitat");
+                    let env=self.habitat_environment(&self.habitats[habitat_index].definition,t);
+                    self.habitats[habitat_index].step(t,env)?;
+                    let flight=self.vehicles.iter().find(|v|v.id == *vehicle_id && v.definition.parent.system == *system).expect("validated vehicle");
+                    let habitat=&self.habitats[habitat_index];
+                    let plan=crate::vehicle_transfer::plan(self,flight,habitat,requested)?;
+                    let flight_index=self.vehicles.iter().position(|v|v.id == *vehicle_id).expect("validated vehicle");
+                    let flight=&mut self.vehicles[flight_index];
+                    let event=flight.remove_cargo(plan.accepted.clone(),Vec3d::ZERO)?;
+                    let equipment=flight.definition.handling.as_ref().expect("validated vehicle");
+                    let transfer=crate::vehicle_transfer::Transfer {
+                        model: crate::vehicle_transfer::MODEL.into(),
+                        world_time_s: t,
+                        habitat_id: *habitat_id,
+                        requested: requested.clone(),
+                        accepted: plan.accepted.clone(),
+                        rejected: plan.rejected.clone(),
+                        current_window_s: plan.preflight.current_window_s,
+                        required_operation_window_s: plan.preflight.required_operation_window_s,
+                        surface_separation_m: plan.surface_separation_m,
+                        reach_m: plan.reach_m,
+                        rate_envelope_kg: plan.rate_envelope_kg,
+                        ground_relative_velocity_m_s: plan.ground_relative_velocity_m_s,
+                        ground_absorbed_linear_momentum_kg_m_s: plan.ground_relative_velocity_m_s * plan.accepted.mass_kg(),
+                        ground_absorbed_kinetic_energy_j: 0.5 * plan.accepted.mass_kg() * plan.ground_relative_velocity_m_s.length_squared(),
+                        declared_power_w: equipment.power_w,
+                        declared_thermal_rejection_w: equipment.thermal_rejection_w,
+                        craft_mass_before_kg: event.vehicle_mass_before_kg,
+                        craft_mass_after_kg: event.vehicle_mass_after_kg,
+                    };
+                    flight.transfers.push(transfer);
+                    let parent=flight.definition.parent;
+                    let habitat=&mut self.habitats[habitat_index];
+                    crate::vehicle_transfer::receive(habitat,t,*vehicle_id,requested,&plan.accepted)?;
+                    habitat.validate(t)?;
+                    parent
                 }
                 _ => unreachable!(),
             };
@@ -793,7 +856,7 @@ impl Universe {
                     sys.deactivate_dynamics(t)?;
                 }
             }
-            Edit::CreateVehicle {..} | Edit::RemoveVehicle {..} | Edit::RemoveVehicleCargo {..} | Edit::Intervene { .. } | Edit::SetMarsTerrain { .. } | Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::HarvestHabitatCrop {..} | Edit::RemoveHabitat {..} => unreachable!("handled above"),
+            Edit::CreateVehicle {..} | Edit::RemoveVehicle {..} | Edit::RemoveVehicleCargo {..} | Edit::TransferVehicleCargoToHabitat {..} | Edit::Intervene { .. } | Edit::SetMarsTerrain { .. } | Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::HarvestHabitatCrop {..} | Edit::RemoveHabitat {..} => unreachable!("handled above"),
         }
 
         let sys = &mut self.systems[s];

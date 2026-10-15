@@ -535,6 +535,9 @@ pub struct Habitat {
     pub alert_bits: u16,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub heat: Option<crate::habitat_heat::Ledger>,
+    /// Applied atomic cargo receipts from co-located supported craft transfers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub receipts: Vec<crate::vehicle_transfer::Receipt>,
 }
 impl Habitat {
     pub fn new(id: u64, definition: Definition, time: f64) -> Result<Self, String> {
@@ -578,10 +581,12 @@ impl Habitat {
             last_time: time,
             alert_bits: 0,
             heat,
+            receipts: vec![],
         })
     }
     pub(crate) fn validate(&self, time: f64) -> Result<(), String> {
         self.definition.validate()?;
+        crate::vehicle_transfer::validate_receipts(self, time)?;
         if self.definition.record_heat != self.heat.is_some() {return Err("Heat ledger and original definition disagree".into());}
         if let Some(heat)=&self.heat {heat.validate(self.last_time)?;}
         self.check_config(&self.config)?;

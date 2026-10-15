@@ -23,6 +23,22 @@ pub struct Study {
     pub flight: Definition,
     pub samples: usize,
     pub interval_s: f64,
+    /// Authored atomic transfers applied at exact sample boundaries during the
+    /// branch through the same engine edit the live world uses. Absent legacy
+    /// studies stay byte-exact.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transfers: Vec<AuthoredTransfer>,
+}
+
+/// One authored transfer request applied at an exact sample boundary.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthoredTransfer {
+    /// Sample index at which the transfer edit runs, after the world reaches
+    /// that sample's time and before its observation is recorded.
+    pub at_sample: usize,
+    pub habitat_id: u64,
+    pub requested: supply_vehicle::Cargo,
 }
 impl Study {
     pub fn new(
@@ -38,6 +54,7 @@ impl Study {
             flight,
             samples,
             interval_s,
+            transfers: vec![],
         };
         study.validate(initial)?;
         Ok(study)
@@ -77,6 +94,25 @@ impl Study {
             previous = target;
         }
         initial.validate_vehicle_state()?;
+        for transfer in &self.transfers {
+            if transfer.at_sample >= self.samples {
+                return Err("Authored transfer sample is outside the study".into());
+            }
+            if !crate::vehicle_cargo_mass::finite_cargo(&transfer.requested)
+                || transfer.requested.mass_kg() <= 0.
+            {
+                return Err(
+                    "Authored transfers require finite positive supported cargo".into(),
+                );
+            }
+            if !initial
+                .habitats
+                .iter()
+                .any(|h| h.id == transfer.habitat_id && h.definition.body.system == self.flight.parent.system)
+            {
+                return Err("Authored transfer references a missing habitat".into());
+            }
+        }
         // Validate the actual ordinary create path, including task slots and capacity,
         // on a branch before any worker writes an export folder.
         let mut preview = initial.clone();
@@ -183,6 +219,14 @@ impl Bundle {
             if world.time != target {
                 return Err("World did not reach the requested flight observation time".into());
             }
+            for transfer in study.transfers.iter().filter(|t| t.at_sample == i) {
+                world.apply_edit(Edit::TransferVehicleCargoToHabitat {
+                    system: world.vehicles.iter().find(|v| v.id == id).expect("studied craft").definition.parent.system,
+                    vehicle_id: id,
+                    habitat_id: transfer.habitat_id,
+                    requested: transfer.requested.clone(),
+                })?;
+            }
             let flight = world
                 .vehicles
                 .iter()
@@ -221,13 +265,31 @@ impl Bundle {
                 "scope":"Studies replay authored removals only; interactive removals are save-level evidence"});
         }
         if let Some(handling) = study.flight.handling.as_ref() {
+            let handling_scope = if study.transfers.is_empty() {
+                "Authored handling limits and operation-window evidence only; no transfer, receipt or delivery occurs"
+            } else {
+                "Authored handling limits consumed by the retained transfer records; rejected stock stays on the craft"
+            };
             manifest["handling"] = json!({"model":handling.model,
                 "per_species_limit_kg":handling.per_species_limit_kg,"total_limit_kg":handling.total_limit_kg,
                 "oxygen_interface_limit_kg":handling.oxygen_interface_limit_kg,
                 "power_w":handling.power_w,"thermal_rejection_w":handling.thermal_rejection_w,
                 "required_operation_window_s":handling.required_operation_window_s,
+                "reach_m":handling.reach_m,"mass_rate_kg_s":handling.mass_rate_kg_s,
                 "current_window_s":rows.last().and_then(|r|r.flight.operation_ledger.as_ref()).map(|l|l.current_window_s),
-                "scope":"Authored handling limits and operation-window evidence only; no transfer, receipt or delivery occurs"});
+                "scope":handling_scope});
+        }
+        if !study.transfers.is_empty() {
+            let last = rows.last().unwrap();
+            let applied = &last.flight.transfers;
+            if applied.len() != study.transfers.len() {
+                return Err("Applied transfers do not match the authored study".into());
+            }
+            manifest["transfers"] = json!({"model":crate::vehicle_transfer::MODEL,
+                "authored":study.transfers,"applied":applied,
+                "habitats":applied.iter().filter_map(|t|world.habitats.iter().find(|h|h.id==t.habitat_id).map(|h|json!({"id":h.id,"receipts":h.receipts}))).collect::<Vec<_>>(),
+                "scope":crate::vehicle_transfer::SCOPE});
+            manifest["files"].as_array_mut().unwrap().push(json!("transfers.csv"));
         }
         Ok(Self {
             study,
@@ -278,6 +340,9 @@ impl Bundle {
         }
         if self.study.flight.contact.as_ref().is_some_and(|h|h.operation.is_some()) {
             let index=files.len()-1;files.insert(index,("operation.csv",operation_csv(&self.rows)?.into_bytes()));
+        }
+        if !self.study.transfers.is_empty() {
+            let index=files.len()-1;files.insert(index,("transfers.csv",transfers_csv(&self.rows)?.into_bytes()));
         }
         if files
             .iter()
@@ -504,6 +569,44 @@ pub fn shear_csv(rows: &[Observation]) -> Result<String, String> {
     }
     Ok(output)
 }
+pub fn transfers_csv(rows: &[Observation]) -> Result<String, String> {
+    let transfers = &rows.last().ok_or("Transfer CSV requires observations")?.flight.transfers;
+    let mut output=String::from("index,world_time_s,habitat_id,requested_oxygen_kg,requested_potable_kg,requested_food_dry_kg,requested_food_water_kg,accepted_oxygen_kg,accepted_potable_kg,accepted_food_dry_kg,accepted_food_water_kg,rejected_oxygen_kg,rejected_potable_kg,rejected_food_dry_kg,rejected_food_water_kg,current_window_s,required_window_s,surface_separation_m,reach_m,rate_envelope_kg,ground_velocity_x_m_s,ground_velocity_y_m_s,ground_velocity_z_m_s,absorbed_momentum_kg_m_s,absorbed_kinetic_energy_j,craft_mass_before_kg,craft_mass_after_kg\n");
+    for (index, t) in transfers.iter().enumerate() {
+        let fields = vec![
+            index.to_string(),
+            t.world_time_s.to_string(),
+            t.habitat_id.to_string(),
+            t.requested.oxygen_reserve_kg.to_string(),
+            t.requested.potable_water_kg.to_string(),
+            t.requested.food_dry_kg.to_string(),
+            t.requested.food_water_kg.to_string(),
+            t.accepted.oxygen_reserve_kg.to_string(),
+            t.accepted.potable_water_kg.to_string(),
+            t.accepted.food_dry_kg.to_string(),
+            t.accepted.food_water_kg.to_string(),
+            t.rejected.oxygen_reserve_kg.to_string(),
+            t.rejected.potable_water_kg.to_string(),
+            t.rejected.food_dry_kg.to_string(),
+            t.rejected.food_water_kg.to_string(),
+            t.current_window_s.to_string(),
+            t.required_operation_window_s.to_string(),
+            t.surface_separation_m.to_string(),
+            t.reach_m.to_string(),
+            t.rate_envelope_kg.to_string(),
+            t.ground_relative_velocity_m_s.x.to_string(),
+            t.ground_relative_velocity_m_s.y.to_string(),
+            t.ground_relative_velocity_m_s.z.to_string(),
+            t.ground_absorbed_linear_momentum_kg_m_s.length().to_string(),
+            t.ground_absorbed_kinetic_energy_j.to_string(),
+            t.craft_mass_before_kg.to_string(),
+            t.craft_mass_after_kg.to_string(),
+        ];
+        output.push_str(&fields.join(","));
+        output.push('\n');
+    }
+    Ok(output)
+}
 pub fn operation_csv(rows: &[Observation]) -> Result<String, String> {
     let mut output=String::from("world_time_s,craft_time_s,current_window_s,longest_window_s,current_window_origin_s,longest_window_origin_s,samples,supported_samples,exclusion_samples,last_sample_supported,last_exclusion\n");
     for row in rows {
@@ -628,5 +731,108 @@ mod tests {
         let (_, study) = setup();
         u.advance_by(1.);
         assert!(study.validate(&u).is_err());
+    }
+
+    #[test]
+    fn transfer_studies_apply_the_shared_edit_and_replay_exactly() {
+        let (mut world, mars) = crate::vehicle_transfer::tests::habitat_world(|d| {
+            d.config.crew = 0;
+        });
+        world.advance_to(world.time + 30., None, None);
+        let definition = crate::vehicle_transfer::tests::site_definition(
+            &world,
+            mars,
+            crate::vehicle_handling::Equipment::example(),
+        );
+        let requested = supply_vehicle::Cargo {
+            oxygen_reserve_kg: 10.,
+            potable_water_kg: 20.,
+            food_dry_kg: 5.,
+            food_water_kg: 5.,
+        };
+        let mut study = Study::new(&world, definition, 15, 2.0).unwrap();
+        study.transfers = vec![AuthoredTransfer {
+            at_sample: 14,
+            habitat_id: 0,
+            requested: requested.clone(),
+        }];
+        study.validate(&world).unwrap();
+        let bundle = Bundle::run(&world, study.clone()).unwrap();
+        let transfer = &bundle.final_world.vehicles[0].transfers[0];
+        assert_eq!(transfer.accepted, requested);
+        assert_eq!(transfer.habitat_id, 0);
+        assert_eq!(bundle.final_world.habitats[0].receipts.len(), 1);
+        assert_eq!(bundle.final_world.habitats[0].receipts[0].accepted, requested);
+        let manifest_transfers = &bundle.manifest["transfers"];
+        assert_eq!(manifest_transfers["applied"].as_array().unwrap().len(), 1);
+        assert!(bundle.manifest["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "transfers.csv"));
+        assert!(bundle.manifest["handling"]["scope"]
+            .as_str()
+            .unwrap()
+            .contains("consumed by the retained transfer records"));
+        // Independent re-run is bit-identical.
+        let rerun = Bundle::run(&world, study.clone()).unwrap();
+        assert_eq!(
+            research::state_fingerprint(&bundle.final_world).unwrap(),
+            research::state_fingerprint(&rerun.final_world).unwrap()
+        );
+        // Export and reopen.
+        let root = std::env::temp_dir().join(format!(
+            "cosmogon-world-transfer-recording-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        bundle.export(&root).unwrap();
+        let opened = Bundle::read(&root).unwrap();
+        assert_eq!(opened.final_world.vehicles[0].transfers, bundle.final_world.vehicles[0].transfers);
+        assert!(root.join("transfers.csv").exists());
+        std::fs::remove_dir_all(root).unwrap();
+        // A study authored before transfers existed loads unchanged and moves nothing.
+        let mut legacy_json = serde_json::to_value(&study).unwrap();
+        legacy_json.as_object_mut().unwrap().remove("transfers");
+        let legacy: Study =
+            serde_json::from_value(legacy_json).expect("legacy studies load without transfers");
+        assert!(legacy.transfers.is_empty());
+        let legacy_bundle = Bundle::run(&world, legacy).unwrap();
+        assert!(legacy_bundle.final_world.vehicles[0].transfers.is_empty());
+        assert!(legacy_bundle.manifest.get("transfers").is_none());
+        assert_eq!(legacy_bundle.final_world.habitats[0].receipts.len(), 0);
+    }
+
+    #[test]
+    fn transfer_studies_refuse_missing_habitats_and_bad_samples() {
+        let (mut world, mars) = crate::vehicle_transfer::tests::habitat_world(|d| {
+            d.config.crew = 0;
+        });
+        world.advance_to(world.time + 30., None, None);
+        let definition = crate::vehicle_transfer::tests::site_definition(
+            &world,
+            mars,
+            crate::vehicle_handling::Equipment::example(),
+        );
+        let mut study = Study::new(&world, definition, 12, 1.0).unwrap();
+        study.transfers = vec![AuthoredTransfer {
+            at_sample: 99,
+            habitat_id: 0,
+            requested: supply_vehicle::Cargo {
+                oxygen_reserve_kg: 1.,
+                potable_water_kg: 0.,
+                food_dry_kg: 0.,
+                food_water_kg: 0.,
+            },
+        }];
+        assert!(study.validate(&world).unwrap_err().contains("outside the study"));
+        study.transfers[0].at_sample = 2;
+        study.transfers[0].habitat_id = 17;
+        assert!(study.validate(&world).unwrap_err().contains("missing habitat"));
+        study.transfers[0].habitat_id = 0;
+        study.transfers[0].requested.oxygen_reserve_kg = -1.;
+        assert!(study.validate(&world).unwrap_err().contains("finite positive"));
+        study.transfers[0].requested.oxygen_reserve_kg = 0.;
+        assert!(study.validate(&world).unwrap_err().contains("finite positive"));
     }
 }
