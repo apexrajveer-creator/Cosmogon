@@ -6,7 +6,7 @@
 **Version:** Draft  
 **Date:** 15 October 2026
 
-**Release context:** Cosmogon 1.0.0 was released on 4 October 2026. The newer vehicle and research work described here is from the public but unreleased development branch at commit `9eb830d` (15 October 2026); it is not part of the 1.0.0 release.
+**Release context:** Cosmogon 1.0.0 was released on 4 October 2026. The newer vehicle and research work described here is post-release development on the public `main` branch, described at commit `9eb830d` (15 October 2026); it is not part of the 1.0.0 release.
 
 > Before public release, replace the author placeholder, verify every linked source and version-specific claim, and export a versioned copy alongside the code release. This article describes the software and its engineering evidence; it does not claim that all of its scientific models are validated research instruments.
 
@@ -66,7 +66,7 @@ The current development direction connects finite spacecraft operations to surfa
 
 ## 8. Availability and citation
 
-Cosmogon source code, documentation, and release downloads are available from the [project repository](https://github.com/ashvyagni/SpaceRender) and its [release page](https://github.com/ashvyagni/SpaceRender/releases). The latest release covered by this overview is **1.0.0**; the development snapshot described above is not a release. The Cargo workspace declares `MIT OR Apache-2.0`, but the 15 October 2026 repository audit found no corresponding license text files. The project’s license distribution therefore needs reconciliation before asserting that the repository includes those license terms. For reproducibility, cite a specific release or commit. A versioned Zenodo record can provide a persistent DOI for a released software snapshot or report; Zenodo assigns a DOI when a record is published ([Zenodo quick start](https://help.zenodo.org/docs/get-started/quickstart/)).
+Cosmogon source code, documentation, and release downloads are available from the [project repository](https://github.com/ashvyagni/SpaceRender) and its [release page](https://github.com/ashvyagni/SpaceRender/releases). A rendered copy of this overview is published at [ashvyagni.github.io/SpaceRender](https://ashvyagni.github.io/SpaceRender/). The latest release covered by this overview is **1.0.0**; the development snapshot described above is not a release. The Cargo workspace declares `MIT OR Apache-2.0`, but the 15 October 2026 repository audit found no corresponding license text files. The project’s license distribution therefore needs reconciliation before asserting that the repository includes those license terms. For reproducibility, cite a specific release or commit. A versioned Zenodo record can provide a persistent DOI for a released software snapshot or report; Zenodo assigns a DOI when a record is published ([Zenodo quick start](https://help.zenodo.org/docs/get-started/quickstart/)).
 
 **Suggested software citation (complete before publication):**
 
