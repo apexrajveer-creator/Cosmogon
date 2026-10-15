@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cosmogon: A Reproducible Living-Universe Sandbox</title>
+<style>
+  body { margin: 0; font-family: Georgia, 'Times New Roman', serif; background: #faf9f7; color: #1a1a1a; line-height: 1.65; }
+  header { background: #0b1020; color: #eceff8; padding: 1.1rem 1.5rem; }
+  header .brand { font-size: 1.05rem; letter-spacing: .02em; }
+  header nav { margin-top: .45rem; }
+  header a { color: #9db4ff; text-decoration: none; margin-right: 1.1rem; font-family: system-ui, sans-serif; font-size: .9rem; }
+  header a:hover { text-decoration: underline; }
+  main { max-width: 46rem; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+  main h1 { font-size: 1.75rem; line-height: 1.3; margin-bottom: .25rem; }
+  main h2 { border-bottom: 1px solid #ddd; padding-bottom: .2rem; margin-top: 2.2rem; font-size: 1.25rem; }
+  main h3 { font-size: 1.05rem; }
+  code, pre { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .88em; }
+  code { background: #f0eee9; padding: .1em .28em; border-radius: 4px; }
+  pre { background: #f0eee9; padding: .8rem 1rem; overflow-x: auto; border-radius: 6px; }
+  pre code { background: none; padding: 0; }
+  blockquote { border-left: 4px solid #c9c4b8; margin: 1rem 0; padding: .3rem 1rem; color: #444; background: #f3f1ec; }
+  table { border-collapse: collapse; margin: 1rem 0; }
+  th, td { border: 1px solid #ccc; padding: .35rem .6rem; }
+  a { color: #1b4db1; }
+  em { color: #333; }
+  footer { text-align: center; color: #777; font-size: .85rem; padding: 1.2rem; font-family: system-ui, sans-serif; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><strong>Cosmogon</strong> — project and software overview (draft)</div>
+  <nav>
+    <a href="https://github.com/ashvyagni/SpaceRender">Repository</a>
+    <a href="https://github.com/ashvyagni/SpaceRender/releases">Releases</a>
+    <a href="article.md">Raw Markdown</a>
+  </nav>
+</header>
+<main id="content"><p>Loading article…</p></main>
+<footer>Draft overview — verify every claim against the repository before citing. Not a peer-reviewed paper.</footer>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script>
+fetch('article.md')
+  .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+  .then(function (md) { document.getElementById('content').innerHTML = marked.parse(md); })
+  .catch(function (e) {
+    document.getElementById('content').innerHTML =
+      '<p>Failed to load <code>article.md</code>: ' + e.message + '</p>';
+  });
+</script>
+</body>
+</html>
