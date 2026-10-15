@@ -251,18 +251,51 @@ impl State {
         d.validate()?;
         let length = self.elastic_shear_m.length();
         let load = length * d.stiffness_n_m;
-        if self.model != MODEL
-            || !unit(self.outward_normal)
-            || !tangent(self.elastic_shear_m, self.outward_normal)
-            || !self.normal_load_n.is_finite()
-            || !(0.0..=1e12).contains(&self.normal_load_n)
-            || length > d.maximum_elastic_shear_m
-            || !load.is_finite()
-            || load > d.maximum_tangential_force_n
-            || load > d.friction_coefficient * self.normal_load_n + 1e-10 * (1. + load)
-            || d.friction_coefficient * self.normal_load_n == 0. && length != 0.
-        {
-            return Err("Retained foot shear violates model/tangent/load/finite travel or structural force limits".into());
+        let mut failed: Vec<String> = Vec::new();
+        if self.model != MODEL {
+            failed.push(format!("model={}", self.model));
+        }
+        if !unit(self.outward_normal) {
+            failed.push(format!("normal_unit={}", self.outward_normal.length()));
+        }
+        if !tangent(self.elastic_shear_m, self.outward_normal) {
+            failed.push(format!(
+                "tangent_dot={}",
+                self.elastic_shear_m.dot(self.outward_normal)
+            ));
+        }
+        if !self.normal_load_n.is_finite() || !(0.0..=1e12).contains(&self.normal_load_n) {
+            failed.push(format!("normal_load_n={}", self.normal_load_n));
+        }
+        if length > d.maximum_elastic_shear_m {
+            failed.push(format!(
+                "shear_length_m={length} max={}",
+                d.maximum_elastic_shear_m
+            ));
+        }
+        if !load.is_finite() || load > d.maximum_tangential_force_n {
+            failed.push(format!(
+                "tangential_load_n={load} max={}",
+                d.maximum_tangential_force_n
+            ));
+        }
+        if load > d.friction_coefficient * self.normal_load_n + 1e-10 * (1. + load) {
+            failed.push(format!(
+                "coulomb_load_n={load} friction_capacity_n={}",
+                d.friction_coefficient * self.normal_load_n
+            ));
+        }
+        if d.friction_coefficient * self.normal_load_n == 0. && length != 0. {
+            failed.push(format!(
+                "zero_friction_capacity_but_shear_length_m={length} friction={} load={}",
+                d.friction_coefficient, self.normal_load_n
+            ));
+        }
+        if !failed.is_empty() {
+            return Err(format!(
+                "Retained foot shear violates model/tangent/load/finite travel or structural force limits [{}]",
+                failed.join("; ")
+            ));
         }
         Ok(())
     }

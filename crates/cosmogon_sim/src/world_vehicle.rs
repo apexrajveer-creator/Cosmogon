@@ -167,6 +167,9 @@ pub struct Flight {
     pub(crate) edit_cursor: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contact: Option<crate::vehicle_contact_dynamics::RigidState>,
+    /// Opt-in solver-integrated surface-operation window evidence; created on first sample.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_ledger: Option<crate::vehicle_operation::Ledger>,
 }
 impl Flight {
     pub fn new(id: u64, d: Definition, u: &Universe) -> Result<Self, String> {
@@ -204,6 +207,7 @@ impl Flight {
             last_sources: source_samples(&sources),
             edit_cursor: u.edits.len() as u64,
             contact,
+            operation_ledger: None,
         })
     }
     /// Validate retained state without reinterpreting original authored conditions
@@ -217,6 +221,25 @@ impl Flight {
             (None, None) => {},
             (Some(h), Some(state)) => state.validate(h, self)?,
             _ => return Err("Flight contact hardware/state model mismatch".into()),
+        }
+        match (
+            &self.operation_ledger,
+            self.definition.contact.as_ref().and_then(|h| h.operation.as_ref()),
+        ) {
+            (None, _) => {}
+            (Some(ledger), Some(authored)) => {
+                ledger
+                    .validate()
+                    .map_err(|e| format!("Invalid retained surface-operation ledger: {e}"))?;
+                if ledger.model != authored.model {
+                    return Err(
+                        "Retained operation ledger and authored hardware models disagree".into()
+                    );
+                }
+            }
+            (Some(_), None) => {
+                return Err("Operation ledger requires authored contact operation hardware".into())
+            }
         }
         let system = u
             .systems

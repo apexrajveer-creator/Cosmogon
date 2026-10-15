@@ -1,3 +1,9 @@
+## Unreleased — solver-integrated surface-operation window
+
+- Add `cosmogon-vehicle-surface-operation/1`: a continuous supported-operation window evaluated at every accepted contact-solver midpoint and endpoint against the authored footprint-support envelope, retained as a versioned flight ledger with counters, bounded exclusion reasons and whole-macro-step rollback. Conditional save pin for enabled operation hardware; absent legacy flights keep no ledger and the golden remains `0xf2c4140a45ae509b`.
+- Add protected `operation.csv`/manifest window evidence to world-flight recordings and exact independent replay in `flight-inspect`; CLI `contact-hardware --operation-window` authors the window. Detailed foot-shear refusal diagnostics now state the failing quantities inside the unchanged refusal prefix.
+- Verify 539 release tests plus one existing ignored and no new clippy warnings. End-to-end: millimeter-gap geographic start on real 4ppd MOLA height with a coast plan holds `flying` for 20 s and grows the window to 9.38671875 s ≥ 5 s required (5800 supported samples), with replay-exact inspect and negative flag cases. [Guide](docs/VEHICLE_OPERATION.md), [verification](docs/VEHICLE_OPERATION_VALIDATION.md). The window is a modeled envelope, not attachment, storage, handling or delivery; graphics remain queued.
+
 ## Unreleased — actual vehicle footprint and ground-hold evidence
 
 - Add actual per-foot loads/utilization, shared-plane guards, deterministic loaded-site hulls, geometric/force-weighted/applied-wrench margins and conditional ground-following force/torque comparisons. Keep compliant force application separate from projected ground sites; retain source derivative/coordinate indicators and motion exclusions.

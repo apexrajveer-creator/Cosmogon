@@ -206,6 +206,13 @@ impl Bundle {
                 "mass_residual_kg":study.flight.plan.definition.initial_propellant_kg-rows.last().unwrap().flight.propulsion.propellant_kg-rows.last().unwrap().flight.propulsion.exhausted_propellant_kg}});
         if study.flight.contact.is_some() {manifest["files"].as_array_mut().unwrap().push(json!("contact.csv"));}
         if study.flight.contact.as_ref().is_some_and(|h|h.shear.is_some()) {manifest["files"].as_array_mut().unwrap().push(json!("shear.csv"));}
+        if let Some(operation)=study.flight.contact.as_ref().and_then(|h|h.operation.as_ref()) {
+            manifest["files"].as_array_mut().unwrap().push(json!("operation.csv"));
+            manifest["operation_window"]=match rows.last().and_then(|r|r.flight.operation_ledger.as_ref()) {
+                Some(ledger)=>json!({"model":ledger.model,"required_window_s":operation.required_window_s,"current_window_s":ledger.current_window_s,"longest_window_s":ledger.longest_window_s,"last_sample_time_s":ledger.last_sample_time_s,"samples":ledger.samples,"supported_samples":ledger.supported_samples,"exclusion_samples":ledger.exclusion_samples,"last_exclusion":ledger.last_exclusion,"permission_scope":"current_window_s only; longest window is historical evidence and grants nothing"}),
+                None=>json!(null),
+            };
+        }
         Ok(Self {
             study,
             origin: initial.clone(),
@@ -252,6 +259,9 @@ impl Bundle {
         }
         if self.study.flight.contact.as_ref().is_some_and(|h|h.shear.is_some()) {
             let index=files.len()-1;files.insert(index,("shear.csv",shear_csv(&self.rows)?.into_bytes()));
+        }
+        if self.study.flight.contact.as_ref().is_some_and(|h|h.operation.is_some()) {
+            let index=files.len()-1;files.insert(index,("operation.csv",operation_csv(&self.rows)?.into_bytes()));
         }
         if files
             .iter()
@@ -313,6 +323,9 @@ impl Bundle {
         }
         if study.flight.contact.as_ref().is_some_and(|h|h.shear.is_some()) && crate::habitat_recording::read(&path.join("shear.csv"),MAX_BYTES)?!=shear_csv(&replay.rows)? {
             return Err("Stored shear CSV differs from exact persistent foot/work observations".into());
+        }
+        if study.flight.contact.as_ref().is_some_and(|h|h.operation.is_some()) && crate::habitat_recording::read(&path.join("operation.csv"),MAX_BYTES)?!=operation_csv(&replay.rows)? {
+            return Err("Stored operation CSV differs from exact operation-window observations".into());
         }
         let final_world = save::from_json(&crate::habitat_recording::read(
             &path.join("final.cosmo"),
@@ -475,6 +488,19 @@ pub fn shear_csv(rows: &[Observation]) -> Result<String, String> {
     }
     Ok(output)
 }
+pub fn operation_csv(rows: &[Observation]) -> Result<String, String> {
+    let mut output=String::from("world_time_s,craft_time_s,current_window_s,longest_window_s,current_window_origin_s,longest_window_origin_s,samples,supported_samples,exclusion_samples,last_sample_supported,last_exclusion\n");
+    for row in rows {
+        row.flight.definition.contact.as_ref().and_then(|h|h.operation.as_ref()).ok_or("Operation CSV requires authored operation hardware")?;
+        let empty=String::new();
+        let values=match &row.flight.operation_ledger {
+            Some(ledger)=>vec![row.world_time_s.to_string(),row.flight.last_time_s.to_string(),ledger.current_window_s.to_string(),ledger.longest_window_s.to_string(),ledger.current_window_origin_s.to_string(),ledger.longest_window_origin_s.to_string(),ledger.samples.to_string(),ledger.supported_samples.to_string(),ledger.exclusion_samples.to_string(),ledger.last_sample_supported.to_string(),ledger.last_exclusion.as_deref().unwrap_or(&empty).replace(',',";")],
+            None=>vec![row.world_time_s.to_string(),row.flight.last_time_s.to_string(),empty.clone(),empty.clone(),empty.clone(),empty.clone(),empty.clone(),empty.clone(),empty.clone(),empty.clone(),empty.clone()],
+        };
+        output.push_str(&values.join(","));output.push('\n');
+    }
+    Ok(output)
+}
 pub fn context_for(definition: &Definition) -> Value {
     if definition.contact.is_none() { return context(); }
     let mut result=context();
@@ -484,6 +510,10 @@ pub fn context_for(definition: &Definition) -> Value {
     result["contact"]=contact["response"].clone();
     result["limits"]=contact["limits"].clone();
     result["contact_capability"]=contact;
+    if let Some(operation)=definition.contact.as_ref().and_then(|h|h.operation.as_ref()) {
+        result["operation_window"]=crate::vehicle_operation::context();
+        result["operation_required_window_s"]=json!(operation.required_window_s);
+    }
     result["gravity"]=json!("Existing Newtonian test-particle sources; target point-mass field evaluated outside modeled terrain even where overview relief lies below the spherical base. Other-source hull intersections are unsupported, conservatively refused.");
     result
 }

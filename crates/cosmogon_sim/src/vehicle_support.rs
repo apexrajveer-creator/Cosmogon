@@ -468,6 +468,12 @@ impl Reading {
         flight.validate_saved(world)?;
         // Reject terminal/source-edited live reconstruction before using any frame derivative.
         Approach::live(world, flight, flight.definition.parent)?;
+        Self::from_flight(world, flight, d)
+    }
+    /// Evaluate a retained state at its own craft clock without the public live reader's
+    /// `world.time` advancement assumption. Callers (the contact solver's operation
+    /// sampler) are responsible for clock, source and phase validity.
+    pub(crate) fn from_flight(world: &Universe, flight: &Flight, d: &Definition) -> Result<Self, String> {
         let h = flight
             .definition
             .contact

@@ -58,6 +58,9 @@ pub struct Hardware {
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shear: Option<crate::vehicle_shear::Definition>,
+    /// Opt-in solver-integrated supported surface-operation window accounting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<crate::vehicle_operation::Definition>,
     /// Fixed authored mass distribution: I_i = actual mass * gyration_radius_i².
     pub gyration_radii_m: Vec3d,
     pub initial_orientation_xyzw: [f64; 4],
@@ -75,6 +78,21 @@ impl Hardware {
         for foot in &mut self.feet {
             foot.response.sliding_friction = 0.;
         }
+        self.validate()?;
+        Ok(self)
+    }
+    /// Attach the opt-in solver-integrated operation-window envelope with the shared
+    /// instantaneous support limits and conservative utilization caps.
+    pub fn with_operation(mut self, required_window_s: f64) -> Result<Self, String> {
+        self.operation = Some(crate::vehicle_operation::Definition {
+            model: crate::vehicle_operation::MODEL.into(),
+            support: crate::vehicle_support::Definition::default(),
+            required_window_s,
+            maximum_sample_gap_s: 1.000001,
+            maximum_structural_utilization: 1.,
+            maximum_stroke_utilization: 1.,
+            maximum_friction_utilization: 1.,
+        });
         self.validate()?;
         Ok(self)
     }
@@ -110,6 +128,7 @@ impl Hardware {
         let result = Self {
             model: MODEL.into(),
             shear: None,
+            operation: None,
             gyration_radii_m: Vec3d::new(1.5, 1.5, 1.5),
             initial_orientation_xyzw: array(rotation),
             initial_angular_velocity_body_rad_s: inverse(rotation)
@@ -179,6 +198,9 @@ impl Hardware {
         }
         if let Some(shear) = &self.shear {
             shear.validate()?;
+        }
+        if let Some(operation) = &self.operation {
+            operation.validate()?;
         }
         Ok(())
     }
@@ -1041,6 +1063,24 @@ fn substep(
     if !finite(position) || position.length() > 1e15 || !finite(velocity) || velocity.length() > 1e6
     {
         return Err("Rigid contact motion exceeds finite world-flight bounds".into());
+    }
+    // Opt-in operation-window evidence is sampled from the accepted midpoint and
+    // committed endpoint of this whole substep. It lives on the previewed flight, so
+    // any later macro-step failure discards these samples with the rest of the step.
+    if let Some(operation) = h.operation.as_ref() {
+        if dt > 0. {
+            let mut midpoint = flight.clone();
+            midpoint.position_m = mid_position;
+            midpoint.velocity_m_s = mid_velocity;
+            midpoint.propulsion = mid_propulsion;
+            midpoint.last_time_s = time + dt * 0.5;
+            let mut midpoint_rigid = mid;
+            midpoint_rigid.feet = mid_samples;
+            midpoint.contact = Some(midpoint_rigid);
+            crate::vehicle_operation::observe(world, &mut midpoint, operation)?;
+            next.operation_ledger = midpoint.operation_ledger;
+            crate::vehicle_operation::observe(world, &mut next, operation)?;
+        }
     }
     Ok(next)
 }

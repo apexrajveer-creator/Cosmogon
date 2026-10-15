@@ -26,6 +26,7 @@ struct Args {
     geographic_start: Option<String>,
     contact_hardware: Option<String>,
     static_shear: bool,
+    operation_window: Option<f64>,
     branches: Option<[usize;2]>,
     observation: Option<usize>,
     reference_index: Option<usize>,
@@ -72,6 +73,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         geographic_start: None,
         contact_hardware: None,
         static_shear: false,
+        operation_window: None,
         branches: None,
         observation: None,
         reference_index: None,
@@ -134,7 +136,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if matches!(a.cmd.as_str(),"greenhouse-definition"|"greenhouse-supply-definition") && flag!="--output" {return Err(format!("{flag} is not a greenhouse-definition option"));}
         if matches!(a.cmd.as_str(),"crop-chemistry"|"crop-chemistry-inspect"|"greenhouse-supply-inspect") && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a crop supply/chemistry inspection option"));}
         if matches!(a.cmd.as_str(),"habitat-diagnose"|"habitat-crop-harvest") && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
-        if a.cmd=="contact-hardware" && !matches!(flag.as_str(),"--initial"|"--target"|"--seed"|"--scenario"|"--output"|"--geographic-start"|"--static-shear") {return Err(format!("{flag} is not a contact hardware option"));}
+        if a.cmd=="contact-hardware" && !matches!(flag.as_str(),"--initial"|"--target"|"--seed"|"--scenario"|"--output"|"--geographic-start"|"--static-shear"|"--operation-window") {return Err(format!("{flag} is not a contact hardware option"));}
         if a.cmd=="flight-definition" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output"|"--target"|"--seed"|"--scenario"|"--samples"|"--interval-seconds"|"--geographic-start"|"--contact-hardware") {return Err(format!("{flag} is not a world flight definition option"));}
         if a.cmd=="flight-study" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output") {return Err(format!("{flag} is not a world flight study option"));}
         if matches!(a.cmd.as_str(),"arrival-start"|"contact-start") && flag!="--output" {return Err(format!("{flag} is not a geographic start option"));}
@@ -166,6 +168,11 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if matches!(flag.as_str(),"--parameter"|"--from"|"--to"|"--runs"|"--samples"|"--interval-days") {explicit_sweep=true;}
         match flag.as_str() {
             "--static-shear" if a.cmd=="contact-hardware" => a.static_shear=true,
+            "--operation-window" if a.cmd=="contact-hardware" => {
+                let seconds=number::<f64>(val()?,&flag)?;
+                if !seconds.is_finite() || !(0.0..=1.0e7).contains(&seconds) {return Err("--operation-window requires a finite window between 0 and 1e7 seconds".into());}
+                a.operation_window=Some(seconds);
+            },
             "--contact-hardware" if a.cmd=="flight-definition" => a.contact_hardware=Some(val()?),
             "--geographic-start" if matches!(a.cmd.as_str(),"flight-definition"|"contact-hardware") => a.geographic_start=Some(val()?),
             "--samples" => {
@@ -306,7 +313,7 @@ if a.geographic_start.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err
     Ok(a)
 }
 fn help() {
-    eprintln!("cosmogon-cli contact-start [--output NEW_FILE]\ncosmogon-cli contact-hardware [--static-shear --initial WORLD --target Mars --geographic-start FILE --output NEW_FILE]\nflight-definition --contact-hardware FILE explicitly enables versioned terrain/rigid-body motion; no safe landing or delivery");
+    eprintln!("cosmogon-cli contact-start [--output NEW_FILE]\ncosmogon-cli contact-hardware [--static-shear --operation-window SECONDS --initial WORLD --target Mars --geographic-start FILE --output NEW_FILE]\nflight-definition --contact-hardware FILE explicitly enables versioned terrain/rigid-body motion; --operation-window adds the modeled solver-integrated surface-operation ledger; no safe landing or delivery");
     eprintln!("cosmogon-cli support-definition [--output NEW_FILE]\ncosmogon-cli flight-support --recording COMPLETE_FLIGHT_DIR [--definition LIMITS_FILE --output NEW_DIR]\ncosmogon-cli support-inspect --recording COMPLETE_SUPPORT_DIR\nConditional actual footprint/force evidence; no attachment or cargo permission");
     eprintln!("cosmogon-cli arrival-start [--output NEW_FILE]\ncosmogon-cli flight-approach --recording COMPLETE_FLIGHT_DIR [--target BODY --output NEW_DIR]\ncosmogon-cli approach-inspect --recording COMPLETE_APPROACH_DIR\nGeographic flight-definition starts: --geographic-start FILE (explicit spherical altitude and east/north/up velocities)");
     eprintln!("cosmogon-cli flight-definition [--initial WORLD --definition PROPULSION_PLAN --target Mars --samples 121 --interval-seconds 1 --output NEW_FILE]\ncosmogon-cli flight-study --definition PINNED_STUDY [--initial WORLD --output NEW_DIR]\ncosmogon-cli flight-inspect --recording COMPLETE_DIR   # exact full-world flight replay, no cargo delivery");
@@ -511,6 +518,7 @@ fn main() {
                 let point=if let Some(path)=&a.geographic_start {cosmogon_sim::vehicle_arrival::GeographicStart::read(std::path::Path::new(path))?.absolute(&world,parent)?.position_m} else {let definition=world_vehicle::Definition::circular_example(&world,parent,plan)?;world.systems[parent.system as usize].body_state(parent.body as usize,world.time).pos+definition.initial_relative_position_m};
                 let hardware=Hardware::example(&world,parent,point)?;
                 let hardware=if a.static_shear {hardware.with_shear(cosmogon_sim::vehicle_shear::Definition::example())?} else {hardware};
+                let hardware=if let Some(seconds)=a.operation_window {hardware.with_operation(seconds)?} else {hardware};
                 let value=serde_json::to_value(&hardware).map_err(|e|e.to_string())?;
                 if let Some(path)=&a.output {
                     use std::io::Write;
@@ -1069,6 +1077,10 @@ mod argument_tests {
         assert!(args(&["contact-hardware","--static-shear"]).unwrap().static_shear);
         assert!(args(&["contact-hardware","--static-shear","true"]).is_err());
         assert!(args(&["flight-definition","--static-shear"]).is_err());
+        assert_eq!(args(&["contact-hardware","--operation-window","5"]).unwrap().operation_window,Some(5.));
+        assert!(args(&["contact-hardware","--operation-window"]).is_err());
+        assert!(args(&["contact-hardware","--operation-window","-1"]).is_err());
+        assert!(args(&["flight-definition","--operation-window","5"]).is_err());
         assert!(args(&["flight-definition","--geographic-start","g","--contact-hardware","h","--samples","5","--interval-seconds","0.5"]).is_ok());
     }
     #[test]

@@ -85,6 +85,7 @@ pub mod vehicle_arrival_recording;
 
 pub mod vehicle_contact;
 pub mod vehicle_contact_dynamics;
+pub mod vehicle_operation;
 pub mod vehicle_shear;
 pub mod vehicle_support;
 pub mod vehicle_support_recording;
