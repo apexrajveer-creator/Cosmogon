@@ -6,6 +6,8 @@
 **Version:** Draft  
 **Date:** 15 October 2026
 
+**Release context:** Cosmogon 1.0.0 was released on 4 October 2026. The newer vehicle and research work described here is from the public but unreleased development branch at commit `9eb830d` (15 October 2026); it is not part of the 1.0.0 release.
+
 > Before public release, replace the author placeholder, verify every linked source and version-specific claim, and export a versioned copy alongside the code release. This article describes the software and its engineering evidence; it does not claim that all of its scientific models are validated research instruments.
 
 ## Abstract
@@ -44,11 +46,11 @@ One bounded example is orbital integration checking. A documented circular test-
 
 The evolving habitat and vehicle studies similarly expose conditional outputs and their assumptions. For example, powered equipment may be represented by finite stores and explicit energy or heat accounting, while some device ratings and biological conditions remain idealized inputs. A recorded result is evidence of what the implemented model computed, not an independently measured outcome in the physical world.
 
-The newest engineering arc connects finite spacecraft operations end to end within the simulator: an authored supply vehicle with dry/tank/propellant/payload budgets performs finite burns under system-local gravity, approaches a rotating planetary surface, contacts modeled terrain through sprung feet with persistent friction-shear history, exposes per-foot loads and ground-hold evidence, accounts for cargo mass epochs, and — most recently — measures how long a craft has continuously satisfied an authored support envelope using actual accepted contact-solver states. Each step is separately versioned, conditionally pinned in saves and independently replayable. This chain is a deterministic engineering model with explicit assumptions; it is not yet attachment, cargo delivery or a validated landing system.
+The latest engineering arc connects several stages of finite spacecraft operation: an authored supply vehicle with dry/tank/propellant/payload budgets performs finite burns under system-local gravity, approaches a rotating planetary surface, and contacts modeled terrain through sprung feet with persistent friction-shear history. Further workflows expose per-foot loads, ground-hold evidence, cargo-mass epochs, and the duration for which a craft continuously satisfies an authored support envelope, measured from accepted contact-solver states. Flight and contact stages use explicit model/save versions and replayable recordings; cargo-mass epochs are a separate, replayable research workflow and are not yet integrated into authoritative flight mass or habitat inventory. In the documented end-to-end operation-window case, the craft remains in flight for 20 seconds; 5,800 of 10,240 solver samples support the operation window, which reaches 9.38671875 seconds against a 5-second requirement. A bounded static check reports per-foot loads of 1,961–2,067 N versus an independent prediction of about 2,013 N. These are results for a specific authored case, not validation against flight hardware or a lander mission. The chain does not yet implement attachment, cargo delivery, or a complete validated landing system. See the [operation-window method](../VEHICLE_OPERATION.md), [validation report](../VEHICLE_OPERATION_VALIDATION.md), and [cargo-mass epoch workflow](../CARGO_MASS_EPOCHS.md).
 
 ## 5. Verification and reproducibility
 
-The repository’s engineering checks include workspace tests, linting, deterministic replay, strict input and export validation, and headless application captures for interface changes. As of commit `9eb830d` (15 October 2026), the project handoff records **539 passing tests, no failures, and one pre-existing ignored test** for that exact source snapshot. This is a software regression result, not a measure of scientific validity. It should be refreshed against the exact source revision before this article is attached to a later release or cited as a current status claim.
+The repository’s engineering checks include workspace tests, linting, deterministic replay, strict input and export validation, and headless application captures for interface changes. On commit `9eb830d` (15 October 2026), `cargo test --release --workspace` passed **539 tests, with no failures and one pre-existing ignored test**; all-target clippy also exited successfully, with pre-existing warnings confined to untouched files. This is software regression evidence, not a measure of scientific validity. The exact checkpoint and its limitations are recorded in the [vehicle operation validation report](../VEHICLE_OPERATION_VALIDATION.md) and [project status audit](../OPENCODE_PROJECT_STATUS.md).
 
 Reproducing a study requires more than the application version. Where provided, users should retain the study definition, starting-world identity, simulation/model versions, source dataset versions, requested settings, run conditions, and raw exported observations. The project’s documentation and release artifacts are the authoritative place to verify the exact workflow and version used.
 
@@ -64,7 +66,7 @@ The current development direction connects finite spacecraft operations to surfa
 
 ## 8. Availability and citation
 
-Cosmogon source code, documentation, and release downloads are available from the [project repository](https://github.com/ashvyagni/SpaceRender) and its [release page](https://github.com/ashvyagni/SpaceRender/releases). The repository is licensed MIT OR Apache-2.0. Cite a specific release or archived software record rather than an unversioned development checkout when reproducibility matters. A versioned Zenodo record can provide a persistent DOI for a released software snapshot or report; Zenodo assigns a DOI when a record is published ([Zenodo quick start](https://help.zenodo.org/docs/get-started/quickstart/)).
+Cosmogon source code, documentation, and release downloads are available from the [project repository](https://github.com/ashvyagni/SpaceRender) and its [release page](https://github.com/ashvyagni/SpaceRender/releases). The latest release covered by this overview is **1.0.0**; the development snapshot described above is not a release. The Cargo workspace declares `MIT OR Apache-2.0`, but the 15 October 2026 repository audit found no corresponding license text files. The project’s license distribution therefore needs reconciliation before asserting that the repository includes those license terms. For reproducibility, cite a specific release or commit. A versioned Zenodo record can provide a persistent DOI for a released software snapshot or report; Zenodo assigns a DOI when a record is published ([Zenodo quick start](https://help.zenodo.org/docs/get-started/quickstart/)).
 
 **Suggested software citation (complete before publication):**
 
@@ -72,8 +74,8 @@ Cosmogon source code, documentation, and release downloads are available from th
 
 ## References and project records
 
-1. NASA/JPL Solar System Dynamics. *Horizons System*. Source and integration context are recorded in the project’s [data-source register](../DATA_SOURCES.md).
-2. NASA Planetary Data System. *Mars Global Surveyor Mars Orbiter Laser Altimeter (MOLA) data products*. Dataset version, checksums, coverage and processing notes are recorded in the project’s [data-source register](../DATA_SOURCES.md).
+1. NASA/JPL Solar System Dynamics. [*Horizons System*](https://ssd.jpl.nasa.gov/horizons/). Source and integration context are recorded in the project’s [data-source register](../DATA_SOURCES.md).
+2. NASA Planetary Data System. [*MGS MOLA Derived Topography — MEGDR and SHADR Dataset Bundle*](https://pds.nasa.gov/ds-view/pds/viewBundle.jsp?identifier=urn%3Anasa%3Apds%3Amgs_mola_topography_derived&version=1.0). Dataset version, checksums, coverage and processing notes are recorded in the project’s [data-source register](../DATA_SOURCES.md).
 3. Cosmogon contributors. *Measured orbit checks*. Project-specific methods, numerical results, and limitations: [SCIENTIFIC_VALIDATION.md](../SCIENTIFIC_VALIDATION.md).
 4. Cosmogon contributors. *Research design and acceptance direction*: [RESEARCH_DESIGN.md](../RESEARCH_DESIGN.md).
 
