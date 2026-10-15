@@ -7,7 +7,7 @@ use cosmogon_sim::{
     research,
     sandbox::Edit,
     save,
-    supply_vehicle::Plan,
+    supply_vehicle::{Cargo, Plan},
     vehicle_arrival::{Approach, GeographicStart},
     vehicle_arrival_recording::Report as ArrivalReport,
     vehicle_support::{Definition as SupportDefinition,Reading as SupportReading},
@@ -57,6 +57,8 @@ pub struct FlightUi {
     support_input:String,
     support_status:Option<String>,
     live_support:Option<Value>,
+    cargo_removal_kg: f64,
+    cargo_removal_relative: [f64; 3],
 
 }
 impl FlightUi {
@@ -586,6 +588,50 @@ impl FlightUi {
             {
                 match sim.edit(Edit::RemoveVehicle {system:flight.definition.parent.system,id:flight.id},now) {Ok(_)=>self.status=Some("Live craft removed through an undoable world edit; recorded studies are preserved.".into()),Err(e)=>self.status=Some(e)}
             }
+            if flight.cargo.is_some() {
+                ui.horizontal(|ui| {
+                    ui.label("Remove cargo (potable water, kg)");
+                    ui.add(egui::DragValue::new(&mut self.cargo_removal_kg).range(0.0..=1e6).speed(1.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Ejection velocity relative to craft (m/s)");
+                    for axis in 0..3 {
+                        ui.add(
+                            egui::DragValue::new(&mut self.cargo_removal_relative[axis])
+                                .range(-1000.0..=1000.0)
+                                .speed(0.1),
+                        );
+                    }
+                });
+                if ui
+                    .add_enabled(
+                        !sim.is_reference(),
+                        egui::Button::new("Remove cargo from this craft"),
+                    )
+                    .clicked()
+                {
+                    let requested = Cargo {
+                        oxygen_reserve_kg: 0.,
+                        potable_water_kg: self.cargo_removal_kg,
+                        food_dry_kg: 0.,
+                        food_water_kg: 0.,
+                    };
+                    match sim.edit(
+                        Edit::RemoveVehicleCargo {
+                            system: flight.definition.parent.system,
+                            id: flight.id,
+                            requested,
+                            velocity_relative_m_s: self.cargo_removal_relative,
+                        },
+                        now,
+                    ) {
+                        Ok(_) => self.status = Some(
+                            "Cargo removed through an undoable world edit; momentum and ledger evidence retained.".into(),
+                        ),
+                        Err(e) => self.status = Some(e),
+                    }
+                }
+            }
         }
         ui.label(egui::RichText::new("Live state is saved with the sandbox. Active flight resolves one-second tasks; high time warp may lag. Use a separate recorded branch for controlled studies.").small().color(MUTED));
     }
@@ -894,10 +940,18 @@ fn readings(ui: &mut egui::Ui, f: &Flight, world_time: f64) {
         Phase::Flying => {}
     }
     ui.label(format!(
-        "Mass {:.9} kg · held fuel {:.9} kg · cargo {:.9} kg",
-        p.mass_kg(d),
+        "Mass {:.9} kg · held fuel {:.9} kg · cargo {:.9} kg{}",
+        f.mass_kg(),
         p.propellant_kg,
-        d.cargo.mass_kg()
+        match &f.cargo {
+            Some(ledger) => ledger.held.mass_kg(),
+            None => d.cargo.mass_kg(),
+        },
+        if f.cargo.is_some() {
+            format!(" · ledger events {}", f.cargo_events.len())
+        } else {
+            String::new()
+        }
     ));
     ui.label(format!(
         "Removed fuel {:.9} kg · applied ideal capability {:.9} m/s",

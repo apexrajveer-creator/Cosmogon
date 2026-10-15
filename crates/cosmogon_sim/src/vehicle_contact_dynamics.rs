@@ -836,7 +836,14 @@ fn substep(
     command: Command,
 ) -> Result<Flight, String> {
     let state = flight.contact.as_ref().ok_or("Missing rigid state")?;
-    let definition = &flight.definition.plan.definition;
+    let held_definition;
+    let definition: &crate::supply_vehicle::Definition = match &flight.cargo {
+        Some(ledger) => {
+            held_definition = ledger.current_definition(&flight.definition.plan.definition)?;
+            &held_definition
+        }
+        None => &flight.definition.plan.definition,
+    };
     let target = flight.definition.parent;
     let time = flight.last_time_s;
     let initial = sample(
@@ -1127,6 +1134,9 @@ pub(crate) fn advance(flight: &mut Flight, world: &Universe, to: f64) -> Result<
         if remaining <= 32. * f64::EPSILON * target_elapsed.abs().max(1.) {
             break;
         }
+        while let Some(index) = next.pending_authored_removal() {
+            next.apply_authored_removal(index)?;
+        }
         if count >= MAX_STEPS_PER_SECOND {
             return Err("Contact interval exceeded 10000 bounded rigid substeps; no unresolved time is skipped".into());
         }
@@ -1140,7 +1150,7 @@ pub(crate) fn advance(flight: &mut Flight, world: &Universe, to: f64) -> Result<
             state,
             &h,
         )?;
-        let mass = next.propulsion.mass_kg(&next.definition.plan.definition);
+        let mass = next.mass_kg();
         let r = h.inertia_per_mass();
         let min_gyration = r.x.min(r.y).min(r.z);
         let mut stiffness = 0.;
@@ -1208,13 +1218,27 @@ pub(crate) fn advance(flight: &mut Flight, world: &Universe, to: f64) -> Result<
         let (command, left) =
             world_vehicle::active_command(&next.definition.plan, next.propulsion.elapsed_s);
         step = step.min(left);
-        let rate = next.definition.plan.definition.rated_thrust_n * command.throttle
-            / next.definition.plan.definition.exhaust_velocity_m_s();
+        let held_definition;
+        let d: &crate::supply_vehicle::Definition = match &next.cargo {
+            Some(ledger) => {
+                held_definition =
+                    ledger.current_definition(&next.definition.plan.definition)?;
+                &held_definition
+            }
+            None => &next.definition.plan.definition,
+        };
+        let rate = d.rated_thrust_n * command.throttle / d.exhaust_velocity_m_s();
         if rate > 0. && next.propulsion.propellant_kg > 0. {
             step = step.min(world_vehicle::exhaustion_time(
                 next.propulsion.propellant_kg,
                 rate,
             ));
+        }
+        if let Some(t) = next.next_authored_removal_time() {
+            let gap = t - next.propulsion.elapsed_s;
+            if gap > 0. {
+                step = step.min(gap);
+            }
         }
         if !step.is_finite()
             || step <= 0.
@@ -1225,6 +1249,9 @@ pub(crate) fn advance(flight: &mut Flight, world: &Universe, to: f64) -> Result<
         }
         next = substep(&next, world, &h, step, command)?;
         count += 1;
+    }
+    while let Some(index) = next.pending_authored_removal() {
+        next.apply_authored_removal(index)?;
     }
     next.last_time_s = to;
     next.contact.as_ref().unwrap().validate(&h, &next)?;
@@ -1268,7 +1295,7 @@ mod tests {
     use super::*;
     use crate::{
         sandbox::{BodyProperty, Edit},
-        supply_vehicle::Plan,
+        supply_vehicle::{Cargo, Plan},
         vehicle_arrival::{KinematicState, SurfaceFrame},
         vehicle_contact::Surface,
         world_vehicle::Definition,
@@ -1315,6 +1342,8 @@ mod tests {
             initial_relative_position_m: position - body.pos,
             initial_relative_velocity_m_s: velocity - body.vel,
             contact: Some(Hardware::example(&world, target, position).unwrap()),
+            cargo_ledgers: false,
+            cargo_removals: vec![],
         };
         d.validate(&world).unwrap();
         (world, d)
@@ -1527,6 +1556,51 @@ mod tests {
                 < 1e-8
         );
         assert!((state.orientation_xyzw.iter().map(|v| v * v).sum::<f64>() - 1.).abs() < 1e-12);
+    }
+    #[test]
+    fn co_rotating_cargo_removal_preserves_angular_velocity_and_closes() {
+        let (mut world, mut d) = setup(200000., 0.);
+        let h = d.contact.as_mut().unwrap();
+        h.initial_angular_velocity_body_rad_s = Vec3d::new(0., 0., 0.2);
+        d.cargo_ledgers = true;
+        d.plan.definition.payload_capacity_kg = 5_000.;
+        d.plan.definition.cargo.potable_water_kg = 2000.;
+        world
+            .apply_edit(Edit::CreateVehicle {
+                definition: Box::new(d),
+            })
+            .unwrap();
+        world.vehicles[0]
+            .remove_cargo(
+                Cargo {
+                    oxygen_reserve_kg: 0.,
+                    potable_water_kg: 800.,
+                    food_dry_kg: 0.,
+                    food_water_kg: 0.,
+                },
+                Vec3d::ZERO,
+            )
+            .unwrap();
+        let omega_before = world.vehicles[0]
+            .contact
+            .as_ref()
+            .unwrap()
+            .angular_velocity_body_rad_s;
+        let event = world.vehicles[0].cargo_events.last().unwrap();
+        assert_eq!(event.craft_angular_velocity_after_body_rad_s, omega_before);
+        assert!(event.carried_angular_momentum_magnitude_kg_m2_s > 0.);
+        assert!(event.carried_rotational_energy_j > 0.);
+        let start = world.time;
+        world.advance_to(start + 1., None, None);
+        assert_eq!(
+            world.vehicles[0]
+                .contact
+                .as_ref()
+                .unwrap()
+                .angular_velocity_body_rad_s,
+            omega_before
+        );
+        world.validate_vehicle_state().unwrap();
     }
     #[test]
     fn off_principal_axis_rotation_matches_euler_and_converges() {

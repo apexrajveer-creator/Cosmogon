@@ -213,6 +213,13 @@ impl Bundle {
                 None=>json!(null),
             };
         }
+        if study.flight.cargo_ledgers {
+            let last = rows.last().unwrap();
+            let ledger = last.flight.cargo.as_ref().ok_or("Cargo-ledger flight lost its retained ledger")?;
+            manifest["cargo"] = json!({"model":ledger.model,"held":ledger.held,
+                "events":last.flight.cargo_events,"authored_removals":study.flight.cargo_removals,
+                "scope":"Studies replay authored removals only; interactive removals are save-level evidence"});
+        }
         Ok(Self {
             study,
             origin: initial.clone(),

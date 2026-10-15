@@ -25,6 +25,7 @@ struct Args {
     recording: Option<String>,
     geographic_start: Option<String>,
     contact_hardware: Option<String>,
+    cargo_ledgers: bool,
     static_shear: bool,
     operation_window: Option<f64>,
     branches: Option<[usize;2]>,
@@ -72,6 +73,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         recording: None,
         geographic_start: None,
         contact_hardware: None,
+        cargo_ledgers: false,
         static_shear: false,
         operation_window: None,
         branches: None,
@@ -137,7 +139,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if matches!(a.cmd.as_str(),"crop-chemistry"|"crop-chemistry-inspect"|"greenhouse-supply-inspect") && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a crop supply/chemistry inspection option"));}
         if matches!(a.cmd.as_str(),"habitat-diagnose"|"habitat-crop-harvest") && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
         if a.cmd=="contact-hardware" && !matches!(flag.as_str(),"--initial"|"--target"|"--seed"|"--scenario"|"--output"|"--geographic-start"|"--static-shear"|"--operation-window") {return Err(format!("{flag} is not a contact hardware option"));}
-        if a.cmd=="flight-definition" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output"|"--target"|"--seed"|"--scenario"|"--samples"|"--interval-seconds"|"--geographic-start"|"--contact-hardware") {return Err(format!("{flag} is not a world flight definition option"));}
+        if a.cmd=="flight-definition" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output"|"--target"|"--seed"|"--scenario"|"--samples"|"--interval-seconds"|"--geographic-start"|"--contact-hardware"|"--cargo-ledgers") {return Err(format!("{flag} is not a world flight definition option"));}
         if a.cmd=="flight-study" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output") {return Err(format!("{flag} is not a world flight study option"));}
         if matches!(a.cmd.as_str(),"arrival-start"|"contact-start") && flag!="--output" {return Err(format!("{flag} is not a geographic start option"));}
         if a.cmd=="flight-approach" && !matches!(flag.as_str(),"--recording"|"--target"|"--output") {return Err(format!("{flag} is not a recorded approach option"));}
@@ -174,6 +176,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
                 a.operation_window=Some(seconds);
             },
             "--contact-hardware" if a.cmd=="flight-definition" => a.contact_hardware=Some(val()?),
+            "--cargo-ledgers" if a.cmd=="flight-definition" => a.cargo_ledgers=true,
             "--geographic-start" if matches!(a.cmd.as_str(),"flight-definition"|"contact-hardware") => a.geographic_start=Some(val()?),
             "--samples" => {
                 let requested=number::<usize>(val()?,&flag)?;explicit_samples=true;
@@ -316,7 +319,7 @@ fn help() {
     eprintln!("cosmogon-cli contact-start [--output NEW_FILE]\ncosmogon-cli contact-hardware [--static-shear --operation-window SECONDS --initial WORLD --target Mars --geographic-start FILE --output NEW_FILE]\nflight-definition --contact-hardware FILE explicitly enables versioned terrain/rigid-body motion; --operation-window adds the modeled solver-integrated surface-operation ledger; no safe landing or delivery");
     eprintln!("cosmogon-cli support-definition [--output NEW_FILE]\ncosmogon-cli flight-support --recording COMPLETE_FLIGHT_DIR [--definition LIMITS_FILE --output NEW_DIR]\ncosmogon-cli support-inspect --recording COMPLETE_SUPPORT_DIR\nConditional actual footprint/force evidence; no attachment or cargo permission");
     eprintln!("cosmogon-cli arrival-start [--output NEW_FILE]\ncosmogon-cli flight-approach --recording COMPLETE_FLIGHT_DIR [--target BODY --output NEW_DIR]\ncosmogon-cli approach-inspect --recording COMPLETE_APPROACH_DIR\nGeographic flight-definition starts: --geographic-start FILE (explicit spherical altitude and east/north/up velocities)");
-    eprintln!("cosmogon-cli flight-definition [--initial WORLD --definition PROPULSION_PLAN --target Mars --samples 121 --interval-seconds 1 --output NEW_FILE]\ncosmogon-cli flight-study --definition PINNED_STUDY [--initial WORLD --output NEW_DIR]\ncosmogon-cli flight-inspect --recording COMPLETE_DIR   # exact full-world flight replay, no cargo delivery");
+    eprintln!("cosmogon-cli flight-definition [--initial WORLD --definition PROPULSION_PLAN --target Mars --samples 121 --interval-seconds 1 --cargo-ledgers --output NEW_FILE]\ncosmogon-cli flight-study --definition PINNED_STUDY [--initial WORLD --output NEW_DIR]\ncosmogon-cli flight-inspect --recording COMPLETE_DIR   # exact full-world flight replay, no cargo delivery; --cargo-ledgers opts into retained cargo mass ledgers with epoch-accurate world flight");
     eprintln!("cosmogon-cli vehicle-definition [--output NEW_FILE]   # explicit assumed finite vehicle and burn plan\ncosmogon-cli vehicle-study [--definition PLAN --output NEW_DIR]   # ideal free-space finite propulsion, no launch/delivery\ncosmogon-cli vehicle-inspect --recording COMPLETE_DIR   # exact independent numeric/source replay");
     eprintln!("cosmogon-cli cargo-epochs-definition [--output NEW_FILE]   # explicit burn → species removal → burn sequence\ncosmogon-cli cargo-epochs-study [--definition PLAN --output NEW_DIR]   # piecewise mass epochs, no world delivery\ncosmogon-cli cargo-epochs-inspect --recording COMPLETE_DIR   # exact independent epoch replay");
     eprintln!("cosmogon-cli habitat-rerun --recording COMPLETE_DESIGN --output NEW_DIR [--definition NEW_TYPED_PLAN]   # exact original common starting world");
@@ -542,6 +545,7 @@ fn main() {
                         let start=cosmogon_sim::vehicle_arrival::GeographicStart::read(std::path::Path::new(path))?;
                         if let Some(h)=hardware {start.contact_flight(&world,parent,plan,h)?} else {start.flight(&world,parent,plan)?}
                     } else {let d=world_vehicle::Definition::circular_example(&world,parent,plan)?;if let Some(h)=hardware {d.with_contact(&world,h)?} else {d}};
+                    let d=if a.cargo_ledgers {d.with_cargo_ledgers()?} else {d};
                     let study=flight::Study::new(&world,d,a.samples,a.interval_days*86400.)?;
                     if let Some(path)=&a.output {study.write(&world,std::path::Path::new(path))?;}
                     return serde_json::to_value(&study).map_err(|e|e.to_string());

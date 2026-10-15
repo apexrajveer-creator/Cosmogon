@@ -345,6 +345,8 @@ mod tests {
             contact: Some(hardware),
             initial_relative_position_m: position - body.pos,
             initial_relative_velocity_m_s: velocity - body.vel,
+            cargo_ledgers: false,
+            cargo_removals: vec![],
         };
         d.validate(&world).unwrap();
         (world, d)

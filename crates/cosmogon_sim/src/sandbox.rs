@@ -96,6 +96,11 @@ pub enum Edit {
     SetMarsTerrain { body: BodyRef, dataset: terrain::ElevationData },
     CreateVehicle { definition: Box<crate::world_vehicle::Definition> },
     RemoveVehicle { system: u32, id: u64 },
+    /// Bounded interactive cargo removal from an authoritative flight; requires
+    /// authored cargo ledgers. Co-moving (zero relative velocity) removal is
+    /// impulse-free; any non-zero relative velocity is a dissipative ejection
+    /// within MAX_CARGO_EJECTION_SPEED_M_S.
+    RemoveVehicleCargo { system: u32, id: u64, requested: crate::supply_vehicle::Cargo, velocity_relative_m_s: [f64; 3] },
     CreateHabitat { definition: Box<crate::habitat::Definition> },
     ConfigureHabitat { system: u32, id: u64, config: Box<crate::habitat::Config> },
     HarvestHabitatCrop { system:u32,id:u64 },
@@ -110,7 +115,7 @@ pub enum Edit {
 impl Edit {
     pub fn system(&self) -> u32 {
         match self {
-            Edit::AddBody { system, .. } | Edit::SetStar { system, .. } | Edit::SetPhysics { system, .. } | Edit::Intervene { system, .. } | Edit::ConfigureHabitat {system,..} | Edit::RemoveHabitat {system,..} | Edit::HarvestHabitatCrop {system,..} | Edit::RemoveVehicle {system,..} => *system,
+            Edit::AddBody { system, .. } | Edit::SetStar { system, .. } | Edit::SetPhysics { system, .. } | Edit::Intervene { system, .. } | Edit::ConfigureHabitat {system,..} | Edit::RemoveHabitat {system,..} | Edit::HarvestHabitatCrop {system,..} | Edit::RemoveVehicle {system,..} | Edit::RemoveVehicleCargo {system,..} => *system,
             Edit::CreateHabitat {definition} => definition.body.system,
             Edit::CreateVehicle {definition} => definition.parent.system,
             Edit::RemoveBody { body } | Edit::SetState { body, .. } | Edit::Impulse { body, .. } | Edit::SetOrbit { body, .. } | Edit::SetProperty { body, .. } | Edit::SetMarsTerrain { body, .. } => body.system,
@@ -435,6 +440,12 @@ fn validate(u: &Universe, e: &Edit) -> Result<(), String> {
         Edit::RemoveVehicle {system,id} => {
             if !u.vehicles.iter().any(|v|v.id == *id && v.definition.parent.system == *system) { return Err("No such finite vehicle".into()); }
         }
+        Edit::RemoveVehicleCargo {system,id,requested,velocity_relative_m_s} => {
+            let flight=u.vehicles.iter().find(|v|v.id == *id && v.definition.parent.system == *system).ok_or("No such finite vehicle")?;
+            let relative=Vec3d::new(velocity_relative_m_s[0],velocity_relative_m_s[1],velocity_relative_m_s[2]);
+            let mut preview=flight.clone();
+            preview.remove_cargo((*requested).clone(),relative)?;
+        }
         Edit::CreateHabitat {definition} => {
             definition.validate()?;body_ok(&definition.body)?;
             if !u.body(definition.body).kind.has_surface() {return Err("Habitat placement requires an existing solid surface".into());}
@@ -491,6 +502,7 @@ fn describe(u: &Universe, e: &Edit) -> String {
         },
         Edit::CreateVehicle {definition} => format!("Created finite flight {} relative to {}",definition.plan.definition.name,name(&definition.parent)),
         Edit::RemoveVehicle {id,..} => format!("Removed finite vehicle {id}"),
+        Edit::RemoveVehicleCargo {id,requested,..} => format!("Removed {:.3} kg of cargo from vehicle {id}",requested.mass_kg()),
         Edit::CreateHabitat {definition} => format!("Built {} on {}",definition.name,name(&definition.body)),
         Edit::ConfigureHabitat {id,..} => format!("Configured habitat {id}"),
         Edit::HarvestHabitatCrop {id,..} => format!("Harvested completed crop in habitat {id}"),
@@ -529,7 +541,7 @@ impl Universe {
             return Ok(EditOutcome { created: None, summary });
         }
         // Habitat edits have their own conserved state; never activate orbital dynamics.
-        if matches!(edit, Edit::CreateVehicle {..} | Edit::RemoveVehicle {..}) {
+        if matches!(edit, Edit::CreateVehicle {..} | Edit::RemoveVehicle {..} | Edit::RemoveVehicleCargo {..}) {
             let summary = describe(self, &edit);
             let parent = match &edit {
                 Edit::CreateVehicle {definition} => {
@@ -541,6 +553,12 @@ impl Universe {
                 Edit::RemoveVehicle {id,..} => {
                     let index = self.vehicles.iter().position(|v|v.id == *id).expect("validated vehicle");
                     self.vehicles.remove(index).definition.parent
+                }
+                Edit::RemoveVehicleCargo {system,id,requested,velocity_relative_m_s} => {
+                    let relative=Vec3d::new(velocity_relative_m_s[0],velocity_relative_m_s[1],velocity_relative_m_s[2]);
+                    let flight=self.vehicles.iter_mut().find(|v|v.id == *id && v.definition.parent.system == *system).expect("validated vehicle");
+                    flight.remove_cargo((*requested).clone(),relative)?;
+                    flight.definition.parent
                 }
                 _ => unreachable!(),
             };
@@ -775,7 +793,7 @@ impl Universe {
                     sys.deactivate_dynamics(t)?;
                 }
             }
-            Edit::CreateVehicle {..} | Edit::RemoveVehicle {..} | Edit::Intervene { .. } | Edit::SetMarsTerrain { .. } | Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::HarvestHabitatCrop {..} | Edit::RemoveHabitat {..} => unreachable!("handled above"),
+            Edit::CreateVehicle {..} | Edit::RemoveVehicle {..} | Edit::RemoveVehicleCargo {..} | Edit::Intervene { .. } | Edit::SetMarsTerrain { .. } | Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::HarvestHabitatCrop {..} | Edit::RemoveHabitat {..} => unreachable!("handled above"),
         }
 
         let sys = &mut self.systems[s];

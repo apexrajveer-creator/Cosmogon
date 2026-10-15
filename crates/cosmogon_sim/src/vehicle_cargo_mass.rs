@@ -23,7 +23,7 @@ fn cargo(v: [f64; 4]) -> Cargo {
         food_water_kg: v[3],
     }
 }
-fn finite_cargo(c: &Cargo) -> bool {
+pub(crate) fn finite_cargo(c: &Cargo) -> bool {
     quantities(c)
         .iter()
         .all(|v| v.is_finite() && (0.0..=1e9).contains(v))

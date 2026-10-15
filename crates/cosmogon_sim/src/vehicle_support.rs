@@ -683,6 +683,8 @@ pub(crate) fn fixture() -> (Universe, crate::world_vehicle::Definition) {
         initial_relative_position_m: position - body.pos,
         initial_relative_velocity_m_s: velocity - body.vel,
         contact: Some(h),
+        cargo_ledgers: false,
+        cargo_removals: vec![],
     };
     d.validate(&world).unwrap();
     (world, d)

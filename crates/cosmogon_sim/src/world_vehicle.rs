@@ -2,7 +2,7 @@
 //! This module's core is being connected to the authoritative world scheduler and UI.
 use crate::{
     astro::{StarSystem, G},
-    supply_vehicle::{Command, Interval, Plan, State},
+    supply_vehicle::{Cargo, Command, Interval, Plan, State},
     BodyRef, Universe, Vec3d,
 };
 use cosmogon_core::dmath::DMath;
@@ -12,6 +12,12 @@ pub const MODEL: &str = "cosmogon-finite-world-vehicle/1";
 pub const CONTACT_MODEL: &str = "cosmogon-finite-world-vehicle/2";
 pub const SHEAR_MODEL: &str = "cosmogon-finite-world-vehicle/3";
 pub const FRAME: &str = "system-local-inertial-simulation-axes";
+/// Bounded handling rule: cargo material may leave the craft at up to this
+/// speed relative to the craft centre in the inertial frame. Co-moving
+/// removal (zero relative velocity) is impulse-free; any bounded non-zero
+/// relative velocity is an accounted, dissipative ejection, never a free
+/// impulse.
+pub const MAX_CARGO_EJECTION_SPEED_M_S: f64 = 1000.;
 pub(crate) const SUBSTEP_S: f64 = 0.25;
 pub(crate) const TASK: usize = 5;
 pub(crate) const PERIOD: f64 = 1.;
@@ -30,6 +36,22 @@ pub struct Definition {
     pub initial_relative_velocity_m_s: Vec3d,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contact: Option<crate::vehicle_contact_dynamics::Hardware>,
+    /// Opt-in strictly versioned cargo mass ledgers; absent legacy state stays exact.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cargo_ledgers: bool,
+    /// Authored timed species removals applied through the shared cargo ledger
+    /// at the first represented propulsion-clock boundary at or after each time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cargo_removals: Vec<AuthoredCargoRemoval>,
+}
+/// One authored, timed finite species-removal request in the craft-relative frame.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthoredCargoRemoval {
+    pub at_elapsed_s: f64,
+    pub requested: Cargo,
+    /// Added to the craft's current inertial velocity; bounded by MAX_CARGO_EJECTION_SPEED_M_S.
+    pub velocity_relative_m_s: [f64; 3],
 }
 impl Definition {
     pub fn with_contact(mut self, world:&Universe, hardware:crate::vehicle_contact_dynamics::Hardware)->Result<Self,String> {
@@ -52,15 +74,43 @@ impl Definition {
             initial_relative_position_m: Vec3d::new(r, 0., 0.),
             initial_relative_velocity_m_s: Vec3d::new(0., (G * body.mass / r).sqrt(), 0.),
             contact: None,
+            cargo_ledgers: false,
+            cargo_removals: vec![],
         };
         d.validate(u)?;
         Ok(d)
+    }
+    /// Opt in to strictly versioned cargo mass ledgers for this flight.
+    pub fn with_cargo_ledgers(mut self) -> Result<Self, String> {
+        self.cargo_ledgers = true;
+        self.validate_structure()?;
+        Ok(self)
     }
     pub fn validate_structure(&self) -> Result<(), String> {
         if self.frame != FRAME || !matches!((self.model.as_str(), &self.contact), (MODEL, None) | (CONTACT_MODEL | SHEAR_MODEL, Some(_))) {
             return Err("Unsupported finite flight model or reference frame".into());
         }
         if let Some(h) = &self.contact { h.validate()?; if self.model != h.flight_model() {return Err("World-flight and contact hardware model versions disagree".into());} }
+        if !self.cargo_removals.is_empty() && !self.cargo_ledgers {
+            return Err("Authored cargo removals require cargo ledgers".into());
+        }
+        for removal in &self.cargo_removals {
+            let relative = Vec3d::new(
+                removal.velocity_relative_m_s[0],
+                removal.velocity_relative_m_s[1],
+                removal.velocity_relative_m_s[2],
+            );
+            if !removal.at_elapsed_s.is_finite()
+                || !(0.0..=1e7).contains(&removal.at_elapsed_s)
+                || !crate::vehicle_cargo_mass::finite_cargo(&removal.requested)
+                || !finite(relative)
+                || relative.length() > MAX_CARGO_EJECTION_SPEED_M_S
+            {
+                return Err(
+                    "Authored cargo removals require a finite 0–1e7 s clock, supported cargo and a bounded relative ejection velocity".into(),
+                );
+            }
+        }
         self.plan.validate()?;
         if !finite(self.initial_relative_position_m)
             || self.initial_relative_position_m.length() > 1e15
@@ -170,6 +220,30 @@ pub struct Flight {
     /// Opt-in solver-integrated surface-operation window evidence; created on first sample.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation_ledger: Option<crate::vehicle_operation::Ledger>,
+    /// Opt-in strictly versioned cargo mass ledger; absent legacy flights stay byte-exact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cargo: Option<crate::vehicle_cargo_mass::Ledger>,
+    /// Per-removal world evidence: momentum closure, bounded relative ejection and
+    /// the uniform-gyration co-rotating angular share. One entry per ledger event.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cargo_events: Vec<CargoEvent>,
+}
+/// World-side evidence for one cargo removal from an authoritative flight.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CargoEvent {
+    pub removal: crate::vehicle_cargo_mass::Removal,
+    pub velocity_relative_m_s: Vec3d,
+    pub craft_velocity_before_m_s: Vec3d,
+    pub craft_velocity_after_m_s: Vec3d,
+    pub craft_angular_velocity_before_body_rad_s: Vec3d,
+    pub craft_angular_velocity_after_body_rad_s: Vec3d,
+    pub carried_angular_momentum_magnitude_kg_m2_s: f64,
+    pub carried_rotational_energy_j: f64,
+    pub vehicle_mass_before_kg: f64,
+    pub vehicle_mass_after_kg: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authored_index: Option<usize>,
 }
 impl Flight {
     pub fn new(id: u64, d: Definition, u: &Universe) -> Result<Self, String> {
@@ -193,6 +267,11 @@ impl Flight {
         }
         supported_motion(position, velocity)?;
         let propulsion = State::new(&d.plan.definition)?;
+        let cargo = if d.cargo_ledgers {
+            Some(crate::vehicle_cargo_mass::Ledger::new(&d.plan.definition)?)
+        } else {
+            None
+        };
         let contact = d.contact.as_ref().map(|h| crate::vehicle_contact_dynamics::RigidState::new(u, d.parent, position, velocity, h)).transpose()?;
         Ok(Self {
             id,
@@ -208,7 +287,139 @@ impl Flight {
             edit_cursor: u.edits.len() as u64,
             contact,
             operation_ledger: None,
+            cargo,
+            cargo_events: vec![],
         })
+    }
+    /// Actual current vehicle mass: dry + held cargo (ledger epoch) + remaining propellant.
+    pub fn mass_kg(&self) -> f64 {
+        match &self.cargo {
+            Some(ledger) => ledger.mass_kg(&self.definition.plan.definition, &self.propulsion),
+            None => self.propulsion.mass_kg(&self.definition.plan.definition),
+        }
+    }
+    pub(crate) fn pending_authored_removal(&self) -> Option<usize> {
+        let elapsed = self.propulsion.elapsed_s;
+        self.definition
+            .cargo_removals
+            .iter()
+            .enumerate()
+            .find(|(index, removal)| {
+                removal.at_elapsed_s <= elapsed
+                    && !self.cargo_events.iter().any(|e| e.authored_index == Some(*index))
+            })
+            .map(|(index, _)| index)
+    }
+    pub(crate) fn next_authored_removal_time(&self) -> Option<f64> {
+        let elapsed = self.propulsion.elapsed_s;
+        self.definition
+            .cargo_removals
+            .iter()
+            .enumerate()
+            .filter(|(index, removal)| {
+                removal.at_elapsed_s > elapsed
+                    && !self.cargo_events.iter().any(|e| e.authored_index == Some(*index))
+            })
+            .fold(None, |acc: Option<f64>, (_, removal)| match acc {
+                Some(best) if best <= removal.at_elapsed_s => acc,
+                _ => Some(removal.at_elapsed_s),
+            })
+    }
+    pub(crate) fn apply_authored_removal(&mut self, index: usize) -> Result<CargoEvent, String> {
+        let removal = self
+            .definition
+            .cargo_removals
+            .get(index)
+            .cloned()
+            .ok_or("Missing authored cargo removal")?;
+        let relative = Vec3d::new(
+            removal.velocity_relative_m_s[0],
+            removal.velocity_relative_m_s[1],
+            removal.velocity_relative_m_s[2],
+        );
+        self.remove_cargo_inner(removal.requested, relative, Some(index))
+    }
+    /// Interactive bounded cargo removal through the retained ledger. Co-moving
+    /// material (zero relative velocity) leaves craft velocity and, under the
+    /// uniform-gyration layout rule, angular velocity unchanged; the removed
+    /// material carries its linear momentum and co-rotating angular share.
+    /// Eccentric (offset) cargo layouts are not representable.
+    pub fn remove_cargo(
+        &mut self,
+        requested: Cargo,
+        velocity_relative_m_s: Vec3d,
+    ) -> Result<CargoEvent, String> {
+        self.remove_cargo_inner(requested, velocity_relative_m_s, None)
+    }
+    fn remove_cargo_inner(
+        &mut self,
+        requested: Cargo,
+        relative: Vec3d,
+        authored_index: Option<usize>,
+    ) -> Result<CargoEvent, String> {
+        if self.phase != Phase::Flying {
+            return Err("Cargo removal requires an active flying craft".into());
+        }
+        if self.cargo.is_none() {
+            return Err("Cargo removal requires authored cargo ledgers".into());
+        }
+        if !finite(relative) || relative.length() > MAX_CARGO_EJECTION_SPEED_M_S {
+            return Err(format!(
+                "Cargo removal velocity relative to the craft must be finite and at most {MAX_CARGO_EJECTION_SPEED_M_S} m/s"
+            ));
+        }
+        let definition = &self.definition.plan.definition;
+        let mass_before = self.mass_kg();
+        let velocity_before = self.velocity_m_s;
+        let omega_before = self
+            .contact
+            .as_ref()
+            .map(|c| c.angular_velocity_body_rad_s)
+            .unwrap_or(Vec3d::ZERO);
+        let material_velocity = velocity_before + relative;
+        let ledger = self.cargo.as_mut().expect("checked above");
+        let removal = ledger.remove(definition, &self.propulsion, requested, material_velocity)?;
+        let mass_after = removal.final_mass_kg;
+        let removed_mass = removal.actual_removed.mass_kg();
+        // Linear momentum closes exactly: m_before·v_before = m_after·v_after + carried.
+        let velocity_after =
+            (velocity_before * mass_before - material_velocity * removed_mass) / mass_after;
+        // Uniform-gyration layout rule: removed material shares the craft's
+        // per-mass inertia, so its co-rotating angular momentum is exactly the
+        // removed mass fraction and the craft's angular velocity is unchanged.
+        let (omega_after, carried_angular_magnitude, carried_rotational_energy) =
+            if let Some(hardware) = self.definition.contact.as_ref() {
+                let g = hardware.gyration_radii_m;
+                let delta_i = Vec3d::new(
+                    g.x * g.x * removed_mass,
+                    g.y * g.y * removed_mass,
+                    g.z * g.z * removed_mass,
+                );
+                let body = Vec3d::new(
+                    omega_before.x * delta_i.x,
+                    omega_before.y * delta_i.y,
+                    omega_before.z * delta_i.z,
+                );
+                (omega_before, body.length(), 0.5 * omega_before.dot(body))
+            } else {
+                (Vec3d::ZERO, 0., 0.)
+            };
+        self.velocity_m_s = velocity_after;
+        let event = CargoEvent {
+            removal,
+            velocity_relative_m_s: relative,
+            craft_velocity_before_m_s: velocity_before,
+            craft_velocity_after_m_s: velocity_after,
+            craft_angular_velocity_before_body_rad_s: omega_before,
+            craft_angular_velocity_after_body_rad_s: omega_after,
+            carried_angular_momentum_magnitude_kg_m2_s: carried_angular_magnitude,
+            carried_rotational_energy_j: carried_rotational_energy,
+            vehicle_mass_before_kg: mass_before,
+            vehicle_mass_after_kg: mass_after,
+            authored_index,
+        };
+        self.cargo_events.push(event.clone());
+        Ok(event)
     }
     /// Validate retained state without reinterpreting original authored conditions
     /// against a body whose mass, radius or existence may have changed since launch.
@@ -288,23 +499,127 @@ impl Flight {
             return Err("Retained flight propellant inventory does not close".into());
         }
         let impulse = p.exhausted_propellant_kg * d.exhaust_velocity_m_s();
-        let capability =
-            d.exhaust_velocity_m_s() * (p.exhausted_propellant_kg / p.mass_kg(d)).dln1p();
-        if (p.cumulative_impulse_n_s - impulse).abs() > 1e-8 * impulse.max(1.)
-            || (p.cumulative_ideal_delta_v_m_s - capability).abs() > 1e-8 * capability.max(1.)
-            || Vec3d::new(
-                p.velocity_change_m_s[0],
-                p.velocity_change_m_s[1],
-                p.velocity_change_m_s[2],
-            )
-            .length()
-                > p.cumulative_ideal_delta_v_m_s + 1e-8 * capability.max(1.)
+        if Vec3d::new(
+            p.velocity_change_m_s[0],
+            p.velocity_change_m_s[1],
+            p.velocity_change_m_s[2],
+        )
+        .length()
+            > p.cumulative_ideal_delta_v_m_s
+                + 1e-8 * p.cumulative_ideal_delta_v_m_s.max(1.)
             || p.powered_duration_s + p.fuel_limited_duration_s
                 > p.elapsed_s + 1e-8 * p.elapsed_s.max(1.)
         {
             return Err(
                 "Retained propulsion counters do not match finite mass or elapsed support".into(),
             );
+        }
+        match (&self.cargo, self.definition.cargo_ledgers) {
+            (None, false) => {
+                let capability =
+                    d.exhaust_velocity_m_s() * (p.exhausted_propellant_kg / p.mass_kg(d)).dln1p();
+                if (p.cumulative_impulse_n_s - impulse).abs() > 1e-8 * impulse.max(1.)
+                    || (p.cumulative_ideal_delta_v_m_s - capability).abs() > 1e-8 * capability.max(1.)
+                {
+                    return Err(
+                        "Retained propulsion counters do not match finite mass or elapsed support".into(),
+                    );
+                }
+            }
+            (Some(ledger), true) => {
+                if ledger.model != crate::vehicle_cargo_mass::MODEL {
+                    return Err("Unsupported retained cargo ledger model".into());
+                }
+                ledger
+                    .validate(d, p)
+                    .map_err(|e| format!("Invalid retained cargo ledger: {e}"))?;
+                if self.cargo_events.len() != ledger.events.len() {
+                    return Err("Cargo event evidence does not match the retained ledger".into());
+                }
+                let mut authored = std::collections::BTreeSet::new();
+                for event in &self.cargo_events {
+                    let material_velocity =
+                        event.craft_velocity_before_m_s + event.velocity_relative_m_s;
+                    if !finite(event.velocity_relative_m_s)
+                        || event.velocity_relative_m_s.length() > MAX_CARGO_EJECTION_SPEED_M_S
+                        || !finite(event.craft_velocity_before_m_s)
+                        || !finite(event.craft_velocity_after_m_s)
+                        || (event.removal.velocity_m_s - material_velocity).length()
+                            > 1e-8 * material_velocity.length().max(1.)
+                        || (event.vehicle_mass_before_kg - event.vehicle_mass_after_kg
+                            - event.removal.actual_removed.mass_kg())
+                            .abs()
+                            > mass_tolerance
+                    {
+                        return Err("Invalid cargo removal evidence".into());
+                    }
+                    let momentum = event.craft_velocity_after_m_s * event.vehicle_mass_after_kg
+                        + material_velocity * event.removal.actual_removed.mass_kg()
+                        - event.craft_velocity_before_m_s * event.vehicle_mass_before_kg;
+                    if momentum.length() > 1e-8 * event.vehicle_mass_before_kg.max(1.) {
+                        return Err("Cargo removal momentum does not close".into());
+                    }
+                    if (event.craft_angular_velocity_after_body_rad_s
+                        - event.craft_angular_velocity_before_body_rad_s)
+                        .length()
+                        > 0.
+                    {
+                        return Err("Cargo removal changed craft angular velocity".into());
+                    }
+                    if let Some(hardware) = self.definition.contact.as_ref() {
+                        let g = hardware.gyration_radii_m;
+                        let removed = event.removal.actual_removed.mass_kg();
+                        let delta_i = Vec3d::new(
+                            g.x * g.x * removed,
+                            g.y * g.y * removed,
+                            g.z * g.z * removed,
+                        );
+                        let w = event.craft_angular_velocity_before_body_rad_s;
+                        let body =
+                            Vec3d::new(w.x * delta_i.x, w.y * delta_i.y, w.z * delta_i.z);
+                        if (event.carried_angular_momentum_magnitude_kg_m2_s - body.length()).abs()
+                            > 1e-8 * body.length().max(1.)
+                            || (event.carried_rotational_energy_j - 0.5 * w.dot(body)).abs()
+                                > 1e-8 * (0.5 * w.dot(body)).abs().max(1.)
+                        {
+                            return Err("Cargo removal angular evidence does not match".into());
+                        }
+                    } else if event.carried_angular_momentum_magnitude_kg_m2_s != 0.
+                        || event.carried_rotational_energy_j != 0.
+                    {
+                        return Err("Cargo removal angular evidence without contact hardware".into());
+                    }
+                    if let Some(index) = event.authored_index {
+                        let removal = self
+                            .definition
+                            .cargo_removals
+                            .get(index)
+                            .ok_or("Cargo event references a missing authored removal")?;
+                        if !authored.insert(index)
+                            || removal.requested != event.removal.requested
+                            || event.removal.elapsed_s + 1e-9 < removal.at_elapsed_s
+                        {
+                            return Err(
+                                "Authored cargo removal evidence does not match the flight definition".into(),
+                            );
+                        }
+                    }
+                }
+                for (index, removal) in self.definition.cargo_removals.iter().enumerate() {
+                    if removal.at_elapsed_s <= p.elapsed_s && !authored.contains(&index) {
+                        return Err(
+                            "An elapsed authored cargo removal is missing from retained evidence".into(),
+                        );
+                    }
+                }
+                let mass = self.mass_kg();
+                if !mass.is_finite() || mass <= 0. {
+                    return Err("Invalid retained cargo-aware vehicle mass".into());
+                }
+            }
+            _ => {
+                return Err("Cargo ledgers and retained cargo evidence disagree".into());
+            }
         }
         let clock_tolerance =
             (64. * f64::EPSILON * self.last_time_s.abs().max(self.launched_at_s.abs())).max(1e-6);
@@ -376,7 +691,24 @@ impl Flight {
             .any(|v| !v.is_finite() || *v < 0.)
                 || !i.mass_residual_kg.is_finite()
                 || i.duration_s > SUBSTEP_S + 1e-8
-                || (i.final_mass_kg - p.mass_kg(d)).abs() > mass_tolerance
+                || (i.final_mass_kg
+                    - match &self.cargo {
+                        None => p.mass_kg(d),
+                        // A removal at the very end boundary of the last interval was
+                        // applied after that interval integrated; add it back when
+                        // checking the interval's recorded final mass.
+                        Some(_) => {
+                            self.mass_kg()
+                                + self
+                                    .cargo_events
+                                    .iter()
+                                    .filter(|e| p.elapsed_s - e.removal.elapsed_s <= 1e-6)
+                                    .map(|e| e.removal.actual_removed.mass_kg())
+                                    .sum::<f64>()
+                        }
+                    })
+                    .abs()
+                    > mass_tolerance
                 || (i.initial_mass_kg - i.final_mass_kg - i.actual_propellant_kg).abs()
                     > mass_tolerance
                 || i.powered_duration_s + i.fuel_limited_duration_s > i.duration_s + 1e-8
@@ -422,16 +754,34 @@ impl Flight {
         let mut next = self.clone();
         let mut remaining = dt;
         while remaining > 0. {
+            while let Some(index) = next.pending_authored_removal() {
+                next.apply_authored_removal(index)?;
+            }
+            let held_definition;
+            let d: &crate::supply_vehicle::Definition = match &next.cargo {
+                Some(ledger) => {
+                    held_definition =
+                        ledger.current_definition(&next.definition.plan.definition)?;
+                    &held_definition
+                }
+                None => &next.definition.plan.definition,
+            };
             let elapsed = next.propulsion.elapsed_s;
             let (command, left) = active_command(&next.definition.plan, elapsed);
-            let rate = next.definition.plan.definition.rated_thrust_n * command.throttle
-                / next.definition.plan.definition.exhaust_velocity_m_s();
+            let rate =
+                d.rated_thrust_n * command.throttle / d.exhaust_velocity_m_s();
             let cutoff = if rate > 0. && next.propulsion.propellant_kg > 0. {
                 exhaustion_time(next.propulsion.propellant_kg, rate)
             } else {
                 f64::INFINITY
             };
-            let h = remaining.min(SUBSTEP_S).min(left).min(cutoff);
+            let mut h = remaining.min(SUBSTEP_S).min(left).min(cutoff);
+            if let Some(t) = next.next_authored_removal_time() {
+                let gap = t - elapsed;
+                if gap > 0. {
+                    h = h.min(gap);
+                }
+            }
             if h <= 0. || elapsed + h == elapsed {
                 return Err("Flight interval is below represented elapsed-time precision".into());
             }
@@ -442,7 +792,6 @@ impl Flight {
                 duration_s: h,
                 ..command
             };
-            let d = &next.definition.plan.definition;
             let tolerance = (64.
                 * f64::EPSILON
                 * next
@@ -572,6 +921,9 @@ impl Flight {
             next.propulsion = propulsion;
             next.last_interval = Some(interval);
             remaining = (remaining - h).max(0.);
+        }
+        while let Some(index) = next.pending_authored_removal() {
+            next.apply_authored_removal(index)?;
         }
         next.last_time_s = to;
         next.last_sources = source_samples(&gravity_sources(system, to)?);
@@ -1583,5 +1935,168 @@ mod tests {
             before.definition.plan.definition.cargo
         );
         assert_ne!(flight.position_m, before.position_m);
+    }
+    fn cargo( water: f64) -> Cargo {
+        Cargo {
+            oxygen_reserve_kg: 0.,
+            potable_water_kg: water,
+            food_dry_kg: 0.,
+            food_water_kg: 0.,
+        }
+    }
+    fn launched_with_ledgers(water: f64) -> Universe {
+        let mut u = Universe::new(crate::UniverseSettings {
+            scenario: crate::Scenario::SolarSystemLab,
+            ..Default::default()
+        });
+        let mut d =
+            Definition::circular_example(&u, BodyRef { system: 0, body: 3 }, Plan::example())
+                .unwrap()
+                .with_cargo_ledgers()
+                .unwrap();
+        d.plan.definition.payload_capacity_kg = 20_000.;
+        d.plan.definition.cargo.potable_water_kg = water;
+        u.apply_edit(crate::sandbox::Edit::CreateVehicle {
+            definition: Box::new(d),
+        })
+        .unwrap();
+        u
+    }
+    #[test]
+    fn co_moving_cargo_removal_is_impulse_free_and_closes_momentum() {
+        let mut u = launched_with_ledgers(5000.);
+        let velocity_before = u.vehicles[0].velocity_m_s;
+        let mass_before = u.vehicles[0].mass_kg();
+        let event = u.vehicles[0].remove_cargo(cargo(1000.), Vec3d::ZERO).unwrap();
+        assert_eq!(event.removal.actual_removed, cargo(1000.));
+        let mass_after = u.vehicles[0].mass_kg();
+        assert!((mass_before - mass_after - 1000.).abs() < 1e-9);
+        assert!(
+            (u.vehicles[0].velocity_m_s - velocity_before).length()
+                < 1e-9 * velocity_before.length().max(1.)
+        );
+        assert_eq!(u.vehicles[0].cargo.as_ref().unwrap().held.potable_water_kg, 4000.);
+        assert_eq!(u.vehicles[0].cargo_events.len(), 1);
+        u.validate_vehicle_state().unwrap();
+    }
+    #[test]
+    fn bounded_ejection_closes_linear_momentum_exactly() {
+        let mut u = launched_with_ledgers(5000.);
+        let relative = Vec3d::new(120., -40., 90.);
+        let velocity_before = u.vehicles[0].velocity_m_s;
+        let mass_before = u.vehicles[0].mass_kg();
+        let event = u.vehicles[0].remove_cargo(cargo(800.), relative).unwrap();
+        let carried = event.removal.velocity_m_s * event.removal.actual_removed.mass_kg();
+        let closed = u.vehicles[0].velocity_m_s * u.vehicles[0].mass_kg() + carried;
+        assert!((closed - velocity_before * mass_before).length() < 1e-6);
+        assert!(
+            (u.vehicles[0].velocity_m_s - velocity_before).length() > 1e-6,
+            "non-zero relative ejection must change craft velocity"
+        );
+        u.validate_vehicle_state().unwrap();
+    }
+    #[test]
+    fn cargo_removal_refuses_missing_ledgers_overdraw_unbounded_velocity_and_non_flight() {
+        let mut plain = launched_world();
+        assert!(plain.vehicles[0]
+            .remove_cargo(cargo(1.), Vec3d::ZERO)
+            .unwrap_err()
+            .contains("ledgers"));
+        let mut u = launched_with_ledgers(1000.);
+        assert!(u.vehicles[0]
+            .remove_cargo(cargo(5000.), Vec3d::ZERO)
+            .is_err());
+        assert!(u.vehicles[0]
+            .remove_cargo(cargo(10.), Vec3d::new(MAX_CARGO_EJECTION_SPEED_M_S + 1., 0., 0.))
+            .is_err());
+        u.vehicles[0].phase = Phase::Unsupported {
+            reason: "test".into(),
+        };
+        assert!(u.vehicles[0]
+            .remove_cargo(cargo(10.), Vec3d::ZERO)
+            .unwrap_err()
+            .contains("flying"));
+    }
+    #[test]
+    fn tampered_cargo_evidence_fails_saved_validation() {
+        let mut u = launched_with_ledgers(2000.);
+        u.vehicles[0].remove_cargo(cargo(300.), Vec3d::new(50., 0., 0.)).unwrap();
+        u.validate_vehicle_state().unwrap();
+        u.vehicles[0].cargo_events[0].craft_velocity_after_m_s += Vec3d::new(1., 0., 0.);
+        assert!(u.validate_vehicle_state().is_err());
+    }
+    #[test]
+    fn authored_cargo_removals_apply_at_represented_boundaries() {
+        let mut u = Universe::new(crate::UniverseSettings {
+            scenario: crate::Scenario::SolarSystemLab,
+            ..Default::default()
+        });
+        let mut d =
+            Definition::circular_example(&u, BodyRef { system: 0, body: 3 }, Plan::example())
+                .unwrap()
+                .with_cargo_ledgers()
+                .unwrap();
+        d.plan.definition.payload_capacity_kg = 20_000.;
+        d.plan.definition.cargo.potable_water_kg = 3000.;
+        d.cargo_removals = vec![AuthoredCargoRemoval {
+            at_elapsed_s: 0.6,
+            requested: cargo(400.),
+            velocity_relative_m_s: [0., 0., 0.],
+        }];
+        u.apply_edit(crate::sandbox::Edit::CreateVehicle {
+            definition: Box::new(d),
+        })
+        .unwrap();
+        let start = u.time;
+        u.advance_to(start + 2., None, None);
+        let flight = &u.vehicles[0];
+        assert_eq!(flight.cargo_events.len(), 1);
+        assert!(flight.propulsion.elapsed_s >= 0.6);
+        assert_eq!(flight.cargo.as_ref().unwrap().held.potable_water_kg, 2600.);
+        assert_eq!(flight.cargo_events[0].authored_index, Some(0));
+        u.validate_vehicle_state().unwrap();
+    }
+    #[test]
+    fn ledger_flights_expose_cargo_keys_and_legacy_flights_stay_byte_exact() {
+        let plain = launched_world();
+        let value: serde_json::Value = serde_json::to_value(&plain.vehicles[0]).unwrap();
+        let object = value.as_object().unwrap();
+        assert!(!object.contains_key("cargo"));
+        assert!(!object.contains_key("cargo_events"));
+        let ledger = launched_with_ledgers(1000.);
+        let value: serde_json::Value = serde_json::to_value(&ledger.vehicles[0]).unwrap();
+        let object = value.as_object().unwrap();
+        assert!(object.contains_key("cargo"));
+        assert!(!object.contains_key("cargo_events"));
+        let mut u = launched_with_ledgers(1000.);
+        u.vehicles[0].remove_cargo(cargo(10.), Vec3d::ZERO).unwrap();
+        let value: serde_json::Value = serde_json::to_value(&u.vehicles[0]).unwrap();
+        assert!(value.as_object().unwrap().contains_key("cargo_events"));
+        let roundtrip: crate::Universe =
+            crate::save::from_json(&crate::save::to_json(&ledger, "cargo").unwrap()).unwrap();
+        roundtrip.validate_vehicle_state().unwrap();
+    }
+    #[test]
+    fn definition_structure_rejects_removals_without_ledgers_and_unsupported_inputs() {
+        let u = Universe::new(crate::UniverseSettings {
+            scenario: crate::Scenario::SolarSystemLab,
+            ..Default::default()
+        });
+        let parent = BodyRef { system: 0, body: 3 };
+        let mut d = Definition::circular_example(&u, parent, Plan::example()).unwrap();
+        d.cargo_removals = vec![AuthoredCargoRemoval {
+            at_elapsed_s: 1.,
+            requested: cargo(10.),
+            velocity_relative_m_s: [0., 0., 0.],
+        }];
+        assert!(d.validate_structure().is_err());
+        let mut d = d.with_cargo_ledgers().unwrap();
+        d.cargo_removals[0].at_elapsed_s = f64::NAN;
+        assert!(d.validate_structure().is_err());
+        d.cargo_removals[0].at_elapsed_s = 1.;
+        d.cargo_removals[0].velocity_relative_m_s = [2000., 0., 0.];
+        assert!(d.validate_structure().is_err());
+        d.cargo_removals[0].requested = cargo(f64::NAN);
+        assert!(d.validate_structure().is_err());
     }
 }
