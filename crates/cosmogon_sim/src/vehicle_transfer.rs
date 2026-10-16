@@ -482,6 +482,8 @@ pub(crate) mod tests {
             cargo_removals: vec![],
             handling: Some(equipment),
             launch: None,
+            entry: None,
+            landing: None,
         }
     }
 

@@ -1263,6 +1263,16 @@ pub(crate) fn advance(flight: &mut Flight, world: &Universe, to: f64) -> Result<
                 elapsed_s,
             )?;
         }
+        if next.definition.entry.is_some() {
+            let sample_time = next.last_time_s;
+            let elapsed_s = next.propulsion.elapsed_s;
+            crate::vehicle_entry::observe(&mut next, world, sample_time, elapsed_s, step)?;
+        }
+        if next.definition.landing.is_some() {
+            let sample_time = next.last_time_s;
+            let elapsed_s = next.propulsion.elapsed_s;
+            crate::vehicle_landing::observe(&mut next, world, sample_time, elapsed_s)?;
+        }
         count += 1;
     }
     while let Some(index) = next.pending_authored_removal() {
@@ -1361,6 +1371,8 @@ mod tests {
             cargo_removals: vec![],
             handling: None,
             launch: None,
+            entry: None,
+            landing: None,
         };
         d.validate(&world).unwrap();
         (world, d)

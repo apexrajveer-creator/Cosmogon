@@ -28,6 +28,16 @@ struct Args {
     cargo_ledgers: bool,
     handling: bool,
     launch: Option<String>,
+    entry: Option<String>,
+    landing: Option<String>,
+    entry_interface_altitude: Option<f64>,
+    nose_radius: Option<f64>,
+    heat_flux_coefficient: Option<f64>,
+    maximum_heat_flux: Option<f64>,
+    maximum_total_heat: Option<f64>,
+    maximum_touchdown_vertical: Option<f64>,
+    maximum_touchdown_horizontal: Option<f64>,
+    landing_liftoff_altitude: Option<f64>,
     thrust_time: Option<f64>,
     thrust_newtons: Option<f64>,
     maximum_acceleration: Option<f64>,
@@ -83,6 +93,16 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         cargo_ledgers: false,
         handling: false,
         launch: None,
+        entry: None,
+        landing: None,
+        entry_interface_altitude: None,
+        nose_radius: None,
+        heat_flux_coefficient: None,
+        maximum_heat_flux: None,
+        maximum_total_heat: None,
+        maximum_touchdown_vertical: None,
+        maximum_touchdown_horizontal: None,
+        landing_liftoff_altitude: None,
         thrust_time: None,
         thrust_newtons: None,
         maximum_acceleration: None,
@@ -134,6 +154,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if a.cmd=="habitat-sweep" {a.parameter="firm_power_w".into();}
         if matches!(a.cmd.as_str(),"habitat-definition"|"habitat-crop-definition"|"habitat-setup") {a.scenario=Scenario::SolarSystemLab;a.target="Mars".into();}
         if a.cmd=="launch-definition" {a.scenario=Scenario::SolarSystemLab;a.target="Mars".into();}
+        if matches!(a.cmd.as_str(),"entry-definition"|"landing-definition") {a.scenario=Scenario::SolarSystemLab;a.target="Mars".into();}
     }
     if matches!(a.cmd.as_str(), "--help" | "-h" | "help") {
         a.cmd = "help".into();
@@ -154,8 +175,10 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if matches!(a.cmd.as_str(),"crop-chemistry"|"crop-chemistry-inspect"|"greenhouse-supply-inspect") && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a crop supply/chemistry inspection option"));}
         if matches!(a.cmd.as_str(),"habitat-diagnose"|"habitat-crop-harvest") && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
         if a.cmd=="contact-hardware" && !matches!(flag.as_str(),"--initial"|"--target"|"--seed"|"--scenario"|"--output"|"--geographic-start"|"--static-shear"|"--operation-window") {return Err(format!("{flag} is not a contact hardware option"));}
-        if a.cmd=="flight-definition" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output"|"--target"|"--seed"|"--scenario"|"--samples"|"--interval-seconds"|"--geographic-start"|"--contact-hardware"|"--cargo-ledgers"|"--handling"|"--launch") {return Err(format!("{flag} is not a world flight definition option"));}
+        if a.cmd=="flight-definition" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output"|"--target"|"--seed"|"--scenario"|"--samples"|"--interval-seconds"|"--geographic-start"|"--contact-hardware"|"--cargo-ledgers"|"--handling"|"--launch"|"--entry"|"--landing") {return Err(format!("{flag} is not a world flight definition option"));}
         if a.cmd=="launch-definition" && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario"|"--thrust-time"|"--thrust-newtons"|"--maximum-acceleration"|"--liftoff-altitude"|"--maximum-start-altitude") {return Err(format!("{flag} is not a launch-definition option"));}
+        if a.cmd=="entry-definition" && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario"|"--entry-interface-altitude"|"--nose-radius"|"--heat-flux-coefficient"|"--maximum-heat-flux"|"--maximum-total-heat") {return Err(format!("{flag} is not an entry-definition option"));}
+        if a.cmd=="landing-definition" && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario"|"--maximum-touchdown-vertical"|"--maximum-touchdown-horizontal"|"--liftoff-altitude") {return Err(format!("{flag} is not a landing-definition option"));}
         if a.cmd=="flight-study" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output") {return Err(format!("{flag} is not a world flight study option"));}
         if matches!(a.cmd.as_str(),"arrival-start"|"contact-start") && flag!="--output" {return Err(format!("{flag} is not a geographic start option"));}
         if a.cmd=="flight-approach" && !matches!(flag.as_str(),"--recording"|"--target"|"--output") {return Err(format!("{flag} is not a recorded approach option"));}
@@ -196,6 +219,48 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--cargo-ledgers" if a.cmd=="flight-definition" => a.cargo_ledgers=true,
             "--handling" if a.cmd=="flight-definition" => a.handling=true,
             "--launch" if a.cmd=="flight-definition" => a.launch=Some(val()?),
+            "--entry" if a.cmd=="flight-definition" => a.entry=Some(val()?),
+            "--landing" if a.cmd=="flight-definition" => a.landing=Some(val()?),
+            "--entry-interface-altitude" if a.cmd=="entry-definition" => {
+                let altitude=number::<f64>(val()?,&flag)?;
+                if !altitude.is_finite() || !(0.0..=1.0e7).contains(&altitude) {return Err("--entry-interface-altitude requires a finite height between 0 and 1e7 m".into());}
+                a.entry_interface_altitude=Some(altitude);
+            },
+            "--nose-radius" if a.cmd=="entry-definition" => {
+                let radius=number::<f64>(val()?,&flag)?;
+                if !radius.is_finite() || !(1.0e-3..=1.0e4).contains(&radius) {return Err("--nose-radius requires a finite radius between 0.001 and 10000 m".into());}
+                a.nose_radius=Some(radius);
+            },
+            "--heat-flux-coefficient" if a.cmd=="entry-definition" => {
+                let coefficient=number::<f64>(val()?,&flag)?;
+                if !coefficient.is_finite() || !(0.0..=1.0e-1).contains(&coefficient) {return Err("--heat-flux-coefficient requires a finite coefficient between 0 and 0.1".into());}
+                a.heat_flux_coefficient=Some(coefficient);
+            },
+            "--maximum-heat-flux" if a.cmd=="entry-definition" => {
+                let flux=number::<f64>(val()?,&flag)?;
+                if !flux.is_finite() || !(1.0e-30..=1.0e12).contains(&flux) {return Err("--maximum-heat-flux requires a finite bound between 1e-30 and 1e12 W/m²".into());}
+                a.maximum_heat_flux=Some(flux);
+            },
+            "--maximum-total-heat" if a.cmd=="entry-definition" => {
+                let heat=number::<f64>(val()?,&flag)?;
+                if !heat.is_finite() || !(1.0e-30..=1.0e18).contains(&heat) {return Err("--maximum-total-heat requires a finite bound between 1e-30 and 1e18 J/m²".into());}
+                a.maximum_total_heat=Some(heat);
+            },
+            "--maximum-touchdown-vertical" if a.cmd=="landing-definition" => {
+                let speed=number::<f64>(val()?,&flag)?;
+                if !speed.is_finite() || !(0.0..=1.0e4).contains(&speed) {return Err("--maximum-touchdown-vertical requires a finite speed between 0 and 1e4 m/s".into());}
+                a.maximum_touchdown_vertical=Some(speed);
+            },
+            "--maximum-touchdown-horizontal" if a.cmd=="landing-definition" => {
+                let speed=number::<f64>(val()?,&flag)?;
+                if !speed.is_finite() || !(0.0..=1.0e4).contains(&speed) {return Err("--maximum-touchdown-horizontal requires a finite speed between 0 and 1e4 m/s".into());}
+                a.maximum_touchdown_horizontal=Some(speed);
+            },
+            "--liftoff-altitude" if a.cmd=="landing-definition" => {
+                let altitude=number::<f64>(val()?,&flag)?;
+                if !altitude.is_finite() || !(0.0..=1.0e5).contains(&altitude) {return Err("--liftoff-altitude requires a finite height between 0 and 1e5 m".into());}
+                a.landing_liftoff_altitude=Some(altitude);
+            },
             "--thrust-time" if a.cmd=="launch-definition" => {
                 let seconds=number::<f64>(val()?,&flag)?;
                 if !seconds.is_finite() || !(0.0..=1.0e7).contains(&seconds) {return Err("--thrust-time requires a finite duration between 0 and 1e7 seconds".into());}
@@ -298,6 +363,13 @@ if a.geographic_start.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err
         if a.cmd=="flight-study" && a.definition.is_none() {return Err("flight-study requires --definition PINNED_STUDY".into());}
         if a.launch.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Launch definition requires a nonempty file".into());}
         if a.cmd=="flight-definition" && a.launch.is_some() && (a.geographic_start.is_some() || a.contact_hardware.is_some() || a.definition.is_some()) {return Err("Choose one --launch definition file or circular/geographic flight options, not both".into());}
+        if a.entry.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Entry definition requires a nonempty file".into());}
+        if a.landing.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Landing definition requires a nonempty file".into());}
+        if a.cmd=="flight-definition" && (a.entry.is_some() || a.landing.is_some()) && !(a.launch.is_some() || a.contact_hardware.is_some()) {return Err("Entry heating and terminal landing require contact gear (--contact-hardware or --launch FILE)".into());}
+    }
+    if matches!(a.cmd.as_str(),"entry-definition"|"landing-definition") {
+        if [&a.initial,&a.output].iter().any(|p|p.as_deref().is_some_and(|s|s.trim().is_empty())) {return Err("Definition files require nonempty paths".into());}
+        if a.output.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err(format!("{} requires --output NEW_FILE",a.cmd));}
     }
     if a.cmd=="launch-definition" {
         if [&a.initial,&a.output].iter().any(|p|p.as_deref().is_some_and(|s|s.trim().is_empty())) {return Err("Launch definition files require nonempty paths".into());}
@@ -311,7 +383,7 @@ if a.geographic_start.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err
     if a.cmd=="cargo-epochs-inspect" && a.recording.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err("cargo-epochs-inspect requires --recording COMPLETE_DIR".into());}
     if matches!(a.cmd.as_str(),"cargo-epochs-definition"|"cargo-epochs-study") && a.output.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Cargo-epochs output requires a nonempty new file/folder".into());}
     if a.cmd=="cargo-epochs-study" && a.definition.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Choose a nonempty cargo-epochs plan file".into());}
-    if matches!(a.cmd.as_str(),"flight-definition"|"contact-hardware"|"habitat"|"habitat-definition"|"habitat-crop-definition"|"habitat-setup"|"launch-definition") && a.initial.is_some() && (explicit_scenario || explicit_seed) {return Err("Choose saved --initial world or new --scenario/--seed, not both".into());}
+    if matches!(a.cmd.as_str(),"flight-definition"|"contact-hardware"|"habitat"|"habitat-definition"|"habitat-crop-definition"|"habitat-setup"|"launch-definition"|"entry-definition"|"landing-definition") && a.initial.is_some() && (explicit_scenario || explicit_seed) {return Err("Choose saved --initial world or new --scenario/--seed, not both".into());}
     if a.cmd=="habitat-setup" && a.output.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err("habitat-setup requires --output NEW_FILE".into());}
     if matches!(a.cmd.as_str(),"greenhouse"|"greenhouse-supplies") && a.habitat_id.is_some() && a.initial.is_none() {return Err("Greenhouse habitat context requires --initial saved world".into());}
     if a.cmd=="habitat-sweep" {
@@ -375,8 +447,10 @@ fn help() {
     eprintln!("cosmogon-cli support-definition [--output NEW_FILE]\ncosmogon-cli flight-support --recording COMPLETE_FLIGHT_DIR [--definition LIMITS_FILE --output NEW_DIR]\ncosmogon-cli support-inspect --recording COMPLETE_SUPPORT_DIR\nConditional actual footprint/force evidence; no attachment or cargo permission");
     eprintln!("cosmogon-cli arrival-start [--output NEW_FILE]\ncosmogon-cli flight-approach --recording COMPLETE_FLIGHT_DIR [--target BODY --output NEW_DIR]\ncosmogon-cli approach-inspect --recording COMPLETE_APPROACH_DIR\nGeographic flight-definition starts: --geographic-start FILE (explicit spherical altitude and east/north/up velocities)");
     eprintln!("cosmogon-cli flight-rendezvous --recording LEFT_DIR --reference RIGHT_DIR [--output NEW_DIR]\nClosest shared-observation-time evidence between two complete replay-verified flights from one origin world; sample-grid evidence only, never continuous closest approach, intercept or docking");
-    eprintln!("cosmogon-cli flight-definition [--initial WORLD --definition PROPULSION_PLAN --target Mars --samples 121 --interval-seconds 1 --cargo-ledgers --handling --launch FILE --output NEW_FILE]\ncosmogon-cli flight-study --definition PINNED_STUDY [--initial WORLD --output NEW_DIR]\ncosmogon-cli flight-inspect --recording COMPLETE_DIR   # exact full-world flight replay; --cargo-ledgers opts into retained cargo mass ledgers; --handling opts into finite surface-handling equipment for co-located habitat transfers; --launch FILE consumes an authored surface-launch definition");
+    eprintln!("cosmogon-cli flight-definition [--initial WORLD --definition PROPULSION_PLAN --target Mars --samples 121 --interval-seconds 1 --cargo-ledgers --handling --launch FILE --entry FILE --landing FILE --output NEW_FILE]\ncosmogon-cli flight-study --definition PINNED_STUDY [--initial WORLD --output NEW_DIR]\ncosmogon-cli flight-inspect --recording COMPLETE_DIR   # exact full-world flight replay; --cargo-ledgers opts into retained cargo mass ledgers; --handling opts into finite surface-handling equipment for co-located habitat transfers; --launch FILE consumes an authored surface-launch definition; --entry/--landing FILE consume authored heating/touchdown limits (contact gear required)");
     eprintln!("cosmogon-cli launch-definition --thrust-time SECONDS --thrust-newtons N [--maximum-acceleration M_S2 --liftoff-altitude M --maximum-start-altitude M --initial WORLD --target Mars --latitude N --longitude E --seed N --scenario S] --output NEW_FILE   # authored surface launch definition: fixed inertial zenith burn on contact gear with structural specific-force limits and liftoff/burnout/apogee evidence");
+    eprintln!("cosmogon-cli entry-definition [--entry-interface-altitude M --nose-radius M --heat-flux-coefficient K --maximum-heat-flux W_M2 --maximum-total-heat J_M2 --initial WORLD --target Mars --latitude N --longitude E --seed N --scenario S] --output NEW_FILE   # authored entry-heating definition: Sutton-Graves stagnation flux with thermal limits on an atmospheric starting body");
+    eprintln!("cosmogon-cli landing-definition [--maximum-touchdown-vertical M_S --maximum-touchdown-horizontal M_S --liftoff-altitude M --initial WORLD --target Mars --latitude N --longitude E --seed N --scenario S] --output NEW_FILE   # authored terminal-landing definition: touchdown-speed limits with a versioned liftoff baseline on contact gear");
     eprintln!("cosmogon-cli habitat-setup [--initial WORLD --target Mars --latitude N --longitude E --seed N --scenario S] --output NEW_FILE   # world containing one finite habitat, for flight transfer studies");
     eprintln!("cosmogon-cli vehicle-definition [--output NEW_FILE]   # explicit assumed finite vehicle and burn plan\ncosmogon-cli vehicle-study [--definition PLAN --output NEW_DIR]   # ideal free-space finite propulsion, no launch/delivery\ncosmogon-cli vehicle-inspect --recording COMPLETE_DIR   # exact independent numeric/source replay");
     eprintln!("cosmogon-cli cargo-epochs-definition [--output NEW_FILE]   # explicit burn → species removal → burn sequence\ncosmogon-cli cargo-epochs-study [--definition PLAN --output NEW_DIR]   # piecewise mass epochs, no world delivery\ncosmogon-cli cargo-epochs-inspect --recording COMPLETE_DIR   # exact independent epoch replay");
@@ -624,6 +698,9 @@ fn main() {
                     let d=if a.cargo_ledgers {d.with_cargo_ledgers()?} else {d};
                     if a.handling {d.with_handling()?} else {d}
                     };
+                    let mut d=d;
+                    if let Some(path)=&a.entry {d.entry=Some(world_vehicle::Definition::read(std::path::Path::new(path))?.entry.ok_or("Entry file must be an entry definition containing entry limits")?);}
+                    if let Some(path)=&a.landing {d.landing=Some(world_vehicle::Definition::read(std::path::Path::new(path))?.landing.ok_or("Landing file must be a landing definition containing touchdown limits")?);}
                     let study=flight::Study::new(&world,d,a.samples,a.interval_days*86400.)?;
                     if let Some(path)=&a.output {study.write(&world,std::path::Path::new(path))?;}
                     return serde_json::to_value(&study).map_err(|e|e.to_string());
@@ -667,6 +744,8 @@ fn main() {
         "habitat-definition"|"habitat-crop-definition" => {if let Err(e)=habitat_definition(&a) {eprintln!("Habitat definition failed: {e}");std::process::exit(1);}},
         "habitat-setup" => {if let Err(e)=habitat_setup(&a) {eprintln!("Habitat setup failed: {e}");std::process::exit(1);}},
         "launch-definition" => {if let Err(e)=launch_definition(&a) {eprintln!("Launch definition failed: {e}");std::process::exit(1);}},
+        "entry-definition" => {if let Err(e)=entry_definition(&a) {eprintln!("Entry definition failed: {e}");std::process::exit(1);}},
+        "landing-definition" => {if let Err(e)=landing_definition(&a) {eprintln!("Landing definition failed: {e}");std::process::exit(1);}},
         "habitat" => {if let Err(e)=habitat(&a) {eprintln!("Habitat study failed: {e}");std::process::exit(1);}},
         "section" => {if let Err(e)=section(&a) {eprintln!("Terrain section failed: {e}");std::process::exit(1);}},
         "sites" => println!("{}", serde_json::to_string_pretty(&cosmogon_sim::planet::landing::registry()).unwrap()),
@@ -1203,6 +1282,94 @@ fn launch_definition(a:&Args)->Result<(),String> {
     })).map_err(|e|e.to_string())?);Ok(())
 }
 
+fn entry_definition(a:&Args)->Result<(),String> {
+    use cosmogon_sim::supply_vehicle::{Command,Plan};
+    let world=if let Some(path)=&a.initial {cosmogon_sim::world_vehicle_recording::read_world(std::path::Path::new(path))?} else {Universe::new(settings(a,a.seed))};
+    let parent=world.systems.iter().enumerate().find_map(|(i,s)|s.find_body(&a.target).map(|j|cosmogon_sim::BodyRef {system:i as u32,body:j as u32})).ok_or("No matching entry starting body")?;
+    let mut start=cosmogon_sim::vehicle_arrival::GeographicStart::contact_example();
+    start.latitude_deg=a.latitude;
+    start.longitude_east_deg=a.longitude;
+    start.east_velocity_m_s=0.;
+    start.north_velocity_m_s=0.;
+    start.up_velocity_m_s=0.;
+    start.spherical_altitude_m=10000.;
+    let above=start.absolute(&world,parent)?;
+    let probe=cosmogon_sim::vehicle_contact::Surface::sample(&world,parent,world.time,above.position_m,1.)?;
+    start.spherical_altitude_m=10000.-probe.radial_clearance_m+1.6;
+    let pad=start.absolute(&world,parent)?;
+    let surface=cosmogon_sim::vehicle_contact::Surface::sample(&world,parent,world.time,pad.position_m,1.)?;
+    let up=surface.outward_normal;
+    let mut plan=Plan::example();
+    plan.commands=vec![Command {duration_s:5_000.,throttle:0.,direction:[up.x,up.y,up.z]}];
+    let hardware=cosmogon_sim::vehicle_contact_dynamics::Hardware::example(&world,parent,pad.position_m)?;
+    let mut definition=start.contact_flight(&world,parent,plan,hardware)?;
+    let entry=cosmogon_sim::vehicle_entry::Entry {
+        entry_interface_altitude_m:a.entry_interface_altitude.unwrap_or(125_000.),
+        nose_radius_m:a.nose_radius.unwrap_or(1.),
+        heat_flux_coefficient:a.heat_flux_coefficient.unwrap_or(1.7415e-4),
+        maximum_heat_flux_w_m2:a.maximum_heat_flux.unwrap_or(1e7),
+        maximum_total_heat_j_m2:a.maximum_total_heat.unwrap_or(1e10),
+    };
+    entry.validate()?;
+    definition.entry=Some(entry);
+    definition.validate(&world)?;
+    cosmogon_sim::world_vehicle::Flight::new(0,definition.clone(),&world)?;
+    let path=std::path::Path::new(a.output.as_deref().ok_or("--output NEW_FILE required")?);
+    if let Some(parent)=path.parent().filter(|p|!p.as_os_str().is_empty()) {std::fs::create_dir_all(parent).map_err(|e|e.to_string())?;}
+    definition.write(path)?;
+    println!("{}",serde_json::to_string_pretty(&serde_json::json!({
+        "format":"cosmogon-entry-definition","schema_version":1,
+        "target":world.systems[parent.system as usize].bodies[parent.body as usize].name,
+        "latitude_north_deg":a.latitude,"longitude_east_deg":a.longitude,
+        "limits":definition.entry.expect("written limits"),
+        "definition":path.display().to_string(),
+        "scope":"Authored Sutton-Graves stagnation heat flux with thermal limits on the existing exponential atmosphere and flight clock; not aerodynamic forces, attitude, or trajectory control"
+    })).map_err(|e|e.to_string())?);Ok(())
+}
+
+fn landing_definition(a:&Args)->Result<(),String> {
+    use cosmogon_sim::supply_vehicle::{Command,Plan};
+    let world=if let Some(path)=&a.initial {cosmogon_sim::world_vehicle_recording::read_world(std::path::Path::new(path))?} else {Universe::new(settings(a,a.seed))};
+    let parent=world.systems.iter().enumerate().find_map(|(i,s)|s.find_body(&a.target).map(|j|cosmogon_sim::BodyRef {system:i as u32,body:j as u32})).ok_or("No matching landing starting body")?;
+    let mut start=cosmogon_sim::vehicle_arrival::GeographicStart::contact_example();
+    start.latitude_deg=a.latitude;
+    start.longitude_east_deg=a.longitude;
+    start.east_velocity_m_s=0.;
+    start.north_velocity_m_s=0.;
+    start.up_velocity_m_s=0.;
+    start.spherical_altitude_m=10000.;
+    let above=start.absolute(&world,parent)?;
+    let probe=cosmogon_sim::vehicle_contact::Surface::sample(&world,parent,world.time,above.position_m,1.)?;
+    start.spherical_altitude_m=10000.-probe.radial_clearance_m+1.6;
+    let pad=start.absolute(&world,parent)?;
+    let surface=cosmogon_sim::vehicle_contact::Surface::sample(&world,parent,world.time,pad.position_m,1.)?;
+    let up=surface.outward_normal;
+    let mut plan=Plan::example();
+    plan.commands=vec![Command {duration_s:5_000.,throttle:0.,direction:[up.x,up.y,up.z]}];
+    let hardware=cosmogon_sim::vehicle_contact_dynamics::Hardware::example(&world,parent,pad.position_m)?;
+    let mut definition=start.contact_flight(&world,parent,plan,hardware)?;
+    let limits=cosmogon_sim::vehicle_landing::Limits {
+        maximum_touchdown_vertical_speed_m_s:a.maximum_touchdown_vertical.unwrap_or(10.),
+        maximum_touchdown_horizontal_speed_m_s:a.maximum_touchdown_horizontal.unwrap_or(5.),
+        liftoff_altitude_m:a.landing_liftoff_altitude.unwrap_or(10.),
+    };
+    limits.validate()?;
+    definition.landing=Some(limits);
+    definition.validate(&world)?;
+    cosmogon_sim::world_vehicle::Flight::new(0,definition.clone(),&world)?;
+    let path=std::path::Path::new(a.output.as_deref().ok_or("--output NEW_FILE required")?);
+    if let Some(parent)=path.parent().filter(|p|!p.as_os_str().is_empty()) {std::fs::create_dir_all(parent).map_err(|e|e.to_string())?;}
+    definition.write(path)?;
+    println!("{}",serde_json::to_string_pretty(&serde_json::json!({
+        "format":"cosmogon-landing-definition","schema_version":1,
+        "target":world.systems[parent.system as usize].bodies[parent.body as usize].name,
+        "latitude_north_deg":a.latitude,"longitude_east_deg":a.longitude,
+        "limits":definition.landing.expect("written limits"),
+        "definition":path.display().to_string(),
+        "scope":"Authored touchdown-speed limits and a versioned liftoff baseline on the existing bounded gear solver; not terrain hazards, structural certification, or tip-over modeling"
+    })).map_err(|e|e.to_string())?);Ok(())
+}
+
 fn habitat_definition(a:&Args)->Result<(),String> {
     use std::io::Write;
     let u=if let Some(p)=&a.initial {save::read_file(std::path::Path::new(p)).map_err(|e|e.to_string())?} else {Universe::new(settings(a,a.seed))};
@@ -1270,6 +1437,25 @@ mod argument_tests {
         assert!(args(&["flight-definition","--launch","launch.json","--contact-hardware","h"]).is_err());
         assert!(args(&["flight-definition","--launch","launch.json","--definition","p"]).is_err());
         assert!(args(&["flight-study","--definition","d","--launch","launch.json"]).is_err());
+    }
+    #[test]
+    fn entry_and_landing_arguments_are_explicit_and_refuse_ignored_flags() {
+        for v in [vec!["entry-definition"],vec!["landing-definition"],vec!["entry-definition","--output","e","--samples","3"],vec!["landing-definition","--output","l","--definition","p"],vec!["entry-definition","--output","e","--entry-interface-altitude","-1"],vec!["entry-definition","--output","e","--nose-radius","0"],vec!["landing-definition","--output","l","--maximum-touchdown-vertical","-2"],vec!["landing-definition","--output","l","--liftoff-altitude","1e9"],vec!["entry-definition","--output","e","--initial","s","--seed","2"]] {assert!(args(&v).is_err(),"{v:?}");}
+        assert!(args(&["entry-definition","--output","e"]).is_ok());
+        assert!(args(&["landing-definition","--output","l"]).is_ok());
+        let e=args(&["entry-definition","--output","entry.json","--entry-interface-altitude","110000","--nose-radius","0.5","--maximum-heat-flux","5e6"]).unwrap();
+        assert_eq!(e.output.as_deref(),Some("entry.json"));
+        assert_eq!(e.entry_interface_altitude,Some(110000.));assert_eq!(e.nose_radius,Some(0.5));assert_eq!(e.maximum_heat_flux,Some(5e6));
+        assert_eq!(e.target,"Mars");
+        let l=args(&["landing-definition","--output","landing.json","--maximum-touchdown-vertical","8","--liftoff-altitude","5"]).unwrap();
+        assert_eq!(l.maximum_touchdown_vertical,Some(8.));assert_eq!(l.landing_liftoff_altitude,Some(5.));
+        assert!(args(&["flight-definition","--entry","entry.json"]).is_err());
+        assert!(args(&["flight-definition","--landing","landing.json"]).is_err());
+        assert!(args(&["flight-definition","--entry","entry.json","--contact-hardware","h"]).is_ok());
+        assert!(args(&["flight-definition","--landing","landing.json","--contact-hardware","h"]).is_ok());
+        assert!(args(&["flight-definition","--entry"," ","--contact-hardware","h"]).is_err());
+        assert!(args(&["flight-study","--definition","d","--entry","e"]).is_err());
+        assert!(args(&["flight-study","--definition","d","--landing","l"]).is_err());
     }
     #[test]
     fn rendezvous_arguments_are_explicit_and_refuse_ignored_flags() {

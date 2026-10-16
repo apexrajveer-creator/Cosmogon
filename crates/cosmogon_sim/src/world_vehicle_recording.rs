@@ -267,6 +267,18 @@ impl Bundle {
                 None=>json!(null),
             };
         }
+        if study.flight.entry.is_some() {
+            manifest["entry_evidence"]=match rows.last().and_then(|r|r.flight.entry_ledger.as_ref()) {
+                Some(ledger)=>json!({"model":crate::vehicle_entry::MODEL,"above_interface":ledger.above_interface,"interface_elapsed_s":ledger.interface_elapsed_s,"peak_heat_flux_w_m2":ledger.peak_heat_flux_w_m2,"total_heat_j_m2":ledger.total_heat_j_m2,"substeps_observed":ledger.substeps_observed}),
+                None=>json!(null),
+            };
+        }
+        if study.flight.landing.is_some() {
+            manifest["landing_evidence"]=match rows.last().and_then(|r|r.flight.landing_ledger.as_ref()) {
+                Some(ledger)=>json!({"model":crate::vehicle_landing::MODEL,"airborne":ledger.airborne,"touchdown_elapsed_s":ledger.touchdown_elapsed_s,"touchdown_vertical_speed_m_s":ledger.touchdown_vertical_speed_m_s,"touchdown_horizontal_speed_m_s":ledger.touchdown_horizontal_speed_m_s,"substeps_observed":ledger.substeps_observed}),
+                None=>json!(null),
+            };
+        }
         if study.flight.cargo_ledgers {
             let last = rows.last().unwrap();
             let ledger = last.flight.cargo.as_ref().ok_or("Cargo-ledger flight lost its retained ledger")?;
@@ -676,6 +688,14 @@ pub fn context_for(definition: &Definition) -> Value {
     if let Some(limits)=&definition.launch {
         result["launch"]=crate::vehicle_launch::context();
         result["launch_limits"]=json!({"maximum_acceleration_m_s2":limits.maximum_acceleration_m_s2,"liftoff_altitude_m":limits.liftoff_altitude_m,"maximum_start_altitude_m":limits.maximum_start_altitude_m});
+    }
+    if let Some(entry)=&definition.entry {
+        result["entry"]=crate::vehicle_entry::context();
+        result["entry_limits"]=json!({"entry_interface_altitude_m":entry.entry_interface_altitude_m,"nose_radius_m":entry.nose_radius_m,"heat_flux_coefficient":entry.heat_flux_coefficient,"maximum_heat_flux_w_m2":entry.maximum_heat_flux_w_m2,"maximum_total_heat_j_m2":entry.maximum_total_heat_j_m2});
+    }
+    if let Some(limits)=&definition.landing {
+        result["landing"]=crate::vehicle_landing::context();
+        result["landing_limits"]=json!({"maximum_touchdown_vertical_speed_m_s":limits.maximum_touchdown_vertical_speed_m_s,"maximum_touchdown_horizontal_speed_m_s":limits.maximum_touchdown_horizontal_speed_m_s});
     }
     result["gravity"]=json!("Existing Newtonian test-particle sources; target point-mass field evaluated outside modeled terrain even where overview relief lies below the spherical base. Other-source hull intersections are unsupported, conservatively refused.");
     result

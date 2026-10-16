@@ -313,6 +313,8 @@ mod tests {
             cargo_removals: vec![],
             handling: Some(equipment),
             launch: None,
+            entry: None,
+            landing: None,
         };
         definition.validate(&world).unwrap();
         world

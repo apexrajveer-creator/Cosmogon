@@ -284,7 +284,11 @@ impl FlightUi {
             )
             .strong(),
         );
-        ui.label(egui::RichText::new("Contact does not establish safe landing. Cargo remains aboard; no habitat supply grant.").small().color(ACCENT));
+        let header_landing=self.selected_vehicle
+            .and_then(|id|sim.universe.vehicles.iter().find(|f|f.id==id))
+            .or_else(||sim.universe.vehicles.iter().find(|f|f.contact.is_some()))
+            .is_some_and(|f|f.definition.landing.is_some());
+        ui.label(egui::RichText::new(if header_landing {"Contact does not establish safe landing on its own; authored touchdown limits add evidence only. Cargo remains aboard; no habitat supply grant."} else {"Contact does not establish safe landing. Cargo remains aboard; no habitat supply grant."}).small().color(ACCENT));
         match pane {
             4 => self.live(ui, sim, plan, now),
             5 => self.recorded(ui, &sim.universe),
@@ -411,18 +415,26 @@ impl FlightUi {
         ui.collapsing("Geographic initial conditions",|ui| {
             let mut contact=self.geographic_start.model==cosmogon_sim::vehicle_arrival::CONTACT_START_MODEL;
             if ui.checkbox(&mut contact,"Stage geographic conditions with terrain contact hardware").changed() {self.geographic_start.model=if contact {cosmogon_sim::vehicle_arrival::CONTACT_START_MODEL} else {cosmogon_sim::vehicle_arrival::MODEL}.into();}
-            ui.label("Explicit authored ground-relative start. Contact mode permits signed height relative to the spherical base; actual terrain and feet must clear. No surface launch, safe landing or stock loading is implied.");
+            let target=match sim.selected {Some(Target::Body(r))=>Some(r),_=>None};
+            let carried:Vec<&'static str>=match (target,self.draft.as_ref()) {(Some(t),Some(d)) if d.parent==t => {
+                let mut v=vec![];
+                if d.entry.is_some(){v.push("entry heating");}
+                if d.landing.is_some(){v.push("landing touchdown");}
+                v
+            },_=>vec![]};
+            let carried_note=if carried.is_empty() {String::new()} else {format!(" Authored {} limits carry over to the staged craft when the parent matches.",carried.join(" and "))};
+            ui.label(format!("Explicit authored ground-relative start. Contact mode permits signed height relative to the spherical base; actual terrain and feet must clear.{carried_note} No surface launch, safe landing or stock loading is implied."));
             for (label,value) in [("North latitude (°)",&mut self.geographic_start.latitude_deg),("East longitude (°)",&mut self.geographic_start.longitude_east_deg),("Above spherical radius (m)",&mut self.geographic_start.spherical_altitude_m),("East velocity (m/s)",&mut self.geographic_start.east_velocity_m_s),("North velocity (m/s)",&mut self.geographic_start.north_velocity_m_s),("Up velocity (m/s)",&mut self.geographic_start.up_velocity_m_s)] {
                 ui.horizontal(|ui|{ui.label(label);ui.add(egui::DragValue::new(value).speed(0.1).max_decimals(9));});
             }
-            let target=match sim.selected {Some(Target::Body(r))=>Some(r),_=>None};
-            let candidate=target.ok_or_else(||"Select a solid starting body".to_string()).and_then(|r| {
+            let mut candidate=target.ok_or_else(||"Select a solid starting body".to_string()).and_then(|r| {
                 if contact {
                     let pose=self.geographic_start.absolute(&sim.universe,r)?;
                     let hardware=if let Some(h)=self.draft.as_ref().filter(|d|d.parent==r).and_then(|d|d.contact.clone()) {h} else {cosmogon_sim::vehicle_contact_dynamics::Hardware::example(&sim.universe,r,pose.position_m)?};
                     self.geographic_start.contact_flight(&sim.universe,r,plan.clone(),hardware)
                 } else {self.geographic_start.flight(&sim.universe,r,plan.clone())}
             });
+            if let (Ok(def),Some(prev))=(candidate.as_mut(),self.draft.as_ref()) {if prev.parent==def.parent {def.entry=prev.entry;def.landing=prev.landing;}}
             if let Err(reason)=&candidate {ui.colored_label(ACCENT,reason);}
             if ui.add_enabled(candidate.is_ok(),egui::Button::new("Stage these geographic conditions for a recorded study")).clicked() {
                 self.draft=candidate.as_ref().ok().cloned();self.status=Some(format!("Geographic vectors staged at world {:.6} s; reuse this paused world for the same longitude, or explicitly recompute before creation.",sim.universe.time));
@@ -577,6 +589,50 @@ impl FlightUi {
             .and_then(|id| sim.universe.vehicles.iter().find(|v| v.id == id))
             .cloned()
         {
+            if let Some(limits)=&flight.definition.entry {
+                ui.separator();
+                ui.strong("Entry heating limits and evidence");
+                ui.label(format!(
+                    "Interface altitude {:.3} m · nose radius {:.3} m · flux coefficient {:.4e}",
+                    limits.entry_interface_altitude_m, limits.nose_radius_m, limits.heat_flux_coefficient
+                ));
+                ui.label(format!(
+                    "Flux bound {:.4e} W/m² · total heat bound {:.4e} J/m²",
+                    limits.maximum_heat_flux_w_m2, limits.maximum_total_heat_j_m2
+                ));
+                if let Some(ledger)=&flight.entry_ledger {
+                    ui.label(format!(
+                        "Peak flux {:.4e} W/m² · total heat {:.4e} J/m² · substeps {}",
+                        ledger.peak_heat_flux_w_m2, ledger.total_heat_j_m2, ledger.substeps_observed
+                    ));
+                    match ledger.interface_elapsed_s {
+                        Some(t) => ui.label(format!("Interface crossing at {t:.3} s")),
+                        None => ui.label("No interface crossing evidence yet."),
+                    };
+                }
+                ui.label(egui::RichText::new("Sutton-Graves stagnation flux on the modeled exponential atmosphere; heating accrues at every accepted substep. No aerodynamic force, attitude controller or trajectory guidance is modeled.").small().color(MUTED));
+            }
+            if let Some(limits)=&flight.definition.landing {
+                ui.separator();
+                ui.strong("Landing limits and touchdown evidence");
+                ui.label(format!(
+                    "Touchdown bounds {:.3} m/s vertical · {:.3} m/s horizontal · liftoff +{:.3} m above start clearance",
+                    limits.maximum_touchdown_vertical_speed_m_s, limits.maximum_touchdown_horizontal_speed_m_s, limits.liftoff_altitude_m
+                ));
+                if let Some(ledger)=&flight.landing_ledger {
+                    ui.label(format!(
+                        "Start clearance {:.3} m · airborne {} · substeps {}",
+                        ledger.start_clearance_m, ledger.airborne, ledger.substeps_observed
+                    ));
+                    match (ledger.touchdown_elapsed_s, ledger.touchdown_vertical_speed_m_s, ledger.touchdown_horizontal_speed_m_s) {
+                        (Some(t), Some(v), Some(h)) => ui.label(format!(
+                            "Touchdown at {t:.3} s · vertical {v:.3} m/s · horizontal {h:.3} m/s"
+                        )),
+                        _ => ui.label("No touchdown evidence yet."),
+                    };
+                }
+                ui.label(egui::RichText::new("Ground-relative touchdown speeds on the bounded gear solver; gear settling below the liftoff bound never counts as a landing. No terrain hazard, tip-over or structural certification is modeled.").small().color(MUTED));
+            }
             readings(ui, &flight, sim.universe.time);
             self.live_observation = Some(recording::Observation {
                 world_time_s: sim.universe.time,
@@ -838,6 +894,46 @@ impl FlightUi {
                 .text("Observation"),
         );
         let row = &bundle.rows[self.selected_row];
+        if bundle.study.flight.entry.is_some() {
+            ui.separator();
+            ui.strong("Entry heating evidence at this observation");
+            match &row.flight.entry_ledger {
+                Some(ledger) => {
+                    ui.label(format!(
+                        "Peak flux {:.4e} W/m² · total heat {:.4e} J/m² · substeps {}",
+                        ledger.peak_heat_flux_w_m2, ledger.total_heat_j_m2, ledger.substeps_observed
+                    ));
+                    match ledger.interface_elapsed_s {
+                        Some(t) => ui.label(format!("Interface crossing at {t:.3} s")),
+                        None => ui.label("Interface not crossed at this observation."),
+                    };
+                }
+                None => {
+                    ui.label("No entry evidence at this observation.");
+                }
+            }
+        }
+        if bundle.study.flight.landing.is_some() {
+            ui.separator();
+            ui.strong("Landing touchdown evidence at this observation");
+            match &row.flight.landing_ledger {
+                Some(ledger) => {
+                    ui.label(format!(
+                        "Start clearance {:.3} m · airborne {} · substeps {}",
+                        ledger.start_clearance_m, ledger.airborne, ledger.substeps_observed
+                    ));
+                    match (ledger.touchdown_elapsed_s, ledger.touchdown_vertical_speed_m_s, ledger.touchdown_horizontal_speed_m_s) {
+                        (Some(t), Some(v), Some(h)) => ui.label(format!(
+                            "Touchdown at {t:.3} s · vertical {v:.3} m/s · horizontal {h:.3} m/s"
+                        )),
+                        _ => ui.label("No touchdown at this observation."),
+                    };
+                }
+                None => {
+                    ui.label("No landing evidence at this observation.");
+                }
+            }
+        }
         readings(ui, &row.flight, row.world_time_s);
         ui.horizontal_wrapped(|ui| {
             for (i, label) in [
@@ -932,7 +1028,16 @@ impl FlightUi {
         ui.separator();
         ui.strong("Model and source limits");
         ui.label("Newtonian test particle; primary star, companion and present-body gravity. Fixed task and source-sampling approximations are retained in every manifest.");
-        ui.label("Original flight uses spherical contact. Explicit terrain mode adds authored rigid-body/gear dynamics; it does not establish safe landing or attachment. No atmosphere/entry heating, staging, docking or cargo transfer. Created cargo is an explicit initial condition; source edits stop unresolved flight.");
+        ui.label("Original flight uses spherical contact. Explicit terrain mode adds authored rigid-body/gear dynamics; it does not establish safe landing or attachment.");
+        let entry_note = match self.draft.as_ref().and_then(|d| d.entry.as_ref()) {
+            Some(e) => format!(" Entry heating accrues Sutton-Graves flux on the modeled atmosphere with authored bounds ({:.0} W/m² · {:.0} J/m²) and atomic thermal stops.", e.maximum_heat_flux_w_m2, e.maximum_total_heat_j_m2),
+            None => " No atmosphere/entry heating.".into(),
+        };
+        let landing_note = match self.draft.as_ref().and_then(|d| d.landing.as_ref()) {
+            Some(l) => format!(" Landing limits record first-touchdown evidence (bounds {:.0}/{:.0} m/s, liftoff +{:.0} m) but never a static landing certificate.", l.maximum_touchdown_vertical_speed_m_s, l.maximum_touchdown_horizontal_speed_m_s, l.liftoff_altitude_m),
+            None => String::new(),
+        };
+        ui.label(format!("{entry_note}{landing_note} No staging, docking or cargo transfer. Created cargo is an explicit initial condition; source edits stop unresolved flight."));
         for (title, url) in [
             (
                 "NASA Glenn gravity",
@@ -1085,7 +1190,12 @@ fn readings(ui: &mut egui::Ui, f: &Flight, world_time: f64) {
             tolerance_m,
             ..
         } => {
-            ui.colored_label(ACCENT,format!("First spherical contact with {source:?} · raw residual {position_residual_m} m · tolerance {tolerance_m} m. No safe landing or delivery."));
+            let landing_note = if f.definition.landing.is_some() {
+                " Touchdown-speed limits, when authored, record first-touchdown evidence on the gear ledger."
+            } else {
+                ""
+            };
+            ui.colored_label(ACCENT,format!("First spherical contact with {source:?} · raw residual {position_residual_m} m · tolerance {tolerance_m} m. No safe landing or delivery.{landing_note}"));
         }
         Phase::Unsupported { reason } => {
             ui.colored_label(ACCENT, format!("Stopped at last supported state: {reason}"));
@@ -1126,6 +1236,8 @@ fn readings(ui: &mut egui::Ui, f: &Flight, world_time: f64) {
             else {ui.colored_label(ACCENT,"Retained tangential storage is unavailable");}
             ui.label(format!("Endpoint numerical term {:.6} J · constitutive residual {:.6} J",s.numerical_dissipation_j,s.balance_residual_j));
             ui.label("Authored persistent shear. Endpoint work and actual midpoint motion have separate balances; numerical terms are not measured friction. Stability, attachment and cargo delivery remain unavailable.");
+        } else if f.definition.landing.is_some() {
+            ui.label("Authored finite gear response with sliding friction; touchdown limits record first-touchdown speeds only. No static attachment, landing certification or cargo delivery.");
         } else {ui.label("Authored finite gear response with sliding friction. No static attachment, safe landing certification or cargo delivery.");}
         ui.collapsing("Per-foot forces, rotating terrain and full work evidence",|ui| {
             for (i,foot) in r.feet.iter().enumerate() {

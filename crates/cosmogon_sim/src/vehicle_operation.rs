@@ -349,6 +349,8 @@ mod tests {
             cargo_removals: vec![],
             handling: None,
             launch: None,
+            entry: None,
+            landing: None,
         };
         d.validate(&world).unwrap();
         (world, d)

@@ -297,6 +297,8 @@ pub(crate) mod tests {
             cargo_removals: Vec::new(),
             handling: None,
             launch: Some(limits),
+            entry: None,
+            landing: None,
         };
         definition.validate(&world).expect("launch definition validates");
         world

@@ -50,6 +50,15 @@ pub struct Definition {
     /// legacy definitions stay exact. Launch-limited craft require contact gear.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch: Option<crate::vehicle_launch::Limits>,
+    /// Opt-in stagnation-point entry-heating limits and thermal evidence;
+    /// absent legacy definitions stay exact. Entry-limited craft require
+    /// contact gear and an atmosphere-bearing starting body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<crate::vehicle_entry::Entry>,
+    /// Opt-in touchdown-speed limits and first-touchdown evidence; absent
+    /// legacy definitions stay exact. Landing-limited craft require contact gear.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landing: Option<crate::vehicle_landing::Limits>,
 }
 /// One authored, timed finite species-removal request in the craft-relative frame.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -85,6 +94,8 @@ impl Definition {
             cargo_removals: vec![],
             handling: None,
             launch: None,
+            entry: None,
+            landing: None,
         };
         d.validate(u)?;
         Ok(d)
@@ -169,6 +180,18 @@ impl Definition {
                 return Err("Launch limits require authored contact landing gear".into());
             }
         }
+        if let Some(e) = &self.entry {
+            e.validate()?;
+            if self.contact.is_none() {
+                return Err("Entry limits require authored contact landing gear".into());
+            }
+        }
+        if let Some(l) = &self.landing {
+            l.validate()?;
+            if self.contact.is_none() {
+                return Err("Landing limits require authored contact landing gear".into());
+            }
+        }
         self.plan.validate()?;
         if !finite(self.initial_relative_position_m)
             || self.initial_relative_position_m.length() > 1e15
@@ -193,6 +216,9 @@ impl Definition {
             || body.radius <= 0.
         {
             return Err("Starting body lacks supported finite physical mass/radius".into());
+        }
+        if self.entry.is_some() && !body.atmosphere.is_present() {
+            return Err("Entry heating requires a starting body with a modeled atmosphere".into());
         }
         if self.plan.definition.inert_mass_kg() + self.plan.definition.initial_propellant_kg
             > body.mass * 1e-6
@@ -293,6 +319,14 @@ pub struct Flight {
     /// definitions. Absent legacy flights stay byte-exact.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_ledger: Option<crate::vehicle_launch::Ledger>,
+    /// Opt-in entry-heating evidence; created with entry-limited
+    /// definitions. Absent legacy flights stay byte-exact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry_ledger: Option<crate::vehicle_entry::Ledger>,
+    /// Opt-in first-touchdown evidence; created with landing-limited
+    /// definitions. Absent legacy flights stay byte-exact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landing_ledger: Option<crate::vehicle_landing::Ledger>,
 }
 /// World-side evidence for one cargo removal from an authoritative flight.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -363,6 +397,27 @@ impl Flight {
             None
         };
         let contact = d.contact.as_ref().map(|h| crate::vehicle_contact_dynamics::RigidState::new(u, d.parent, position, velocity, h)).transpose()?;
+        let entry_ledger = d
+            .entry
+            .map(|_| crate::vehicle_entry::Ledger::new());
+        let landing_ledger = match &d.landing {
+            Some(limits) => {
+                limits.validate()?;
+                let clearance = crate::vehicle_contact::Surface::sample(
+                    u,
+                    d.parent,
+                    u.time,
+                    position,
+                    1.,
+                )?
+                .radial_clearance_m;
+                Some(crate::vehicle_landing::Ledger::new(
+                    clearance > limits.liftoff_altitude_m,
+                    clearance,
+                ))
+            }
+            None => None,
+        };
         Ok(Self {
             id,
             definition: d,
@@ -381,6 +436,8 @@ impl Flight {
             cargo_events: vec![],
             transfers: vec![],
             launch_ledger,
+            entry_ledger,
+            landing_ledger,
         })
     }
     /// Actual current vehicle mass: dry + held cargo (ledger epoch) + remaining propellant.
@@ -729,6 +786,40 @@ impl Flight {
             }
             (None, Some(_)) => {
                 return Err("Retained launch ledgers require authored launch limits".into())
+            }
+            (None, None) => {}
+        }
+        match (&self.definition.entry, &self.entry_ledger) {
+            (Some(limits), Some(ledger)) => {
+                limits
+                    .validate()
+                    .map_err(|e| format!("Invalid retained entry limits: {e}"))?;
+                ledger
+                    .validate()
+                    .map_err(|e| format!("Invalid retained entry ledger: {e}"))?;
+            }
+            (Some(_), None) => {
+                return Err("Entry-limited flights require a retained entry ledger".into())
+            }
+            (None, Some(_)) => {
+                return Err("Retained entry ledgers require authored entry limits".into())
+            }
+            (None, None) => {}
+        }
+        match (&self.definition.landing, &self.landing_ledger) {
+            (Some(limits), Some(ledger)) => {
+                limits
+                    .validate()
+                    .map_err(|e| format!("Invalid retained landing limits: {e}"))?;
+                ledger
+                    .validate()
+                    .map_err(|e| format!("Invalid retained landing ledger: {e}"))?;
+            }
+            (Some(_), None) => {
+                return Err("Landing-limited flights require a retained landing ledger".into())
+            }
+            (None, Some(_)) => {
+                return Err("Retained landing ledgers require authored landing limits".into())
             }
             (None, None) => {}
         }
