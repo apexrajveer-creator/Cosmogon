@@ -159,6 +159,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if a.cmd=="flight-study" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output") {return Err(format!("{flag} is not a world flight study option"));}
         if matches!(a.cmd.as_str(),"arrival-start"|"contact-start") && flag!="--output" {return Err(format!("{flag} is not a geographic start option"));}
         if a.cmd=="flight-approach" && !matches!(flag.as_str(),"--recording"|"--target"|"--output") {return Err(format!("{flag} is not a recorded approach option"));}
+        if a.cmd=="flight-rendezvous" && !matches!(flag.as_str(),"--recording"|"--reference"|"--output") {return Err(format!("{flag} is not a flight-rendezvous option"));}
         if a.cmd=="approach-inspect" && flag!="--recording" {return Err(format!("{flag} is not an approach inspection option"));}
         if a.cmd=="support-definition" && flag!="--output" {return Err(format!("{flag} is not a support-definition option"));}
         if a.cmd=="flight-support" && !matches!(flag.as_str(),"--recording"|"--definition"|"--output") {return Err(format!("{flag} is not a recorded support option"));}
@@ -282,6 +283,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         }
     }
 if matches!(a.cmd.as_str(),"arrival-start"|"contact-start"|"flight-approach") && a.output.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Arrival output requires a nonempty fresh path".into());}
+if a.cmd=="flight-rendezvous" && a.output.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Rendezvous output requires a nonempty fresh path".into());}
+if a.cmd=="flight-rendezvous" && (a.recording.as_deref().is_none_or(|p|p.trim().is_empty()) || a.reference.as_deref().is_none_or(|p|p.trim().is_empty())) {return Err("flight-rendezvous requires --recording LEFT_DIR and --reference RIGHT_DIR".into());}
 if matches!(a.cmd.as_str(),"flight-support"|"support-inspect") && a.recording.as_deref().is_none_or(|p|p.trim().is_empty()) {return Err("Support commands require --recording COMPLETE_DIR".into());}
 if matches!(a.cmd.as_str(),"support-definition"|"flight-support") && [&a.output,&a.definition].iter().any(|p|p.as_deref().is_some_and(|s|s.trim().is_empty())) {return Err("Support files require nonempty paths".into());}
 if a.cmd=="flight-approach" && explicit_target && a.target.trim().is_empty() {return Err("Choose a nonempty approach target".into());}
@@ -371,6 +374,7 @@ fn help() {
     eprintln!("cosmogon-cli contact-start [--output NEW_FILE]\ncosmogon-cli contact-hardware [--static-shear --operation-window SECONDS --initial WORLD --target Mars --geographic-start FILE --output NEW_FILE]\nflight-definition --contact-hardware FILE explicitly enables versioned terrain/rigid-body motion; --operation-window adds the modeled solver-integrated surface-operation ledger; no safe landing or delivery");
     eprintln!("cosmogon-cli support-definition [--output NEW_FILE]\ncosmogon-cli flight-support --recording COMPLETE_FLIGHT_DIR [--definition LIMITS_FILE --output NEW_DIR]\ncosmogon-cli support-inspect --recording COMPLETE_SUPPORT_DIR\nConditional actual footprint/force evidence; no attachment or cargo permission");
     eprintln!("cosmogon-cli arrival-start [--output NEW_FILE]\ncosmogon-cli flight-approach --recording COMPLETE_FLIGHT_DIR [--target BODY --output NEW_DIR]\ncosmogon-cli approach-inspect --recording COMPLETE_APPROACH_DIR\nGeographic flight-definition starts: --geographic-start FILE (explicit spherical altitude and east/north/up velocities)");
+    eprintln!("cosmogon-cli flight-rendezvous --recording LEFT_DIR --reference RIGHT_DIR [--output NEW_DIR]\nClosest shared-observation-time evidence between two complete replay-verified flights from one origin world; sample-grid evidence only, never continuous closest approach, intercept or docking");
     eprintln!("cosmogon-cli flight-definition [--initial WORLD --definition PROPULSION_PLAN --target Mars --samples 121 --interval-seconds 1 --cargo-ledgers --handling --launch FILE --output NEW_FILE]\ncosmogon-cli flight-study --definition PINNED_STUDY [--initial WORLD --output NEW_DIR]\ncosmogon-cli flight-inspect --recording COMPLETE_DIR   # exact full-world flight replay; --cargo-ledgers opts into retained cargo mass ledgers; --handling opts into finite surface-handling equipment for co-located habitat transfers; --launch FILE consumes an authored surface-launch definition");
     eprintln!("cosmogon-cli launch-definition --thrust-time SECONDS --thrust-newtons N [--maximum-acceleration M_S2 --liftoff-altitude M --maximum-start-altitude M --initial WORLD --target Mars --latitude N --longitude E --seed N --scenario S] --output NEW_FILE   # authored surface launch definition: fixed inertial zenith burn on contact gear with structural specific-force limits and liftoff/burnout/apogee evidence");
     eprintln!("cosmogon-cli habitat-setup [--initial WORLD --target Mars --latitude N --longitude E --seed N --scenario S] --output NEW_FILE   # world containing one finite habitat, for flight transfer studies");
@@ -567,6 +571,16 @@ fn main() {
                 if let Some(path)=&a.output {report.export(std::path::Path::new(path))} else {Ok(report.manifest)}
             })();
             match result {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).expect("finite approach evidence")),Err(e)=>{eprintln!("Arrival operation failed: {e}");std::process::exit(1);}}
+        },
+        "flight-rendezvous" => {
+            let result=(||->Result<serde_json::Value,String>{
+                use cosmogon_sim::{world_vehicle_recording::Bundle,world_vehicle_rendezvous::Report};
+                let left=Bundle::read(std::path::Path::new(a.recording.as_deref().expect("validated recording")))?;
+                let right=Bundle::read(std::path::Path::new(a.reference.as_deref().expect("validated reference")))?;
+                let report=Report::run(&left,&right)?;
+                if let Some(path)=&a.output {report.export(std::path::Path::new(path))} else {Ok(report.manifest())}
+            })();
+            match result {Ok(v)=>println!("{}",serde_json::to_string_pretty(&v).expect("finite rendezvous evidence")),Err(e)=>{eprintln!("Flight rendezvous failed: {e}");std::process::exit(1);}}
         },
         "contact-hardware" => {
             let result=(||->Result<serde_json::Value,String>{
@@ -1256,6 +1270,14 @@ mod argument_tests {
         assert!(args(&["flight-definition","--launch","launch.json","--contact-hardware","h"]).is_err());
         assert!(args(&["flight-definition","--launch","launch.json","--definition","p"]).is_err());
         assert!(args(&["flight-study","--definition","d","--launch","launch.json"]).is_err());
+    }
+    #[test]
+    fn rendezvous_arguments_are_explicit_and_refuse_ignored_flags() {
+        for v in [vec!["flight-rendezvous"],vec!["flight-rendezvous","--recording","l"],vec!["flight-rendezvous","--reference","r"],vec!["flight-rendezvous","--recording","l","--reference"," "],vec!["flight-rendezvous","--recording"," ","--reference","r"],vec!["flight-rendezvous","--recording","l","--reference","r","--output"," "],vec!["flight-rendezvous","--recording","l","--reference","r","--target","Mars"],vec!["flight-rendezvous","--recording","l","--reference","r","--samples","3"],vec!["flight-rendezvous","--recording","l","--reference","r","--initial","w"]] {assert!(args(&v).is_err(),"{v:?}");}
+        let a=args(&["flight-rendezvous","--recording","left","--reference","right","--output","out"]).unwrap();
+        assert_eq!(a.recording.as_deref(),Some("left"));
+        assert_eq!(a.reference.as_deref(),Some("right"));
+        assert_eq!(a.output.as_deref(),Some("out"));
     }
     #[test]
     fn vehicle_commands_refuse_missing_recordings_and_unrelated_world_controls() {

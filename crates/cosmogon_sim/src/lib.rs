@@ -79,6 +79,8 @@ pub mod world_vehicle;
 
 pub mod world_vehicle_recording;
 
+pub mod world_vehicle_rendezvous;
+
 pub mod vehicle_arrival;
 
 pub mod vehicle_arrival_recording;
@@ -87,6 +89,7 @@ pub mod vehicle_contact;
 pub mod vehicle_contact_dynamics;
 pub mod vehicle_handling;
 pub mod vehicle_launch;
+pub mod vehicle_orbit;
 pub mod vehicle_operation;
 pub mod vehicle_shear;
 pub mod vehicle_support;

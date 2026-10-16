@@ -51,6 +51,16 @@ Studies support 2–4096 observations, intervals from 0.001 to 86400 seconds, at
 
 Without `--initial`, these two author/run commands use the same default Solar System lab and seed 1. A custom world/seed requires its exact saved source for subsequent study execution. Inspection requires a complete folder. Unsupported/ignored option combinations are refused.
 
+Free-flight recordings (no contact hardware) also carry derived orbital evidence: `orbital.csv` plus a conditional `manifest["orbital"]` summary block with per-observation osculating elements, verified byte-exact by `flight-inspect` (see [VEHICLE_ORBIT](VEHICLE_ORBIT.md)). Two complete recordings can be compared into a craft-to-craft closest-approach report:
+
+```bash
+./target/release/cosmogon-cli flight-rendezvous \
+  --recording /tmp/flight-recording --reference /tmp/other-recording \
+  --output /tmp/rendezvous-report
+# Both recordings must share one origin fingerprint, one system and one exact
+# observation grid; without --output the report manifest prints to stdout.
+```
+
 ```bash
 ./dist/Cosmogon.app/Contents/MacOS/cosmogon --new lab --focus Mars --speed 0 \
   --flight-recording /tmp/flight-recording --flight-observation 360 \

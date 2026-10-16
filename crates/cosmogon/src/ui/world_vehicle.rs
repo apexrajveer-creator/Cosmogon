@@ -750,6 +750,41 @@ impl FlightUi {
                     ui.label(egui::RichText::new("Evidence is accepted-substep geometry on the propulsion clock; no atmospheric ascent losses or attitude controller are modeled.").small().color(MUTED));
                 }
             }
+            if flight.definition.contact.is_none() {
+                ui.separator();
+                ui.strong("Osculating orbit about the parent body");
+                match cosmogon_sim::vehicle_orbit::observe(&sim.universe, &flight) {
+                    Ok(elements) => {
+                        ui.label(format!(
+                            "Semi-major axis {:.3} m · eccentricity {:.6} · periapsis {:.3} m",
+                            elements.semi_major_axis_m,
+                            elements.eccentricity,
+                            elements.periapsis_m
+                        ));
+                        match (elements.apoapsis_m, elements.period_s) {
+                            (Some(apoapsis), Some(period)) => ui.label(format!(
+                                "Apoapsis {:.3} m · period {:.3} s · inclination {:.3}°",
+                                apoapsis,
+                                period,
+                                elements.inclination_rad.to_degrees()
+                            )),
+                            _ => ui.label(format!(
+                                "Hyperbolic state: no apoapsis or period · inclination {:.3}°",
+                                elements.inclination_rad.to_degrees()
+                            )),
+                        };
+                        ui.label(format!(
+                            "Specific energy {:.6} J/kg · specific angular momentum {:.6} m²/s",
+                            elements.specific_energy_j_kg,
+                            elements.specific_angular_momentum_m2_s
+                        ));
+                        ui.label(egui::RichText::new("Instantaneous two-body evidence of the retained N-body state; never a propagated orbit. Inclination is to the system inertial plane, not the parent equator.").small().color(MUTED));
+                    }
+                    Err(reason) => {
+                        ui.colored_label(ACCENT, format!("Osculating evidence unavailable: {reason}"));
+                    }
+                }
+            }
         }
         ui.label(egui::RichText::new("Live state is saved with the sandbox. Active flight resolves one-second tasks; high time warp may lag. Use a separate recorded branch for controlled studies.").small().color(MUTED));
     }

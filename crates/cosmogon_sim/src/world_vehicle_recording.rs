@@ -201,6 +201,9 @@ pub struct Bundle {
     pub final_world: Universe,
     pub rows: Vec<Observation>,
     pub manifest: Value,
+    /// Free-flight recordings retain per-observation osculating evidence about
+    /// the craft's parent body; contact recordings never do.
+    pub orbital: Option<Vec<crate::vehicle_orbit::OrbitSample>>,
 }
 impl Bundle {
     pub fn run(initial: &Universe, study: Study) -> Result<Self, String> {
@@ -211,6 +214,7 @@ impl Bundle {
             definition: Box::new(study.flight.clone()),
         })?;
         let mut rows = Vec::with_capacity(study.samples);
+        let mut orbital_samples: Vec<crate::vehicle_orbit::OrbitSample> = Vec::new();
         for i in 0..study.samples {
             let target = initial.time + i as f64 * study.interval_s;
             if i > 0 {
@@ -233,6 +237,12 @@ impl Bundle {
                 .find(|v| v.id == id)
                 .ok_or("Studied craft disappeared from its actual branch")?
                 .clone();
+            if study.flight.contact.is_none() {
+                orbital_samples.push(crate::vehicle_orbit::OrbitSample {
+                    world_time_s: world.time,
+                    elements: crate::vehicle_orbit::observe(&world, &flight)?,
+                });
+            }
             rows.push(Observation {
                 world_time_s: world.time,
                 flight,
@@ -291,12 +301,22 @@ impl Bundle {
                 "scope":crate::vehicle_transfer::SCOPE});
             manifest["files"].as_array_mut().unwrap().push(json!("transfers.csv"));
         }
+        let orbital = (!orbital_samples.is_empty()).then_some(orbital_samples);
+        if let Some(samples) = &orbital {
+            manifest["files"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!("orbital.csv"));
+            manifest["orbital"] =
+                crate::vehicle_orbit::summary(study.flight.parent, samples)?;
+        }
         Ok(Self {
             study,
             origin: initial.clone(),
             final_world: world,
             rows,
             manifest,
+            orbital,
         })
     }
     pub fn export(&self, path: &Path) -> Result<(), String> {
@@ -343,6 +363,10 @@ impl Bundle {
         }
         if !self.study.transfers.is_empty() {
             let index=files.len()-1;files.insert(index,("transfers.csv",transfers_csv(&self.rows)?.into_bytes()));
+        }
+        if let Some(samples) = &self.orbital {
+            let index=files.len()-1;
+            files.insert(index,("orbital.csv",crate::vehicle_orbit::csv(samples).into_bytes()));
         }
         if files
             .iter()
@@ -408,6 +432,21 @@ impl Bundle {
         if study.flight.contact.as_ref().is_some_and(|h|h.operation.is_some()) && crate::habitat_recording::read(&path.join("operation.csv"),MAX_BYTES)?!=operation_csv(&replay.rows)? {
             return Err("Stored operation CSV differs from exact operation-window observations".into());
         }
+        match &replay.orbital {
+            Some(samples) => {
+                if crate::habitat_recording::read(&path.join("orbital.csv"), MAX_BYTES)?
+                    != crate::vehicle_orbit::csv(samples)
+                {
+                    return Err(
+                        "Stored orbital CSV differs from exact retained osculating evidence".into(),
+                    );
+                }
+            }
+            None if path.join("orbital.csv").exists() => {
+                return Err("Contact flight recording must not carry an orbital CSV".into());
+            }
+            None => {}
+        }
         let final_world = save::from_json(&crate::habitat_recording::read(
             &path.join("final.cosmo"),
             MAX_BYTES,
@@ -422,6 +461,7 @@ impl Bundle {
             final_world,
             rows,
             manifest,
+            orbital: replay.orbital,
         })
     }
 }
@@ -838,5 +878,108 @@ mod tests {
         assert!(study.validate(&world).unwrap_err().contains("finite positive"));
         study.transfers[0].requested.oxygen_reserve_kg = 0.;
         assert!(study.validate(&world).unwrap_err().contains("finite positive"));
+    }
+
+    #[test]
+    fn free_flight_studies_retain_and_replay_osculating_orbital_evidence() {
+        let (u, study) = setup();
+        assert!(study.flight.contact.is_none());
+        let parent = study.flight.parent;
+        let bundle = Bundle::run(&u, study).unwrap();
+        let orbital = bundle.orbital.as_ref().unwrap();
+        assert_eq!(orbital.len(), bundle.rows.len());
+        for (sample, row) in orbital.iter().zip(&bundle.rows) {
+            assert_eq!(sample.world_time_s, row.world_time_s);
+            assert!(sample.elements.eccentricity.is_finite());
+            assert!(sample.elements.semi_major_axis_m.is_finite());
+            assert!(sample.elements.periapsis_m.is_finite());
+            assert!(sample.elements.inclination_rad.is_finite());
+        }
+        assert_eq!(
+            bundle.manifest["orbital"]["model"],
+            crate::vehicle_orbit::MODEL
+        );
+        assert_eq!(
+            bundle.manifest["orbital"]["observations"],
+            bundle.rows.len()
+        );
+        assert!(bundle.manifest["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "orbital.csv"));
+        assert_eq!(
+            bundle.manifest["orbital"],
+            crate::vehicle_orbit::summary(parent, orbital).unwrap()
+        );
+        let root = std::env::temp_dir().join(format!(
+            "cosmogon-orbital-recording-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        bundle.export(&root).unwrap();
+        let opened = Bundle::read(&root).unwrap();
+        assert_eq!(opened.orbital, bundle.orbital);
+        assert_eq!(opened.manifest, bundle.manifest);
+        let mut tampered = std::fs::read_to_string(root.join("orbital.csv")).unwrap();
+        tampered = tampered.replacen("observation_index", "tampered_index", 1);
+        std::fs::write(root.join("orbital.csv"), tampered).unwrap();
+        assert!(Bundle::read(&root).unwrap_err().contains("orbital CSV"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn contact_studies_omit_orbital_evidence_and_refuse_a_stray_csv() {
+        let u = Universe::new(crate::UniverseSettings {
+            scenario: crate::Scenario::SolarSystemLab,
+            ..Default::default()
+        });
+        let target = crate::BodyRef { system: 0, body: 3 };
+        let frame = crate::vehicle_arrival::SurfaceFrame::at(&u, target, u.time).unwrap();
+        let outward = crate::Vec3d::new(0.8, 0.6, 0.);
+        let above = frame
+            .to_inertial(&crate::vehicle_arrival::KinematicState {
+                position_m: outward * (frame.radius_m + 10000.),
+                velocity_m_s: crate::Vec3d::ZERO,
+            })
+            .unwrap();
+        let hardware =
+            crate::vehicle_contact_dynamics::Hardware::example(&u, target, above.position_m)
+                .unwrap();
+        let mut plan = supply_vehicle::Plan::example();
+        plan.commands = vec![supply_vehicle::Command {
+            duration_s: 30.,
+            throttle: 0.,
+            direction: [1., 0., 0.],
+        }];
+        let definition = crate::vehicle_arrival::GeographicStart::contact_example()
+            .contact_flight(&u, target, plan, hardware)
+            .unwrap();
+        assert!(definition.contact.is_some());
+        let study = Study::new(&u, definition, 5, 1.0).unwrap();
+        let bundle = Bundle::run(&u, study).unwrap();
+        assert!(bundle.orbital.is_none());
+        assert!(bundle.manifest.get("orbital").is_none());
+        assert!(!bundle.manifest["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "orbital.csv"));
+        let root = std::env::temp_dir().join(format!(
+            "cosmogon-contact-no-orbital-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        bundle.export(&root).unwrap();
+        Bundle::read(&root).unwrap();
+        std::fs::write(
+            root.join("orbital.csv"),
+            "observation_index,world_time_s\n0,0\n",
+        )
+        .unwrap();
+        assert!(Bundle::read(&root)
+            .unwrap_err()
+            .contains("must not carry an orbital CSV"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
