@@ -55,6 +55,8 @@ struct Args {
     site: Option<String>,
     mars_terrain: Option<String>,
     habitat_id: Option<u64>,
+    nutrient_kg: Option<f64>,
+    store_kg: Option<f64>,
     from_site: Option<String>,
     to_site: Option<String>,
     latitude: f64,
@@ -122,6 +124,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         site: None,
         mars_terrain: None,
         habitat_id: None,
+        nutrient_kg: None,
+        store_kg: None,
         from_site: None,
         to_site: None,
         latitude: 0.0,
@@ -178,6 +182,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if matches!(a.cmd.as_str(),"greenhouse-definition"|"greenhouse-supply-definition") && flag!="--output" {return Err(format!("{flag} is not a greenhouse-definition option"));}
         if matches!(a.cmd.as_str(),"crop-chemistry"|"crop-chemistry-inspect"|"greenhouse-supply-inspect") && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a crop supply/chemistry inspection option"));}
         if matches!(a.cmd.as_str(),"habitat-diagnose"|"habitat-crop-harvest") && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
+        if a.cmd=="habitat-crop-install" && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output"|"--definition"|"--nutrient-kg") {return Err(format!("{flag} is not a greenhouse installation option"));}
+        if a.cmd=="habitat-crop-store" && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output"|"--store-kg") {return Err(format!("{flag} is not a crop food store option"));}
         if a.cmd=="contact-hardware" && !matches!(flag.as_str(),"--initial"|"--target"|"--seed"|"--scenario"|"--output"|"--geographic-start"|"--static-shear"|"--operation-window") {return Err(format!("{flag} is not a contact hardware option"));}
         if a.cmd=="flight-definition" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output"|"--target"|"--seed"|"--scenario"|"--samples"|"--interval-seconds"|"--geographic-start"|"--contact-hardware"|"--cargo-ledgers"|"--handling"|"--launch"|"--entry"|"--landing"|"--mission-span"|"--transfer") {return Err(format!("{flag} is not a world flight definition option"));}
         if a.cmd=="launch-definition" && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario"|"--thrust-time"|"--thrust-newtons"|"--maximum-acceleration"|"--liftoff-altitude"|"--maximum-start-altitude") {return Err(format!("{flag} is not a launch-definition option"));}
@@ -316,8 +322,10 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--from-index" => {if a.cmd!="habitat-balance" {return Err("--from-index requires habitat-balance".into());} let n=number::<usize>(val()?,&flag)?;if n>=1024{return Err("Initial index must be between 0 and 1023".into());}a.from_index=Some(n);},
             "--reference-index" => {if a.cmd!="habitat-pressure" {return Err("--reference-index requires habitat-pressure".into());}let n=number::<usize>(val()?,&flag)?;if n>=1024 {return Err("Reference index must be between 0 and 1023".into());}a.reference_index=Some(n);},
             "--initial" => a.initial = Some(val()?),
-            "--habitat-id" => {if !matches!(a.cmd.as_str(),"habitat"|"habitat-sweep"|"greenhouse"|"greenhouse-supplies"|"habitat-diagnose"|"habitat-crop-harvest") {return Err("--habitat-id requires habitat, habitat-sweep, habitat-diagnose or greenhouse".into());}a.habitat_id=Some(number(val()?,&flag)?);},
+            "--habitat-id" => {if !matches!(a.cmd.as_str(),"habitat"|"habitat-sweep"|"greenhouse"|"greenhouse-supplies"|"habitat-diagnose"|"habitat-crop-harvest"|"habitat-crop-install"|"habitat-crop-store") {return Err("--habitat-id requires habitat, habitat-sweep, habitat-diagnose, greenhouse or crop edits".into());}a.habitat_id=Some(number(val()?,&flag)?);},
             "--definition" => a.definition = Some(val()?),
+            "--nutrient-kg" => {if a.cmd!="habitat-crop-install" {return Err("--nutrient-kg requires habitat-crop-install".into());}let v=number::<f64>(val()?,&flag)?;if !v.is_finite() || !(0.0..=1.0e7).contains(&v) {return Err("--nutrient-kg requires a finite charge between 0 and 1e7 kg".into());}a.nutrient_kg=Some(v);},
+            "--store-kg" => {if a.cmd!="habitat-crop-store" {return Err("--store-kg requires habitat-crop-store".into());}let v=number::<f64>(val()?,&flag)?;if !v.is_finite() || !(0.0..=1.0e7).contains(&v) {return Err("--store-kg requires a finite request between 0 and 1e7 kg".into());}a.store_kg=Some(v);},
             "--alignment" => {if a.cmd!="habitat-compare" {return Err("--alignment requires habitat-compare".into());}a.alignment=val()?;},
             "--parameter" => a.parameter = val()?,
             "--from" => a.sweep_start = Some(number(val()?, &flag)?),
@@ -404,6 +412,8 @@ if a.geographic_start.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err
         cosmogon_sim::habitat_recording::Metric::parse(a.measure.as_deref().unwrap_or("water"))?;
     }
     if a.cmd=="habitat-crop-harvest" && (a.initial.is_none() || a.habitat_id.is_none() || a.output.is_none()) {return Err("habitat-crop-harvest requires --initial SAVE --habitat-id ID --output NEW_DIR".into());}
+    if a.cmd=="habitat-crop-install" && (a.initial.is_none() || a.habitat_id.is_none() || a.definition.is_none() || a.nutrient_kg.is_none() || a.output.is_none()) {return Err("habitat-crop-install requires --initial SAVE --habitat-id ID --definition CROP_CONFIG --nutrient-kg KG --output NEW_DIR".into());}
+    if a.cmd=="habitat-crop-store" && (a.initial.is_none() || a.habitat_id.is_none() || a.output.is_none()) {return Err("habitat-crop-store requires --initial SAVE --habitat-id ID --output NEW_DIR".into());}
     if a.cmd=="habitat-diagnose" && (a.initial.is_none() || a.habitat_id.is_none()) {return Err("habitat-diagnose requires --initial SAVE and explicit --habitat-id ID".into());}
     if a.cmd=="habitat-rerun" && (a.recording.as_deref().is_none_or(|p|p.trim().is_empty()) || a.output.as_deref().is_none_or(|p|p.trim().is_empty())){return Err("habitat-rerun requires --recording COMPLETE_DESIGN --output NEW_DIR".into());}
     if a.cmd=="habitat-verify" && a.recording.is_none() {return Err("habitat-verify requires --recording COMPLETE_PAIRED_FOLDER".into());}
@@ -466,6 +476,7 @@ fn help() {
     eprintln!("cosmogon-cli habitat-figure --recording FOLDER --definition GRAPH_LAYOUT --output NEW_DIR [--reference ORDINARY_B]");
     eprintln!("cosmogon-cli habitat-sweep --initial SAVE --output NEW_DIR --parameter firm_power_w --from 0 --to 4000 --runs 3 [--samples 25 --interval-days 0.041666666666666664]\n  or --definition SWEEP_PLAN; optional --habitat-id ID\ncosmogon-cli habitat-compare --recording A --reference B [--measure water --alignment elapsed|world --output NEW_DIR]");
     eprintln!("cosmogon-cli habitat-diagnose --initial SAVE --habitat-id ID [--output NEW_DIR]   # explain completed power/water/heat");
+    eprintln!("cosmogon-cli habitat-crop-install --initial SAVE --habitat-id ID --definition CROP_CONFIG --nutrient-kg KG --output NEW_DIR   # explicit runtime greenhouse installation granting only its nutrient charge\ncosmogon-cli habitat-crop-store --initial SAVE --habitat-id ID [--store-kg KG] --output NEW_DIR   # bounded 1:1 conversion of harvested edible dry material into the habitat dry-food tank");
     eprintln!("cosmogon-cli habitat-verify --recording COMPLETE_PAIRED_FOLDER [--output NEW_REPORT_DIR]   # recompute every actual row and endpoint");
     eprintln!("cosmogon-cli habitat-pressure --recording BRANCH_FOLDER --observation INDEX [--reference-index INDEX] [--output NEW_DIR]\ncosmogon-cli habitat-inspect --recording STUDY_FOLDER [--observation INDEX --output NEW_TRAJECTORY_DIR]   # validate and inspect recorded habitat observations");
     println!(
@@ -482,6 +493,10 @@ fn help() {
   greenhouse [--definition FILE --output NEW_DIR]  31 controlled lettuce forecast rows
       [--initial SAVE --habitat-id ID]   Optional exact habitat/world context, no resource credit
   habitat-crop-harvest --initial SAVE --habitat-id ID --output NEW_DIR  Explicit completed-cycle transfer
+  habitat-crop-install --initial SAVE --habitat-id ID --definition CROP_CONFIG
+      --nutrient-kg KG --output NEW_DIR  Runtime installation; grants only its nutrient charge.
+  habitat-crop-store --initial SAVE --habitat-id ID [--store-kg KG]
+      --output NEW_DIR  Bounded 1:1 harvested-edible → habitat dry-food conversion.
   habitat-crop-definition [--target Mars --output NEW_FILE]  Explicit finite crop setup; maintained assumption starts false
   habitat-definition [--target Mars --latitude N --longitude E] [--initial SAVE]
       [--output NEW_FILE]        Create a complete editable preset for this world.
@@ -597,6 +612,8 @@ fn main() {
         "greenhouse-definition" => {if let Err(e)=greenhouse_definition(&a) {eprintln!("Greenhouse definition failed: {e}");std::process::exit(1);}},
         "greenhouse" => {if let Err(e)=greenhouse(&a) {eprintln!("Greenhouse planning failed: {e}");std::process::exit(1);}},
         "habitat-crop-harvest" => {if let Err(e)=habitat_crop_harvest(&a){eprintln!("Crop harvest failed: {e}");std::process::exit(1);}},
+        "habitat-crop-install" => {if let Err(e)=habitat_crop_install(&a){eprintln!("Crop install failed: {e}");std::process::exit(1);}},
+        "habitat-crop-store" => {if let Err(e)=habitat_crop_store(&a){eprintln!("Crop food store failed: {e}");std::process::exit(1);}},
         "habitat-diagnose" => {if let Err(e)=habitat_diagnose(&a) {eprintln!("Habitat diagnosis failed: {e}");std::process::exit(1);}},
         "habitat-verify" => {
             match habitat_verify(&a) {Ok(v)=>{println!("{}",serde_json::to_string_pretty(&v).unwrap());if v["verified"]!=true {eprintln!("Replay differs from saved observations; results are preserved.");std::process::exit(1);}},Err(e)=>{eprintln!("Habitat replay did not complete: {e}");std::process::exit(1);}}
@@ -1220,6 +1237,46 @@ fn habitat_crop_harvest(a:&Args)->Result<(),String> {
     println!("{}",serde_json::to_string_pretty(&u.habitats.iter().find(|h|h.id==id).expect("harvested").report()).map_err(|e|e.to_string())?);Ok(())
 }
 
+/// Runtime installation of a finite greenhouse process into an existing
+/// cropless habitat. The edit grants only its declared bounded nutrient charge;
+/// the before-world copy, action JSON and ordinary export are protected.
+fn habitat_crop_install(a:&Args)->Result<(),String> {
+    use std::io::Write;
+    let mut u=save::read_file(std::path::Path::new(a.initial.as_deref().ok_or("Initial world required")?)).map_err(|e|e.to_string())?;
+    let before=u.clone();let id=a.habitat_id.ok_or("Habitat identity required")?;
+    let system=u.habitats.iter().find(|h|h.id==id).ok_or("No such habitat")?.definition.body.system;
+    let bytes=std::fs::read(std::path::Path::new(a.definition.as_deref().ok_or("Crop configuration required")?)).map_err(|e|e.to_string())?;
+    let config:cosmogon_sim::crop_process::Config=serde_json::from_slice(&bytes).map_err(|e|format!("Crop configuration must be finite crop process JSON: {e}"))?;
+    let nutrient_kg=a.nutrient_kg.ok_or("Nutrient charge required")?;
+    let edit=cosmogon_sim::sandbox::Edit::InstallHabitatCrop {system,id,config:Box::new(config),nutrient_kg};
+    let action=serde_json::json!({"format":"cosmogon-crop-install","schema_version":1,"edit":edit,"before_state_fingerprint":cosmogon_sim::research::state_fingerprint(&before)?});
+    u.apply_edit(edit)?;
+    let p=std::path::Path::new(a.output.as_deref().ok_or("New output folder required")?);
+    let row=cosmogon_sim::habitat::sample(&u,id)?;
+    cosmogon_sim::habitat::export(&u,&u,id,&[row],p)?;
+    for (name,text) in [("before-habitat-crop-install.cosmo",save::to_json(&before,"Before explicit greenhouse installation").map_err(|e|e.to_string())?),("install-action.json",serde_json::to_string_pretty(&action).map_err(|e|e.to_string())?)] {let mut f=std::fs::OpenOptions::new().write(true).create_new(true).open(p.join(name)).map_err(|e|e.to_string())?;f.write_all(text.as_bytes()).map_err(|e|e.to_string())?;}
+    println!("{}",serde_json::to_string_pretty(&u.habitats.iter().find(|h|h.id==id).expect("installed").report()).map_err(|e|e.to_string())?);Ok(())
+}
+
+/// Bounded explicit conversion of held harvested edible dry material into the
+/// habitat's finite dry-food store. Without --store-kg the full held edible
+/// amount is requested; storage capacity keeps any rejected remainder.
+fn habitat_crop_store(a:&Args)->Result<(),String> {
+    use std::io::Write;
+    let mut u=save::read_file(std::path::Path::new(a.initial.as_deref().ok_or("Initial world required")?)).map_err(|e|e.to_string())?;
+    let before=u.clone();let id=a.habitat_id.ok_or("Habitat identity required")?;
+    let system=u.habitats.iter().find(|h|h.id==id).ok_or("No such habitat")?.definition.body.system;
+    let requested_kg=a.store_kg.unwrap_or_else(||u.habitats.iter().find(|h|h.id==id).expect("habitat").state.crop.as_ref().map_or(0.,|c|c.harvested_dry_kg[0]));
+    let edit=cosmogon_sim::sandbox::Edit::StoreHabitatCropFood {system,id,requested_kg};
+    let action=serde_json::json!({"format":"cosmogon-crop-store","schema_version":1,"edit":edit,"before_state_fingerprint":cosmogon_sim::research::state_fingerprint(&before)?});
+    u.apply_edit(edit)?;
+    let p=std::path::Path::new(a.output.as_deref().ok_or("New output folder required")?);
+    let row=cosmogon_sim::habitat::sample(&u,id)?;
+    cosmogon_sim::habitat::export(&u,&u,id,&[row],p)?;
+    for (name,text) in [("before-habitat-crop-store.cosmo",save::to_json(&before,"Before explicit crop food store").map_err(|e|e.to_string())?),("store-action.json",serde_json::to_string_pretty(&action).map_err(|e|e.to_string())?)] {let mut f=std::fs::OpenOptions::new().write(true).create_new(true).open(p.join(name)).map_err(|e|e.to_string())?;f.write_all(text.as_bytes()).map_err(|e|e.to_string())?;}
+    println!("{}",serde_json::to_string_pretty(&u.habitats.iter().find(|h|h.id==id).expect("stored").report()).map_err(|e|e.to_string())?);Ok(())
+}
+
 /// Create a world containing one finite habitat, saved as a protected
 /// `.cosmo` file. This is the headless entry point for habitat-bearing
 /// worlds used by flight transfer studies.
@@ -1500,6 +1557,12 @@ mod argument_tests {
         assert!(args(&["habitat-crop-definition","--initial","s","--seed","4"]).is_err());
         for v in [vec!["habitat-crop-harvest"],vec!["habitat-crop-harvest","--initial","s","--habitat-id","0"],vec!["habitat-crop-harvest","--initial","s","--habitat-id","0","--output","o","--samples","3"]] {assert!(args(&v).is_err());}
         assert!(args(&["habitat-crop-harvest","--initial","s","--habitat-id","0","--output","o"]).is_ok());
+        for v in [vec!["habitat-crop-install"],vec!["habitat-crop-install","--initial","s","--habitat-id","0"],vec!["habitat-crop-install","--initial","s","--habitat-id","0","--definition","c","--output","o"],vec!["habitat-crop-install","--initial","s","--habitat-id","0","--definition","c","--nutrient-kg","2"],vec!["habitat-crop-install","--initial","s","--habitat-id","0","--definition","c","--nutrient-kg","-1","--output","o"],vec!["habitat-crop-install","--initial","s","--habitat-id","0","--definition","c","--nutrient-kg","2","--output","o","--samples","3"],vec!["habitat-crop-store"],vec!["habitat-crop-store","--initial","s","--habitat-id","0","--store-kg","1"],vec!["habitat-crop-store","--initial","s","--habitat-id","0","--output","o","--definition","c"],vec!["habitat-crop-store","--store-kg","1"]] {assert!(args(&v).is_err(),"{v:?}");}
+        let i=args(&["habitat-crop-install","--initial","s","--habitat-id","2","--definition","crop.json","--nutrient-kg","2.5","--output","o"]).unwrap();
+        assert_eq!(i.definition.as_deref(),Some("crop.json"));assert_eq!(i.nutrient_kg,Some(2.5));assert_eq!(i.habitat_id,Some(2));
+        let s=args(&["habitat-crop-store","--initial","s","--habitat-id","0","--store-kg","1","--output","o"]).unwrap();
+        assert_eq!(s.store_kg,Some(1.));
+        assert!(args(&["habitat-crop-store","--initial","s","--habitat-id","0","--output","o"]).is_ok());
     }
     #[test]
     fn crop_chemistry_requires_explicit_source_and_refuses_ignored_arguments() {

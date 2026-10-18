@@ -674,6 +674,19 @@ mod crop_edit_tests {
         sim.edit(Edit::HarvestHabitatCrop {system:0,id:0},0.).unwrap();let after=serde_json::to_value(&sim.universe).unwrap();assert!(sim.universe.habitats[0].state.crop.as_ref().unwrap().harvested);sim.undo(0.);assert_eq!(serde_json::to_value(&sim.universe).unwrap(),before);sim.redo(0.);assert_eq!(serde_json::to_value(&sim.universe).unwrap(),after);
         let mut c=sim.universe.habitats[0].config.clone();c.crop=None;sim.edit(Edit::ConfigureHabitat {system:0,id:0,config:Box::new(c)},0.).unwrap();sim.undo(0.);assert_eq!(serde_json::to_value(&sim.universe).unwrap(),after);
     }
+    #[test]
+    fn runtime_greenhouse_install_and_food_store_are_exactly_undoable() {
+        let mut u=Universe::new(UniverseSettings {scenario:cosmogon_sim::Scenario::SolarSystemLab,..Default::default()});
+        let body=cosmogon_sim::BodyRef {system:0,body:u.systems[0].find_body("Mars").unwrap() as u32};
+        let mut d=cosmogon_sim::crop_process::definition_at(body,0.,0.);d.config.crop=None;d.initial.crop_nutrient_equivalent_kg=0.;
+        d.config.crew=0;d.config.firm_power_w=5000.;d.config.solar_area_m2=0.;d.config.base_load_w=0.;d.config.scrubber_power_w=0.;d.config.recycler_power_w=0.;d.config.heater_limit_w=0.;d.config.radiator_pump_w=0.;d.config.radiator_area_m2=0.;d.config.conductance_w_k=0.;d.config.heat_capacity_j_k=1e9;d.config.moisture.as_mut().unwrap().power_limit_w=0.;
+        u.apply_edit(Edit::CreateHabitat {definition:Box::new(d)}).unwrap();
+        let m:Manifest=serde_json::from_value(serde_json::json!({"format":"test","version":1,"id":"install-in-memory-test","name":"Test","created_unix":0,"modified_unix":0,"template":"test","owner":"test"})).unwrap();let mut sim=Sim::new(u,Session::Sandbox(m));let before=serde_json::to_value(&sim.universe).unwrap();
+        let mut cfg=cosmogon_sim::crop_process::definition_at(body,0.,0.).config.crop.expect("explicit crop");cfg.assume_maintained_conditions=true;
+        sim.edit(Edit::InstallHabitatCrop {system:0,id:0,config:Box::new(cfg),nutrient_kg:2.},0.).unwrap();let installed=serde_json::to_value(&sim.universe).unwrap();assert_eq!(sim.universe.habitats[0].state.crop.as_ref().unwrap().nutrient_equivalent_kg,2.);sim.undo(0.);assert_eq!(serde_json::to_value(&sim.universe).unwrap(),before);sim.redo(0.);assert_eq!(serde_json::to_value(&sim.universe).unwrap(),installed);
+        sim.universe.advance_by(30.*86400.);sim.edit(Edit::HarvestHabitatCrop {system:0,id:0},0.).unwrap();let harvested=serde_json::to_value(&sim.universe).unwrap();
+        sim.edit(Edit::StoreHabitatCropFood {system:0,id:0,requested_kg:1.0e7},0.).unwrap();let stored=serde_json::to_value(&sim.universe).unwrap();assert!(sim.universe.habitats[0].state.food_dry_kg>0.);sim.undo(0.);assert_eq!(serde_json::to_value(&sim.universe).unwrap(),harvested);sim.redo(0.);assert_eq!(serde_json::to_value(&sim.universe).unwrap(),stored);
+    }
 }
 
 #[cfg(test)]

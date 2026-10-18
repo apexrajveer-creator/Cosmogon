@@ -4,7 +4,7 @@ use crate::{
 };
 use serde_json::{json, Value};
 
-pub const SCOPE: &str = "Actual retained finite reference-process state. Supported source progress is not biological age or chronological elapsed time. Pauses do not predict survival or reversible stress. Maintained chamber conditions and chemical energy are user assumptions. Original daily curves are interpolated by the installed model; graph lines are only guides between stored observations. Harvest moves dry stores and supplies no nominal crew diet. Comparisons require aligned installation origins and completed habitat ends; differing original assumptions remain explicit engineering scenarios, not calibrated biology. Existing saved aggregate catalogs remain unchanged.";
+pub const SCOPE: &str = "Actual retained finite reference-process state. Supported source progress is not biological age or chronological elapsed time. Pauses do not predict survival or reversible stress. Maintained chamber conditions and chemical energy are user assumptions. Original daily curves are interpolated by the installed model; graph lines are only guides between stored observations. Harvest moves dry stores and supplies no nominal crew diet; only an explicit bounded store conversion moves harvested edible dry material 1:1 into the habitat dry-food tank, and inedible material never becomes food. A runtime greenhouse installation appears as an explicit origin: leading observations may predate it, after which crop state never disappears or changes origin. Comparisons require aligned installation origins and completed habitat ends; differing original assumptions remain explicit engineering scenarios, not calibrated biology. Existing saved aggregate catalogs remain unchanged.";
 
 /// Full source/curve/material validation occurs when the recording is read. This fast
 /// projection does not repeat source quadrature on every graph frame.
@@ -23,45 +23,53 @@ pub fn retained(row: &Sample) -> Option<&crop_process::State> {
 
 /// Cross-observation invariants supplement each row's full source/material validation.
 /// Structural checks cannot prove that all intervening simulation was executed.
+/// Leading rows without crop state are a legitimate pre-installation span; from the
+/// first installed observation onward, state, origin and counters stay consistent.
 pub fn validate_series(rows: &[Sample]) -> Result<(), String> {
     let Some(first) = rows.first() else {
         return Err("Empty crop trajectory".into());
     };
-    let Some(mut previous) = retained(first) else {
-        return if rows.iter().any(|r| r.habitat.state.crop.is_some()) {
-            Err("Crop state appears inside a retained trajectory".into())
-        } else {
-            Ok(())
-        };
-    };
-    for row in rows.iter().skip(1) {
-        let now = retained(row).ok_or("Crop state disappears inside a retained trajectory")?;
-        if now.origin_time_s != previous.origin_time_s {
-            return Err("Crop installation origin changes inside a retained trajectory".into());
+    if first.habitat.state.crop.is_some() && retained(first).is_none() {
+        return Err("Crop state lacks valid pins inside a retained trajectory".into());
+    }
+    let mut previous: Option<&crop_process::State> = None;
+    for row in rows {
+        if row.habitat.state.crop.is_none() {
+            if previous.is_some() {
+                return Err("Crop state disappears inside a retained trajectory".into());
+            }
+            continue;
         }
-        let counters = |c: &crop_process::State| {
-            [
-                c.source_progress_seconds,
-                c.source_progress_days,
-                c.co2_consumed_kg,
-                c.metabolic_water_consumed_kg,
-                c.vapor_generated_kg,
-                c.oxygen_generated_kg,
-                c.light_electric_j,
-                c.auxiliary_electric_j,
-                c.dry_mass_kg(),
-            ]
-        };
-        if counters(now)
-            .into_iter()
-            .zip(counters(previous))
-            .any(|(a, b)| a < b)
-            || now.nutrient_equivalent_kg > previous.nutrient_equivalent_kg
-            || previous.harvested && !now.harvested
-        {
-            return Err("Crop counters or harvest reverse inside a retained trajectory".into());
+        let now = retained(row).ok_or("Crop state lacks valid pins inside a retained trajectory")?;
+        if let Some(previous) = previous {
+            if now.origin_time_s != previous.origin_time_s {
+                return Err("Crop installation origin changes inside a retained trajectory".into());
+            }
+            let counters = |c: &crop_process::State| {
+                [
+                    c.source_progress_seconds,
+                    c.source_progress_days,
+                    c.co2_consumed_kg,
+                    c.metabolic_water_consumed_kg,
+                    c.vapor_generated_kg,
+                    c.oxygen_generated_kg,
+                    c.light_electric_j,
+                    c.auxiliary_electric_j,
+                    c.dry_mass_kg() + c.food_stored_kg,
+                ]
+            };
+            if counters(now)
+                .into_iter()
+                .zip(counters(previous))
+                .any(|(a, b)| a < b)
+                || now.nutrient_equivalent_kg > previous.nutrient_equivalent_kg
+                || now.food_stored_kg < previous.food_stored_kg
+                || previous.harvested && !now.harvested
+            {
+                return Err("Crop counters or harvest reverse inside a retained trajectory".into());
+            }
         }
-        previous = now;
+        previous = Some(now);
     }
     Ok(())
 }

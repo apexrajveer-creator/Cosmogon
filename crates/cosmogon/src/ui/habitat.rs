@@ -25,6 +25,7 @@ pub struct HabitatUi {
     breach_pane:usize,
     crop_pane:usize,
     crop_setup:Definition,
+    store_food_kg: f64,
     why: super::habitat_why::View,
     pub crop: super::greenhouse::CropPlanner,
     pub recording: super::habitat_recordings::Study,
@@ -47,6 +48,7 @@ impl Default for HabitatUi {
             breach_pane:0,
             crop_pane:0,
             crop_setup:cosmogon_sim::crop_process::definition_at(cosmogon_sim::BodyRef {system:0,body:0},0.,0.),
+            store_food_kg: 0.0,
             why: Default::default(),
             crop: Default::default(),
             recording: Default::default(),
@@ -56,7 +58,7 @@ impl Default for HabitatUi {
 impl HabitatUi {
     pub fn crop_metadata(&self,u:&cosmogon_sim::Universe)->Option<serde_json::Value> {
         if self.tab!=11 {return None;}
-        Some(serde_json::json!({"pane":self.crop_pane,"selected_habitat":self.selected,"staged_configuration":self.draft,"new_setup":self.crop_setup,"observation":self.selected.and_then(|id|u.habitats.iter().find(|h|h.id==id)).map(|h|h.report())}))
+        Some(serde_json::json!({"pane":self.crop_pane,"selected_habitat":self.selected,"staged_configuration":self.draft,"new_setup":self.crop_setup,"store_food_kg":self.store_food_kg,"observation":self.selected.and_then(|id|u.habitats.iter().find(|h|h.id==id)).map(|h|h.report())}))
     }
 
     pub fn breach_metadata(&self,u:&cosmogon_sim::Universe)->Option<serde_json::Value> {
@@ -376,10 +378,10 @@ pub fn panel(
                 }
                 if form.tab==11 {
                     ui.horizontal_wrapped(|ui| {for (i,label) in ["Overview","Settings","Model & sources","New crop setup"].iter().enumerate() {ui.selectable_value(&mut form.crop_pane,i,*label);}});
-                    if form.crop_pane==0 {if super::habitat_crop::readings(ui,h,!sim.is_reference()) && !sim.is_reference() {edit=Some(Edit::HarvestHabitatCrop {system:h.definition.body.system,id:h.id});}}
+                    if form.crop_pane==0 {if let Some(action)=super::habitat_crop::readings(ui,h,!sim.is_reference(),&mut form.crop_setup.config.crop,&mut form.crop_setup.initial.crop_nutrient_equivalent_kg,&mut form.store_food_kg) {if !sim.is_reference() {edit=Some(match action {super::habitat_crop::Action::Harvest=>Edit::HarvestHabitatCrop {system:h.definition.body.system,id:h.id},super::habitat_crop::Action::Store {requested_kg}=>Edit::StoreHabitatCropFood {system:h.definition.body.system,id:h.id,requested_kg},super::habitat_crop::Action::Install {config,nutrient_kg}=>Edit::InstallHabitatCrop {system:h.definition.body.system,id:h.id,config,nutrient_kg}});}}}
                     else if form.crop_pane==2 {super::habitat_crop::model(ui);}
                     else if form.crop_pane==1 {
-                        ui.add_enabled_ui(!sim.is_reference(),|ui|super::habitat_crop::controls(ui,&mut form.draft.crop,h.definition.config.crop.as_ref()));
+                        ui.add_enabled_ui(!sim.is_reference(),|ui|super::habitat_crop::controls(ui,&mut form.draft.crop,h.definition.config.crop.as_ref(),h.definition.config.crop.is_none()&&h.state.crop.is_some()));
                         ui.horizontal(|ui| {if ui.add_enabled(!sim.is_reference() && form.draft!=*c,egui::Button::new("Apply configuration")).clicked(){edit=Some(Edit::ConfigureHabitat {system:h.definition.body.system,id:h.id,config:Box::new(form.draft.clone())});}
                         if ui.button("Discard staged changes").clicked(){form.draft=c.clone();}});
                     }

@@ -3,7 +3,7 @@
 use crate::{crop_chemistry, greenhouse};
 use serde::{Deserialize, Serialize};
 pub const MODEL: &str = "cosmogon-finite-crop-reference/1";
-pub const LIMITS:&str="Finite controlled reference process, not validated crop physiology or chamber hardware. Maintained 23 C/CO2/pressure/humidity are an explicit ideal boundary assumption. Source progress advances only in supported fully powered 16-hour light periods; paused progress does not predict survival or reversible stress. Original daily cumulative source values are piecewise linear between days. CHON-only/no-ash material surrogate; HNO3-equivalent is not literal fertilizer. Dry chemical storage J/kg and auxiliary power are user assumptions, not measured heat of formation or hardware ratings. Vapor/chemical energy must fit actual light electricity. Separate standing/harvested dry stores do not establish calories or feed nominal crew diet. No nutrient solution, root/wet mass, dark physiology, automatic replanting, chamber HVAC/calibration or biological uncertainty.";
+pub const LIMITS:&str="Finite controlled reference process, not validated crop physiology or chamber hardware. Maintained 23 C/CO2/pressure/humidity are an explicit ideal boundary assumption. Source progress advances only in supported fully powered 16-hour light periods; paused progress does not predict survival or reversible stress. Original daily cumulative source values are piecewise linear between days. CHON-only/no-ash material surrogate; HNO3-equivalent is not literal fertilizer. Dry chemical storage J/kg and auxiliary power are user assumptions, not measured heat of formation or hardware ratings. Vapor/chemical energy must fit actual light electricity. Runtime installation is an explicit bounded edit granting only its declared nutrient-equivalent charge; harvest alone keeps separate dry stores with no diet credit, and only the explicit bounded store conversion moves harvested edible dry material 1:1 into the habitat dry-food tank. Inedible dry material never becomes food; the assumed crop chemical basis is not crew metabolizable energy and diet adequacy of crop-derived food is not validated. No nutrient solution, root/wet mass, dark physiology, automatic replanting, chamber HVAC/calibration or biological uncertainty.";
 const DAY: f64 = 86400.;
 const LIGHT: f64 = 57600.;
 fn bounds(v: f64, min: f64, max: f64, label: &str) -> Result<(), String> {
@@ -14,6 +14,9 @@ fn bounds(v: f64, min: f64, max: f64, label: &str) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+fn is_zero(v: &f64) -> bool {
+    *v == 0.0
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -92,6 +95,9 @@ pub struct State {
     pub standing_dry_kg: [f64; 2],
     pub harvested_dry_kg: [f64; 2],
     pub harvested: bool,
+    /// Cumulative harvested edible dry kilograms moved into the habitat food store.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub food_stored_kg: f64,
     /// Original maintained-source daily edible/inedible dry kg and vapor kg; not observations.
     pub source_curve: Vec<[f64; 3]>,
     pub co2_consumed_kg: f64,
@@ -137,6 +143,7 @@ impl State {
             standing_dry_kg: [0.; 2],
             harvested_dry_kg: [0.; 2],
             harvested: false,
+            food_stored_kg: 0.,
             source_curve: curve(&c.crop)?,
             co2_consumed_kg: 0.,
             metabolic_water_consumed_kg: 0.,
@@ -157,7 +164,7 @@ impl State {
         self.nutrient_equivalent_kg + self.dry_mass_kg()
     }
     pub fn chemical_energy_j(&self) -> f64 {
-        self.dry_mass_kg() * self.dry_chemical_energy_j_kg
+        (self.dry_mass_kg() + self.food_stored_kg) * self.dry_chemical_energy_j_kg
     }
     pub fn check_config(&self, c: &Config) -> Result<(), String> {
         bounds(c.auxiliary_power_w, 0., 1e7, "Crop auxiliary power")?;
@@ -215,6 +222,7 @@ impl State {
                 self.metabolic_water_consumed_kg,
                 self.vapor_generated_kg,
                 self.oxygen_generated_kg,
+                self.food_stored_kg,
             ])
         {
             bounds(v, 0., 1e12, "Crop mass counter")?;
@@ -237,7 +245,10 @@ impl State {
             }
         };
         for (k, value) in projected.iter().copied().enumerate().take(2) {
-            check(self.standing_dry_kg[k] + self.harvested_dry_kg[k], value)?;
+            let held = self.standing_dry_kg[k]
+                + self.harvested_dry_kg[k]
+                + if k == 0 { self.food_stored_kg } else { 0. };
+            check(held, value)?;
         }
         check(self.co2_consumed_kg, 1.82 * e + 1.68 * i)?;
         check(self.metabolic_water_consumed_kg, 0.57 * e + 0.55 * i)?;
@@ -267,6 +278,8 @@ impl State {
             }
         } else if self.harvested_dry_kg != [0.; 2] {
             return Err("Crop harvested material lacks explicit harvest state".into());
+        } else if self.food_stored_kg != 0. {
+            return Err("Crop food storage lacks explicit harvest state".into());
         }
         Ok(())
     }
@@ -311,6 +324,30 @@ impl State {
         self.standing_dry_kg = [0.; 2];
         self.harvested = true;
         Ok(())
+    }
+    /// Bounded 1:1 mass transfer of held harvested edible dry material out of the
+    /// crop stores. The caller supplies the habitat dry-food headroom; any rejected
+    /// remainder stays in the harvested store.
+    pub fn store_food(&mut self, requested_kg: f64, headroom_kg: f64) -> Result<f64, String> {
+        bounds(requested_kg, 0., 1e7, "Requested crop food storage")?;
+        if !self.harvested {
+            return Err("Food storage requires an explicit completed-cycle harvest".into());
+        }
+        if self.harvested_dry_kg[0] <= 0. {
+            return Err("No harvested edible dry material is held".into());
+        }
+        if !headroom_kg.is_finite() || headroom_kg <= 0. {
+            return Err("Dry food storage has no remaining headroom".into());
+        }
+        let take = requested_kg
+            .min(self.harvested_dry_kg[0])
+            .min(headroom_kg);
+        if !take.is_finite() || take <= 0. {
+            return Err("Requested crop food storage must be positive".into());
+        }
+        self.harvested_dry_kg[0] -= take;
+        self.food_stored_kg += take;
+        Ok(take)
     }
     pub fn request_w(&self, c: &Config, start: f64, dt: f64) -> f64 {
         if !c.assume_maintained_conditions || self.source_progress_days >= 30. || dt <= 0. {
@@ -901,8 +938,16 @@ pub fn source() -> serde_json::Value {
     serde_json::json!({"model":MODEL,"chemistry_model":crop_chemistry::MODEL,"atomic_model":crop_chemistry::ATOMIC_MODEL,"growth_source":greenhouse::SOURCE,"growth_snapshot_sha256":greenhouse::SOURCE_SHA256,"recipe_source":crate::greenhouse_supplies::SOURCE,"recipe_snapshot_sha256":crate::greenhouse_supplies::SOURCE_SHA256,"limits":LIMITS,"time_scope":"Origin-relative terrestrial 24-hour day / 16-hour light; effective supported reference progress, not physiological age","energy_basis":"Original user-assumed dry J/kg; no measured tissue enthalpy"})
 }
 /// Separate actual crop evidence keeps the original habitat CSV catalog immutable.
+/// The optional food_stored_kg column appears only when a retained row converted
+/// harvested edible material into the habitat food store, so legacy recordings
+/// re-derive byte-identically.
 pub fn samples_csv(rows: &[crate::habitat::Sample]) -> String {
-    let mut csv=String::from("simulation_time_s,completed_habitat_time_s,source_progress_days,nutrient_equivalent_kg,standing_edible_dry_kg,standing_inedible_dry_kg,harvested_edible_dry_kg,harvested_inedible_dry_kg,harvested,chemical_energy_j,total_co2_consumed_kg,total_metabolic_water_consumed_kg,total_vapor_generated_kg,total_oxygen_generated_kg,total_light_electric_j,total_auxiliary_electric_j,interval_requested_w,interval_delivered_w,interval_water_consumed_kg,interval_oxygen_generated_kg,interval_chemical_storage_j,interval_vapor_phase_j,interval_mass_residual_kg\n");
+    let stored = rows
+        .iter()
+        .any(|r| r.habitat.state.crop.as_ref().is_some_and(|s| s.food_stored_kg > 0.));
+    let mut csv=String::from("simulation_time_s,completed_habitat_time_s,source_progress_days,nutrient_equivalent_kg,standing_edible_dry_kg,standing_inedible_dry_kg,harvested_edible_dry_kg,harvested_inedible_dry_kg,harvested,");
+    if stored {csv.push_str("food_stored_kg,");}
+    csv.push_str("chemical_energy_j,total_co2_consumed_kg,total_metabolic_water_consumed_kg,total_vapor_generated_kg,total_oxygen_generated_kg,total_light_electric_j,total_auxiliary_electric_j,interval_requested_w,interval_delivered_w,interval_water_consumed_kg,interval_oxygen_generated_kg,interval_chemical_storage_j,interval_vapor_phase_j,interval_mass_residual_kg\n");
     for r in rows {
         let mut cells = vec![
             format!("{:.17e}", r.simulation_time_s),
@@ -918,6 +963,13 @@ pub fn samples_csv(rows: &[crate::habitat::Sample]) -> String {
                     s.harvested_dry_kg[0],
                     s.harvested_dry_kg[1],
                     if s.harvested { 1. } else { 0. },
+                ]
+                .into_iter()
+                .map(|v| format!("{v:.17e}")),
+            );
+            if stored { cells.push(format!("{:.17e}", s.food_stored_kg)); }
+            cells.extend(
+                [
                     s.chemical_energy_j(),
                     s.co2_consumed_kg,
                     s.metabolic_water_consumed_kg,
@@ -930,7 +982,7 @@ pub fn samples_csv(rows: &[crate::habitat::Sample]) -> String {
                 .map(|v| format!("{v:.17e}")),
             );
         } else {
-            cells.extend(vec![String::new(); 14]);
+            cells.extend(vec![String::new(); if stored { 15 } else { 14 }]);
         }
         if let Some(b) = &r.habitat.budget.crop {
             cells.extend(
@@ -1156,5 +1208,285 @@ mod integration_tests {
             )
             .is_err());
         assert_eq!(*h, before);
+    }
+    fn plain_world(with_moisture: bool) -> Universe {
+        let mut u = Universe::new(UniverseSettings {
+            scenario: Scenario::SolarSystemLab,
+            ..Default::default()
+        });
+        let body = crate::BodyRef {
+            system: 0,
+            body: u.systems[0].find_body("Mars").unwrap() as u32,
+        };
+        let mut d = definition_at(body, 0., 0.);
+        d.config.crop = None;
+        d.initial.crop_nutrient_equivalent_kg = 0.;
+        if !with_moisture {
+            d.config.moisture = None;
+        }
+        d.config.crew = 0;
+        d.config.solar_area_m2 = 0.;
+        d.config.firm_power_w = 5000.;
+        d.config.base_load_w = 0.;
+        d.config.scrubber_power_w = 0.;
+        d.config.recycler_power_w = 0.;
+        d.config.heater_limit_w = 0.;
+        d.config.radiator_pump_w = 0.;
+        d.config.radiator_area_m2 = 0.;
+        d.config.conductance_w_k = 0.;
+        d.config.heat_capacity_j_k = 1e9;
+        if let Some(m) = d.config.moisture.as_mut() {
+            m.power_limit_w = 0.;
+        }
+        u.apply_edit(Edit::CreateHabitat {
+            definition: Box::new(d),
+        })
+        .unwrap();
+        u
+    }
+    fn install_config() -> Config {
+        Config {
+            assume_maintained_conditions: true,
+            ..Default::default()
+        }
+    }
+    #[test]
+    fn runtime_install_is_bounded_refused_twice_and_never_disablable() {
+        let mut dry = plain_world(false);
+        let attempt = Edit::InstallHabitatCrop {
+            system: 0,
+            id: 0,
+            config: Box::new(install_config()),
+            nutrient_kg: 2.,
+        };
+        let err = dry.apply_edit(attempt.clone()).unwrap_err();
+        assert!(err.contains("moisture accounting"), "{err}");
+        assert!(dry.habitats[0].state.crop.is_none());
+        let mut u = plain_world(true);
+        let out_of_bounds = u
+            .apply_edit(Edit::InstallHabitatCrop {
+                system: 0,
+                id: 0,
+                config: Box::new(Config::default()),
+                nutrient_kg: -1.,
+            })
+            .unwrap_err();
+        assert!(out_of_bounds.contains("nutrient-equivalent"), "{out_of_bounds}");
+        let mass = u.habitats[0].state.accounted_mass_kg();
+        u.apply_edit(attempt).unwrap();
+        let h = &u.habitats[0];
+        assert!(h.state.crop.is_some());
+        assert!(h.config.crop.is_some());
+        let crop = h.state.crop.as_ref().unwrap();
+        assert_eq!(crop.initial_nutrient_equivalent_kg, 2.);
+        assert_eq!(crop.origin_time_s, h.last_time);
+        assert!(u.habitats[0].heat.as_ref().unwrap().crop_storage_debits_j.is_some());
+        assert!((u.habitats[0].state.accounted_mass_kg() - mass - 2.).abs() < 1e-9);
+        assert!(u
+            .apply_edit(Edit::InstallHabitatCrop {
+                system: 0,
+                id: 0,
+                config: Box::new(install_config()),
+                nutrient_kg: 0.,
+            })
+            .is_err());
+        let mut low = u.habitats[0].config.clone();
+        low.crop.as_mut().unwrap().oxygen_capacity_kg = 10.;
+        assert!(u
+            .apply_edit(Edit::ConfigureHabitat {
+                system: 0,
+                id: 0,
+                config: Box::new(low),
+            })
+            .is_err());
+        let mut disabled = u.habitats[0].config.clone();
+        disabled.crop = None;
+        let err = u
+            .apply_edit(Edit::ConfigureHabitat {
+                system: 0,
+                id: 0,
+                config: Box::new(disabled),
+            })
+            .unwrap_err();
+        assert!(err.contains("cannot be disabled"), "{err}");
+        let text = save::to_json(&u, "runtime install").unwrap();
+        assert!(!text.contains("food_stored_kg"));
+        let back: Universe = save::from_json(&text).unwrap();
+        assert_eq!(
+            serde_json::to_value(&u).unwrap(),
+            serde_json::to_value(&back).unwrap()
+        );
+        u.advance_by(DAY);
+        let grown = save::to_json(&u, "grown").unwrap();
+        save::from_json(&grown).unwrap();
+    }
+    #[test]
+    fn store_conversion_is_bounded_conserves_mass_and_feeds_the_nominal_diet() {
+        let mut u = world();
+        u.advance_by(DAY * 30.);
+        let held_before = u.habitats[0].state.crop.clone().unwrap();
+        assert!(u
+            .apply_edit(Edit::StoreHabitatCropFood {
+                system: 0,
+                id: 0,
+                requested_kg: 1.,
+            })
+            .is_err());
+        let mass = u.habitats[0].state.accounted_mass_kg();
+        let food_before = u.habitats[0].state.food_dry_kg;
+        assert!(held_before.standing_dry_kg[0] > 0.5);
+        u.apply_edit(Edit::HarvestHabitatCrop { system: 0, id: 0 })
+            .unwrap();
+        let harvested = u.habitats[0].state.crop.clone().unwrap();
+        assert!(u
+            .apply_edit(Edit::StoreHabitatCropFood {
+                system: 0,
+                id: 0,
+                requested_kg: 0.,
+            })
+            .is_err());
+        u.apply_edit(Edit::StoreHabitatCropFood {
+            system: 0,
+            id: 0,
+            requested_kg: 0.5,
+        })
+        .unwrap();
+        {
+            let take = 0.5f64.min(harvested.harvested_dry_kg[0]);
+            assert!(take > 0.);
+            let s = &u.habitats[0].state;
+            let c = s.crop.as_ref().unwrap();
+            assert!((s.food_dry_kg - food_before - take).abs() < 1e-12);
+            assert!((c.harvested_dry_kg[0] - (harvested.harvested_dry_kg[0] - take)).abs() < 1e-12);
+            assert!((c.food_stored_kg - take).abs() < 1e-12);
+            assert!((c.harvested_dry_kg[0] + c.food_stored_kg - held_before.standing_dry_kg[0]).abs() < 1e-9);
+            assert_eq!(c.harvested_dry_kg[1], harvested.harvested_dry_kg[1]);
+            assert_eq!(c.chemical_energy_j(), harvested.chemical_energy_j());
+            assert!((s.accounted_mass_kg() - mass).abs() < 1e-9);
+        }
+        let first_take = u.habitats[0].state.crop.as_ref().unwrap().food_stored_kg;
+        let held_after_first = u.habitats[0].state.crop.as_ref().unwrap().harvested_dry_kg[0];
+        let headroom2 = 0.25f64.min(held_after_first * 0.5);
+        assert!(headroom2 > 0.);
+        let mut tight = u.habitats[0].config.clone();
+        tight.food_dry_capacity_kg = u.habitats[0].state.food_dry_kg + headroom2;
+        u.apply_edit(Edit::ConfigureHabitat {
+            system: 0,
+            id: 0,
+            config: Box::new(tight),
+        })
+        .unwrap();
+        let second_take = 10.0f64.min(held_after_first).min(headroom2);
+        assert!(second_take > 0.);
+        u.apply_edit(Edit::StoreHabitatCropFood {
+            system: 0,
+            id: 0,
+            requested_kg: 10.,
+        })
+        .unwrap();
+        assert!((u.habitats[0].state.crop.as_ref().unwrap().food_stored_kg - (first_take + second_take)).abs() < 1e-9);
+        let mut full = u.habitats[0].config.clone();
+        full.food_dry_capacity_kg = u.habitats[0].state.food_dry_kg;
+        u.apply_edit(Edit::ConfigureHabitat {
+            system: 0,
+            id: 0,
+            config: Box::new(full),
+        })
+        .unwrap();
+        let err = u
+            .apply_edit(Edit::StoreHabitatCropFood {
+                system: 0,
+                id: 0,
+                requested_kg: 1.,
+            })
+            .unwrap_err();
+        assert!(err.contains("headroom"), "{err}");
+        let text = save::to_json(&u, "stored").unwrap();
+        assert!(text.contains("food_stored_kg"));
+        save::from_json(&text).unwrap();
+        let mut crewed = u.habitats[0].config.clone();
+        crewed.food_dry_capacity_kg = 1e7;
+        crewed.crew = 4;
+        u.apply_edit(Edit::ConfigureHabitat {
+            system: 0,
+            id: 0,
+            config: Box::new(crewed),
+        })
+        .unwrap();
+        u.habitats[0].state.food_dry_kg = 50.;
+        let food_start = u.habitats[0].state.food_dry_kg;
+        u.advance_by(DAY);
+        assert!(
+            u.habitats[0].state.food_dry_kg < food_start,
+            "stored crop food must be drawn by the nominal crew cycle"
+        );
+        assert!((u.habitats[0].state.food_dry_kg - (food_start - 3.2)).abs() < 1e-6);
+    }
+    #[test]
+    fn recording_spanning_install_and_conversion_validates_with_optional_food_column() {
+        let mut u = plain_world(true);
+        let mut series = vec![habitat::sample(&u, 0).unwrap()];
+        assert!(series[0].habitat.state.crop.is_none());
+        u.advance_by(1.0);
+        u.apply_edit(Edit::InstallHabitatCrop {
+            system: 0,
+            id: 0,
+            config: Box::new(install_config()),
+            nutrient_kg: 3.,
+        })
+        .unwrap();
+        series.push(habitat::sample(&u, 0).unwrap());
+        assert!(series[1].habitat.state.crop.is_some());
+        assert!(!samples_csv(&series).contains("food_stored_kg"));
+        crate::habitat_crop_trajectory::validate_series(&series).unwrap();
+        let installed = u.clone();
+        u.advance_by(DAY * 30.);
+        u.apply_edit(Edit::HarvestHabitatCrop { system: 0, id: 0 })
+            .unwrap();
+        u.apply_edit(Edit::StoreHabitatCropFood {
+            system: 0,
+            id: 0,
+            requested_kg: 1.0e7,
+        })
+        .unwrap();
+        series.push(habitat::sample(&u, 0).unwrap());
+        assert!(samples_csv(&series).contains("food_stored_kg"));
+        crate::habitat_crop_trajectory::validate_series(&series).unwrap();
+        let rows = vec![habitat::sample(&installed, 0).unwrap(), series[2].clone()];
+        let root =
+            std::env::temp_dir().join(format!("cosmogon-runtime-crop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        habitat::export(&installed, &u, 0, &rows, &root).unwrap();
+        let recorded = Recording::read(&root).unwrap();
+        assert_eq!(recorded.rows, rows);
+        assert!(std::fs::read_to_string(root.join("crop.csv"))
+            .unwrap()
+            .contains("food_stored_kg"));
+        let last = rows.len() - 1;
+        let bundle = crate::habitat_balance::Bundle::ordinary(&recorded, 0, last).unwrap();
+        let report = &bundle.reports[0];
+        assert_eq!(report.stocks.len(), 26);
+        assert!(report.mass["component_sum_residual_kg"]
+            .as_f64()
+            .unwrap()
+            .abs()
+            < 1e-6);
+        let stored = report
+            .stocks
+            .iter()
+            .find(|q| q.id == "food_dry")
+            .unwrap()
+            .change;
+        let nutrients = report
+            .stocks
+            .iter()
+            .find(|q| q.id == "crop_nutrients")
+            .unwrap()
+            .change;
+        assert!(stored > 0., "{stored}");
+        assert!(nutrients < 0., "{nutrients}");
+        let span = crate::habitat_heat::span(&rows).unwrap();
+        assert_eq!(span.terms.len(), 13);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

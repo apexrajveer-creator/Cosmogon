@@ -11,7 +11,7 @@ and may renumber when a build starts.
 
 ---
 
-## Done — 51 builds
+## Done — 52 builds
 
 | # | Build | Status | Evidence |
 | --- | --- | --- | --- |
@@ -65,6 +65,8 @@ and may renumber when a build starts.
 | 48 | Authored finite surface launch | ✅ | gap 48, VEHICLE_LAUNCH.md (584 tests) |
 | 49 | Osculating orbital evidence and craft rendezvous | ✅ | gap 49, VEHICLE_ORBIT.md (596 tests) |
 | 50 | Entry heating and terminal landing limits | ✅ | gap 50, VEHICLE_ENTRY_LANDING.md (613 tests) |
+| 51 | End-to-end supply-mission closeout | ✅ | gap 51, MISSION_CLOSEOUT.md (618 tests) |
+| 52 | Physical greenhouse installation + finite habitat-stock exchange | ✅ | gap 52, PHYSICAL_GREENHOUSE.md (622 tests) |
 
 Released baselines: v0.3.0, v0.5.0, **v1.0.0** (`0411e9d`) — all preserved; tags untouched.
 
@@ -86,8 +88,8 @@ Released baselines: v0.3.0, v0.5.0, **v1.0.0** (`0411e9d`) — all preserved; ta
 
 | # | Build | Status |
 | --- | --- | --- |
-| 52 | Physical greenhouse installation + finite resource exchange with habitat stocks | ⬜ **NEXT** |
-| 53 | Physical humidity/leak/wall-condensation coupling | ⬜ |
+| 52 | ~~Physical greenhouse installation + finite resource exchange with habitat stocks~~ | ✅ **DONE** |
+| 53 | Physical humidity/leak/wall-condensation coupling | ⬜ **NEXT** |
 | 54 | Equipment calibration and maintenance model | ⬜ |
 | 55 | Finite settlement construction and logistics | ⬜ |
 | 56 | Life-support validation beyond reference assumptions (calibration/uncertainty) | ⬜ |

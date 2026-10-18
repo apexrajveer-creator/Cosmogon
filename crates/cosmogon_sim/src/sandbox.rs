@@ -109,6 +109,15 @@ pub enum Edit {
     CreateHabitat { definition: Box<crate::habitat::Definition> },
     ConfigureHabitat { system: u32, id: u64, config: Box<crate::habitat::Config> },
     HarvestHabitatCrop { system:u32,id:u64 },
+    /// Explicit runtime installation of a finite greenhouse process into an
+    /// existing cropless habitat. Grants only the declared bounded
+    /// nutrient-equivalent charge; water, captured CO2, oxygen headroom, power
+    /// and food tanks are never granted.
+    InstallHabitatCrop { system:u32,id:u64,config:Box<crate::crop_process::Config>,nutrient_kg:f64 },
+    /// Bounded explicit 1:1 conversion of held harvested edible dry material
+    /// into the habitat's finite dry-food store. Inedible material never
+    /// converts; the rejected remainder stays in the harvested store.
+    StoreHabitatCropFood { system:u32,id:u64,requested_kg:f64 },
     RemoveHabitat { system: u32, id: u64 },
     SetStar { system: u32, property: StarProperty },
     /// Choose analytic (Kepler) or N-body gravity and its settings.
@@ -120,7 +129,7 @@ pub enum Edit {
 impl Edit {
     pub fn system(&self) -> u32 {
         match self {
-            Edit::AddBody { system, .. } | Edit::SetStar { system, .. } | Edit::SetPhysics { system, .. } | Edit::Intervene { system, .. } | Edit::ConfigureHabitat {system,..} | Edit::RemoveHabitat {system,..} | Edit::HarvestHabitatCrop {system,..} | Edit::RemoveVehicle {system,..} | Edit::RemoveVehicleCargo {system,..} | Edit::TransferVehicleCargoToHabitat {system,..} => *system,
+            Edit::AddBody { system, .. } | Edit::SetStar { system, .. } | Edit::SetPhysics { system, .. } | Edit::Intervene { system, .. } | Edit::ConfigureHabitat {system,..} | Edit::RemoveHabitat {system,..} | Edit::HarvestHabitatCrop {system,..} | Edit::InstallHabitatCrop {system,..} | Edit::StoreHabitatCropFood {system,..} | Edit::RemoveVehicle {system,..} | Edit::RemoveVehicleCargo {system,..} | Edit::TransferVehicleCargoToHabitat {system,..} => *system,
             Edit::CreateHabitat {definition} => definition.body.system,
             Edit::CreateVehicle {definition} => definition.parent.system,
             Edit::RemoveBody { body } | Edit::SetState { body, .. } | Edit::Impulse { body, .. } | Edit::SetOrbit { body, .. } | Edit::SetProperty { body, .. } | Edit::SetMarsTerrain { body, .. } => body.system,
@@ -478,6 +487,22 @@ fn validate(u: &Universe, e: &Edit) -> Result<(), String> {
             h.check_config(config)?;
         }
         Edit::HarvestHabitatCrop {system,id} => {let h=u.habitats.iter().find(|h|h.id==*id && h.definition.body.system==*system).ok_or("No such habitat")?;h.state.crop.as_ref().ok_or("No installed crop")?.clone().harvest()?;}
+        Edit::InstallHabitatCrop {system,id,config,nutrient_kg} => {
+            let h=u.habitats.iter().find(|h|h.id==*id && h.definition.body.system==*system).ok_or("No such habitat")?;
+            if h.state.crop.is_some() {return Err("A greenhouse is already installed in this habitat".into());}
+            config.validate()?;
+            if !nutrient_kg.is_finite() || !(0.0..=1e7).contains(nutrient_kg) {return Err("Initial crop nutrient-equivalent must be finite and between 0 and 10000000".into());}
+            let mut candidate=h.config.clone();
+            candidate.crop=Some((**config).clone());
+            candidate.validate()?;
+            if h.state.oxygen_reserve_kg > config.oxygen_capacity_kg {return Err("New crop product capacity is below held oxygen; no gas discarded".into());}
+        }
+        Edit::StoreHabitatCropFood {system,id,requested_kg} => {
+            let h=u.habitats.iter().find(|h|h.id==*id && h.definition.body.system==*system).ok_or("No such habitat")?;
+            let mut crop=h.state.crop.as_ref().ok_or("No installed crop")?.clone();
+            let headroom=(h.config.food_dry_capacity_kg-h.state.food_dry_kg).max(0.);
+            crop.store_food(*requested_kg,headroom)?;
+        }
         Edit::RemoveHabitat {system,id} => {if !u.habitats.iter().any(|h|h.id==*id && h.definition.body.system==*system) {return Err("No such habitat".into());}}
         Edit::SetMarsTerrain { body, dataset } => {
             body_ok(body)?;
@@ -528,6 +553,8 @@ fn describe(u: &Universe, e: &Edit) -> String {
         Edit::CreateHabitat {definition} => format!("Built {} on {}",definition.name,name(&definition.body)),
         Edit::ConfigureHabitat {id,..} => format!("Configured habitat {id}"),
         Edit::HarvestHabitatCrop {id,..} => format!("Harvested completed crop in habitat {id}"),
+        Edit::InstallHabitatCrop {id,nutrient_kg,..} => format!("Installed greenhouse in habitat {id} with {nutrient_kg} kg nutrient-equivalent"),
+        Edit::StoreHabitatCropFood {id,requested_kg,..} => format!("Stored up to {requested_kg} kg harvested crop food in habitat {id}"),
         Edit::RemoveHabitat {id,..} => format!("Removed habitat {id}"),
         Edit::SetMarsTerrain { body, dataset } => format!("Set terrain of {} to {}", name(body), dataset.mola().expect("validated MOLA").label()),
         Edit::SetStar { system, property } => {
@@ -630,7 +657,7 @@ impl Universe {
             self.history.push(Event {time:t,category:Category::Space,importance:3,title:summary.clone(),detail:"Authored finite test-particle spacecraft initial conditions. No settlement loading, safe landing or cargo delivery is implied.".into(),system:Some(parent.system),body:Some(parent.body),civ:None});
             return Ok(EditOutcome {created:None,summary});
         }
-        if matches!(edit,Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::HarvestHabitatCrop {..} | Edit::RemoveHabitat {..}) {
+        if matches!(edit,Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::HarvestHabitatCrop {..} | Edit::InstallHabitatCrop {..} | Edit::StoreHabitatCropFood {..} | Edit::RemoveHabitat {..}) {
             let summary=describe(self,&edit);
             let body=match &edit {
                 Edit::CreateHabitat {definition} => {
@@ -653,6 +680,27 @@ impl Universe {
                     let body=preview.definition.body;self.habitats[i]=preview;self.habitat_events(i,t);body
                 }
                 Edit::HarvestHabitatCrop {id,..} => {let i=self.habitats.iter().position(|h|h.id==*id).expect("validated habitat");let mut preview=self.habitats[i].clone();let env=self.habitat_environment(&preview.definition,t);preview.step(t,env)?;preview.state.crop.as_mut().ok_or("No installed crop")?.harvest()?;let body=preview.definition.body;self.habitats[i]=preview;body}
+                Edit::InstallHabitatCrop {id,config,nutrient_kg,..} => {
+                    let i=self.habitats.iter().position(|h|h.id==*id).expect("validated habitat");
+                    let mut preview=self.habitats[i].clone();
+                    let env=self.habitat_environment(&preview.definition,t);
+                    preview.step(t,env)?;
+                    preview.config.crop=Some((**config).clone());
+                    preview.state.crop=Some(crate::crop_process::State::new(config,*nutrient_kg,t)?);
+                    if let Some(l)=&mut preview.heat {l.crop_storage_debits_j.get_or_insert([0.;2]);}
+                    preview.check_config(&preview.config.clone())?;
+                    let body=preview.definition.body;self.habitats[i]=preview;body
+                }
+                Edit::StoreHabitatCropFood {id,requested_kg,..} => {
+                    let i=self.habitats.iter().position(|h|h.id==*id).expect("validated habitat");
+                    let mut preview=self.habitats[i].clone();
+                    let env=self.habitat_environment(&preview.definition,t);
+                    preview.step(t,env)?;
+                    let headroom=(preview.config.food_dry_capacity_kg-preview.state.food_dry_kg).max(0.);
+                    let take=preview.state.crop.as_mut().ok_or("No installed crop")?.store_food(*requested_kg,headroom)?;
+                    preview.state.food_dry_kg+=take;
+                    let body=preview.definition.body;self.habitats[i]=preview;body
+                }
                 Edit::RemoveHabitat {id,..} => {let i=self.habitats.iter().position(|h|h.id==*id).expect("validated habitat");self.habitats.remove(i).definition.body}
                 _=>unreachable!(),
             };
@@ -856,7 +904,7 @@ impl Universe {
                     sys.deactivate_dynamics(t)?;
                 }
             }
-            Edit::CreateVehicle {..} | Edit::RemoveVehicle {..} | Edit::RemoveVehicleCargo {..} | Edit::TransferVehicleCargoToHabitat {..} | Edit::Intervene { .. } | Edit::SetMarsTerrain { .. } | Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::HarvestHabitatCrop {..} | Edit::RemoveHabitat {..} => unreachable!("handled above"),
+            Edit::CreateVehicle {..} | Edit::RemoveVehicle {..} | Edit::RemoveVehicleCargo {..} | Edit::TransferVehicleCargoToHabitat {..} | Edit::Intervene { .. } | Edit::SetMarsTerrain { .. } | Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::HarvestHabitatCrop {..} | Edit::InstallHabitatCrop {..} | Edit::StoreHabitatCropFood {..} | Edit::RemoveHabitat {..} => unreachable!("handled above"),
         }
 
         let sys = &mut self.systems[s];

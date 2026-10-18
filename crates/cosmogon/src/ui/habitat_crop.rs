@@ -2,7 +2,19 @@
 use super::{habitat::number, ACCENT, MUTED};
 use bevy_egui::egui;
 use cosmogon_sim::{crop_process, habitat::Habitat};
-pub fn readings(ui: &mut egui::Ui, h: &Habitat, can_edit: bool) -> bool {
+pub enum Action {
+    Harvest,
+    Store { requested_kg: f64 },
+    Install { config: Box<crop_process::Config>, nutrient_kg: f64 },
+}
+pub fn readings(
+    ui: &mut egui::Ui,
+    h: &Habitat,
+    can_edit: bool,
+    staged_crop: &mut Option<crop_process::Config>,
+    staged_nutrient: &mut f64,
+    store_kg: &mut f64,
+) -> Option<Action> {
     ui.strong("Finite installed crop cycle");
     ui.label(
         egui::RichText::new(
@@ -12,11 +24,48 @@ pub fn readings(ui: &mut egui::Ui, h: &Habitat, can_edit: bool) -> bool {
         .color(ACCENT),
     );
     let Some(s) = &h.state.crop else {
-        ui.label("No crop was installed in this habitat's original setup. Build or import a new explicit crop experiment.");
-        return false;
+        ui.label("No crop is installed in this habitat. Install one explicitly; the installation grants only its declared nutrient charge and no other stock.");
+        if can_edit {
+            if staged_crop.is_none() {
+                *staged_crop = Some(crop_process::definition_at(
+                    h.definition.body,
+                    h.definition.latitude_deg,
+                    h.definition.longitude_east_deg,
+                )
+                .config
+                .crop
+                .expect("explicit new crop setup"));
+            }
+            number(ui, "Installation nutrient charge (kg)", staged_nutrient, 0., 1e7);
+            let install = ui
+                .horizontal_wrapped(|ui| {
+                    let ready = staged_crop.is_some()
+                        && staged_nutrient.is_finite()
+                        && (0.0..=1.0e7).contains(staged_nutrient);
+                    let clicked = ui
+                        .add_enabled(ready, egui::Button::new("Install greenhouse"))
+                        .clicked();
+                    ui.label(
+                        egui::RichText::new("Grants only the staged nutrient charge; source pin and chamber assumptions come from the staged crop setup.")
+                            .small()
+                            .color(MUTED),
+                    );
+                    clicked
+                })
+                .inner;
+            if install {
+                if let Some(config) = staged_crop.clone() {
+                    return Some(Action::Install {
+                        config: Box::new(config),
+                        nutrient_kg: *staged_nutrient,
+                    });
+                }
+            }
+        }
+        return None;
     };
     if h.config.crop.is_none() {
-        ui.label("Disabled. All material, source and history remain stored.");
+        ui.label("Runtime installation. Live configuration edits apply through Apply configuration; disabling is refused because material and history remain in use.");
     }
     let harvest = ui
         .horizontal_wrapped(|ui| {
@@ -28,6 +77,26 @@ pub fn readings(ui: &mut egui::Ui, h: &Habitat, can_edit: bool) -> bool {
                 .clicked();
             ui.label(
                 egui::RichText::new("Separate dry stores; no diet credit or new cycle.")
+                    .small()
+                    .color(MUTED),
+            );
+            clicked
+        })
+        .inner;
+    let store = ui
+        .horizontal_wrapped(|ui| {
+            if *store_kg > s.harvested_dry_kg[0] {
+                *store_kg = s.harvested_dry_kg[0];
+            }
+            number(ui, "Store amount (kg)", store_kg, 0., 1e7);
+            let clicked = ui
+                .add_enabled(
+                    can_edit && s.harvested && s.harvested_dry_kg[0] > 0.,
+                    egui::Button::new("Store edible food"),
+                )
+                .clicked();
+            ui.label(
+                egui::RichText::new("Bounded 1:1 conversion of held harvested edible dry material into the cabin dry-food tank; the crew diet draws from that tank.")
                     .small()
                     .color(MUTED),
             );
@@ -68,6 +137,10 @@ pub fn readings(ui: &mut egui::Ui, h: &Habitat, can_edit: bool) -> bool {
                         "{:.6} / {:.6} kg",
                         s.harvested_dry_kg[0], s.harvested_dry_kg[1]
                     ),
+                ),
+                (
+                    "Cabin dry-food tank",
+                    format!("{:.6} kg", h.state.food_dry_kg),
                 ),
                 (
                     "Captured CO₂ / potable water",
@@ -123,57 +196,77 @@ pub fn readings(ui: &mut egui::Ui, h: &Habitat, can_edit: bool) -> bool {
         ));
         ui.collapsing("Material and heat evidence",|ui| {ui.label(format!("Chemical / vapor storage {:.6} / {:.6} J",b.chemical_storage_j,b.vapor_phase_j));ui.label(format!("Mass residual {:.3e} kg · C/H/O/N residuals {:?} kg",b.mass_residual_kg,b.element_residual_kg));ui.label("Actual electricity enters the cabin bus; retained chemical and vapor energy are subtracted from sensible heat. WHY and recorded Cabin balances retain this accounting.");});
     }
-    ui.label(egui::RichText::new("Progress can pause without a survival prediction. Harvest transfers dry material into separate stores; it does not feed the nominal crew diet or restart a cycle.").small().color(MUTED));
-    harvest
+    ui.label(egui::RichText::new("Progress can pause without a survival prediction. Harvest keeps dry material in separate stores; storing converts held harvested edible dry material 1:1 into the finite cabin dry-food tank that feeds the nominal crew diet, and never restarts a cycle.").small().color(MUTED));
+    if harvest {
+        Some(Action::Harvest)
+    } else if store {
+        Some(Action::Store {
+            requested_kg: *store_kg,
+        })
+    } else {
+        None
+    }
+}
+fn fields(ui: &mut egui::Ui, c: &mut crop_process::Config) {
+    ui.checkbox(
+        &mut c.assume_maintained_conditions,
+        "Assume source growing conditions are maintained",
+    );
+    ui.label("Ideal chamber boundary: source 23°C, humidity, pressure and CO₂ regime. This is your assumption; cabin temperature/RH do not prove chamber control.");
+    number(ui, "Auxiliary power (W)", &mut c.auxiliary_power_w, 0., 1e7);
+    number(
+        ui,
+        "Dry storage capacity (kg)",
+        &mut c.biomass_capacity_kg,
+        0.,
+        1e7,
+    );
+    number(
+        ui,
+        "Shared O₂ reserve capacity (kg)",
+        &mut c.oxygen_capacity_kg,
+        0.,
+        1e7,
+    );
+    ui.label(format!(
+        "Pinned source: {:.3} m² · light {:.2} W · dry chemical basis {:.3} MJ/kg",
+        c.crop.area_m2,
+        c.light_power_w(),
+        c.dry_chemical_energy_j_kg / 1e6
+    ));
+    ui.label("Changing the crop source or chemical basis requires a new setup or installation.");
 }
 pub fn controls(
     ui: &mut egui::Ui,
     c: &mut Option<crop_process::Config>,
     original: Option<&crop_process::Config>,
+    runtime_installed: bool,
 ) {
-    let Some(original) = original else {
-        ui.label("This habitat has no originally installed crop. Use New crop setup; toggling cannot grant stock or a source cycle.");
+    if original.is_none() {
+        if runtime_installed {
+            ui.label("Runtime-installed greenhouse. Live configuration edits apply through Apply configuration; disabling is refused because material and history remain in use.");
+            if let Some(c) = c {
+                fields(ui, c);
+            }
+        } else {
+            ui.label("This habitat has no installed crop. Use the Crop pane install control; toggling cannot grant stock or a source cycle.");
+        }
         return;
-    };
+    }
     let mut enabled = c.is_some();
     if ui
         .checkbox(&mut enabled, "Enable installed crop process")
         .changed()
     {
         if enabled {
-            *c = Some(original.clone());
+            *c = original.cloned();
         } else {
             *c = None;
         }
     }
     if let Some(c) = c {
-        ui.checkbox(
-            &mut c.assume_maintained_conditions,
-            "Assume source growing conditions are maintained",
-        );
-        ui.label("Ideal chamber boundary: source 23°C, humidity, pressure and CO₂ regime. This is your assumption; cabin temperature/RH do not prove chamber control.");
-        number(ui, "Auxiliary power (W)", &mut c.auxiliary_power_w, 0., 1e7);
-        number(
-            ui,
-            "Dry storage capacity (kg)",
-            &mut c.biomass_capacity_kg,
-            0.,
-            1e7,
-        );
-        number(
-            ui,
-            "Shared O₂ reserve capacity (kg)",
-            &mut c.oxygen_capacity_kg,
-            0.,
-            1e7,
-        );
-        ui.label(format!(
-            "Pinned source: {:.3} m² · light {:.2} W · dry chemical basis {:.3} MJ/kg",
-            c.crop.area_m2,
-            c.light_power_w(),
-            c.dry_chemical_energy_j_kg / 1e6
-        ));
-        ui.label("Changing the original crop source or chemical basis requires a new setup. Disabling retains stores/history.");
+        fields(ui, c);
+        ui.label("Disabling retains stores/history; the process stays recorded and cannot restart without a new cycle.");
     }
 }
 pub fn model(ui: &mut egui::Ui) {

@@ -603,7 +603,17 @@ impl Habitat {
             "Cabin model temperature",
         )?;
         let s = &self.state;
-        if let Some(crop)=&s.crop {crop.validate(self.last_time)?;let original=self.definition.config.crop.as_ref().ok_or("Crop state lacks original explicit installation")?;if original.crop!=crop.source_crop || original.dry_chemical_energy_j_kg!=crop.dry_chemical_energy_j_kg || self.definition.initial.crop_nutrient_equivalent_kg!=crop.initial_nutrient_equivalent_kg{return Err("Installed crop source/initial stock differs from original setup".into());}}
+        if let Some(crop)=&s.crop {
+            crop.validate(self.last_time)?;
+            if let Some(original)=self.definition.config.crop.as_ref() {
+                if original.crop!=crop.source_crop || original.dry_chemical_energy_j_kg!=crop.dry_chemical_energy_j_kg || self.definition.initial.crop_nutrient_equivalent_kg!=crop.initial_nutrient_equivalent_kg{return Err("Installed crop source/initial stock differs from original setup".into());}
+            } else {
+                if let Some(live)=self.config.crop.as_ref() {
+                    if live.crop!=crop.source_crop || live.dry_chemical_energy_j_kg!=crop.dry_chemical_energy_j_kg{return Err("Runtime-installed crop differs from its retained configuration".into());}
+                }
+                bounds(crop.initial_nutrient_equivalent_kg,0.,1e7,"Runtime crop initial nutrient-equivalent")?;
+            }
+        }
         if let Some(l)=&self.heat {
             match (&s.crop,l.crop_storage_debits_j) {
                 (Some(c),Some(v)) => {for (actual,wanted) in v.into_iter().zip([-c.chemical_energy_j(),-c.vapor_generated_kg*crate::moisture::REFERENCE_PHASE_J_KG]) {if (actual-wanted).abs()>1e-8*wanted.abs().max(1.) {return Err("Crop heat counters disagree with actual cumulative storage".into());}}}
@@ -655,7 +665,8 @@ impl Habitat {
         }
         if let Some(g)=s.escaped_gas {
             g.validate()?;
-            let original=Self::new(self.id,self.definition.clone(),self.last_time)?.state.mass_kg();
+            let mut original=Self::new(self.id,self.definition.clone(),self.last_time)?.state.mass_kg();
+            if self.definition.config.crop.is_none() {if let Some(c)=&s.crop {original+=c.initial_nutrient_equivalent_kg;}}
             if (s.accounted_mass_kg()-original).abs()>1e-8*original.max(1.0) {return Err("Accounted cabin + escaped mass disagrees with original finite inventory".into());}
         }
         let t = &self.totals;
@@ -785,7 +796,7 @@ impl Habitat {
     }
     pub fn check_config(&self, c: &Config) -> Result<(), String> {
         c.validate()?;
-        if let Some(crop)=&c.crop {self.state.crop.as_ref().ok_or("Install crops through a new explicit habitat definition; toggling does not grant initial nutrients")?.check_config(crop)?;if self.state.oxygen_reserve_kg>crop.oxygen_capacity_kg{return Err("New crop product capacity is below held oxygen; no gas discarded".into());}}
+        if let Some(crop)=&c.crop {self.state.crop.as_ref().ok_or("Install crops through the greenhouse installation edit; configuration does not grant initial nutrients")?.check_config(crop)?;if self.state.oxygen_reserve_kg>crop.oxygen_capacity_kg{return Err("New crop product capacity is below held oxygen; no gas discarded".into());}} else if self.state.crop.is_some() && self.definition.config.crop.is_none() {return Err("A runtime-installed greenhouse cannot be disabled; its operational configuration stays with the installation".into());}
         if c.battery_capacity_j < self.state.battery_j {
             return Err(
                 "New battery capacity is below stored energy; no energy was discarded".into(),
