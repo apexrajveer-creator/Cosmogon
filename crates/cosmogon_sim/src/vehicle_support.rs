@@ -399,9 +399,7 @@ fn hold(
         .as_ref()
         .ok_or("No contact hardware")?;
     let rigid = flight.contact.as_ref().ok_or("No contact state")?;
-    let mass = flight
-        .propulsion
-        .mass_kg(&flight.definition.plan.definition);
+    let mass = flight.mass_kg();
     let (command, _) =
         crate::world_vehicle::active_command(&flight.definition.plan, flight.propulsion.elapsed_s);
     let thrust = if flight.propulsion.propellant_kg > 0. {

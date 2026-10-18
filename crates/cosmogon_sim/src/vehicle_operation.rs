@@ -188,8 +188,16 @@ pub fn observe(world: &Universe, flight: &mut Flight, d: &Definition) -> Result<
         Some(mut ledger) => {
             ledger.validate()?;
             // Both clocks are validated finite above, so `<=` is exact here.
-            if t <= ledger.last_sample_time_s {
-                return Err("Operation samples require a strictly increasing craft clock".into());
+            if t < ledger.last_sample_time_s {
+                return Err("Operation samples require a craft clock that never runs backwards".into());
+            }
+            if t == ledger.last_sample_time_s {
+                // At real-world epochs the f64 craft-clock ulp (hundreds of
+                // nanoseconds) exceeds task-tail substep fragments: an equal
+                // clock is the same representable instant, so there is nothing
+                // new to sample. Only a backwards clock is a defect.
+                flight.operation_ledger = Some(ledger);
+                return Ok(());
             }
             let gap = t - ledger.last_sample_time_s;
             let mut previous_supported = ledger.last_sample_supported;
@@ -411,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn same_clock_is_refused_and_definition_mismatch_is_refused() {
+    fn same_clock_is_skipped_backwards_clock_and_mismatch_are_refused() {
         let op = operation_definition();
         let (mut world, d) = setup(&op, 1.6, 0.1);
         world.apply_edit(Edit::CreateVehicle {
@@ -422,12 +430,49 @@ mod tests {
         let flight = &world.vehicles[0];
         assert!(flight.operation_ledger.is_some());
         let mut cloned = flight.clone();
+        // Task-tail fragments can collapse to the same representable craft
+        // instant; that sample is skipped without touching the ledger.
+        let ledger_before = cloned.operation_ledger.clone();
+        observe(&world, &mut cloned, &op).unwrap();
+        assert_eq!(cloned.operation_ledger, ledger_before);
+        // A backwards craft clock remains a hard refusal.
+        cloned.last_time_s -= 1e-3;
         assert!(observe(&world, &mut cloned, &op).is_err());
         let mut other = op.clone();
         other.required_window_s = 1.;
         assert!(observe(&world, &mut cloned, &other).is_err());
         cloned.definition.contact.as_mut().unwrap().operation = None;
         assert!(observe(&world, &mut cloned, &op).is_err());
+    }
+
+    #[test]
+    fn task_tail_fragments_with_non_dyadic_commands_keep_the_craft_flying() {
+        let op = operation_definition();
+        let (mut world, mut d) = setup(&op, 1.6, 0.1);
+        d.plan.commands = vec![
+            Command {
+                duration_s: 10.1,
+                throttle: 0.,
+                direction: [1., 0., 0.],
+            },
+            Command {
+                duration_s: 60.,
+                throttle: 0.,
+                direction: [1., 0., 0.],
+            },
+        ];
+        world.apply_edit(Edit::CreateVehicle {
+            definition: Box::new(d),
+        })
+        .unwrap();
+        world.advance_to(world.time + 12., None, None);
+        let flight = &world.vehicles[0];
+        assert!(
+            matches!(flight.phase, crate::world_vehicle::Phase::Flying),
+            "non-dyadic command tails must not strand the craft: {:?}",
+            flight.phase
+        );
+        assert!(flight.operation_ledger.is_some());
     }
 
     #[test]

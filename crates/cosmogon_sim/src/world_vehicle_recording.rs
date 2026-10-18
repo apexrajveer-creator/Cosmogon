@@ -13,6 +13,11 @@ use std::{io::Write, path::Path};
 
 pub const FORMAT: &str = "cosmogon-world-vehicle-study";
 const MAX_BYTES: u64 = 32 * 1024 * 1024;
+/// Mission-span studies get a larger recording budget: a launch→orbit→entry→
+/// landing closeout keeps one retained sample per second across the whole
+/// mission, and the row estimate includes conservative numeric reserves on top
+/// of the runtime craft state (contact, ledgers, sources).
+const MISSION_MAX_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -28,6 +33,13 @@ pub struct Study {
     /// studies stay byte-exact.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transfers: Vec<AuthoredTransfer>,
+    /// Admits the raised nominal work bounds so one authored end-to-end
+    /// mission span (launch through delivery) can run as a single study, and
+    /// retains the consolidated `manifest["mission"]` phase evidence.
+    /// Admission only: no physics, sampling or determinism change. Absent
+    /// (false) for every legacy study; serialization stays byte-exact.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mission_span: bool,
 }
 
 /// One authored transfer request applied at an exact sample boundary.
@@ -55,6 +67,28 @@ impl Study {
             samples,
             interval_s,
             transfers: vec![],
+            mission_span: false,
+        };
+        study.validate(initial)?;
+        Ok(study)
+    }
+    /// Builds a mission-span study in one validation pass so the raised
+    /// admission bounds apply to the authored end-to-end mission span.
+    pub fn new_mission(
+        initial: &Universe,
+        flight: Definition,
+        samples: usize,
+        interval_s: f64,
+    ) -> Result<Self, String> {
+        let study = Self {
+            format: FORMAT.into(),
+            schema_version: 1,
+            initial_state_fingerprint: research::state_fingerprint(initial)?,
+            flight,
+            samples,
+            interval_s,
+            transfers: vec![],
+            mission_span: true,
         };
         study.validate(initial)?;
         Ok(study)
@@ -80,8 +114,13 @@ impl Study {
         let work_per_second = initial.vehicles.iter().filter(|v| v.phase==Phase::Flying)
             .map(|v| if v.contact.is_some() {3.*crate::vehicle_contact_dynamics::MAX_STEPS_PER_SECOND as f64} else {4.}).sum::<f64>()
             + if self.flight.contact.is_some() {3.*crate::vehicle_contact_dynamics::MAX_STEPS_PER_SECOND as f64} else {4.};
-        if duration > 86400. || duration * work_per_second > 2_000_000. {
-            return Err("World flight study exceeds one day or two million nominal fleet substeps; shorten the span".into());
+        let fleet_cap = if self.mission_span {300_000_000.} else {2_000_000.};
+        if duration > 86400. || duration * work_per_second > fleet_cap {
+            return Err(if self.mission_span {
+                "World flight mission study exceeds one day or three hundred million nominal fleet substeps; shorten the span".into()
+            } else {
+                "World flight study exceeds one day or two million nominal fleet substeps; shorten the span or author an explicit mission span".into()
+            });
         }
         let mut previous = initial.time;
         for i in 1..self.samples {
@@ -125,23 +164,43 @@ impl Study {
             .filter(|b| b.exists())
             .count()
             + 2;
-        if duration * work_per_second * sources as f64 > 20_000_000. {
-            return Err("World flight study exceeds twenty million nominal gravity-source visits; shorten the span or active fleet".into());
+        let visits_cap = if self.mission_span {3_000_000_000.} else {20_000_000.};
+        if duration * work_per_second * sources as f64 > visits_cap {
+            return Err(if self.mission_span {
+                "World flight mission study exceeds three billion nominal gravity-source visits; shorten the span or active fleet".into()
+            } else {
+                "World flight study exceeds twenty million nominal gravity-source visits; shorten the span or active fleet".into()
+            });
         }
         let candidate = preview
             .vehicles
             .last()
             .ok_or("Missing validated flight preview")?;
-        let initial_row_bytes = serde_json::to_vec_pretty(candidate)
-            .map_err(|e| e.to_string())?
-            .len();
+        // Estimate the row bytes the export will actually write: mission
+        // recordings serialize observations compactly; legacy stays pretty.
+        let initial_row_bytes = if self.mission_span {
+            serde_json::to_vec(candidate)
+        } else {
+            serde_json::to_vec_pretty(candidate)
+        }
+        .map_err(|e| e.to_string())?
+        .len();
         // Immutable plan bytes are already included. Reserve numeric expansion,
         // gravity-sample values and terminal evidence before allocating all rows.
         let estimated_row_bytes = initial_row_bytes
             .saturating_add(2048)
             .saturating_add(sources.saturating_mul(128));
-        if estimated_row_bytes.saturating_mul(self.samples) > MAX_BYTES as usize {
-            return Err("Flight observation payload exceeds the bounded recording size; reduce samples or plan/source complexity".into());
+        let max_bytes: usize = if self.mission_span {
+            MISSION_MAX_BYTES as usize
+        } else {
+            MAX_BYTES as usize
+        };
+        if estimated_row_bytes.saturating_mul(self.samples) > max_bytes {
+            return Err(if self.mission_span {
+                "Mission flight observation payload exceeds the bounded mission recording size; reduce mission samples or plan/source complexity".into()
+            } else {
+                "Flight observation payload exceeds the bounded recording size; reduce samples or plan/source complexity".into()
+            });
         }
         Ok(())
     }
@@ -150,11 +209,16 @@ impl Study {
         let files=[("definition.json",serde_json::to_vec_pretty(self).map_err(|e|e.to_string())?),
             ("origin.cosmo",recorded_save(initial,"Flight setup origin")?),
             ("manifest.json",serde_json::to_vec_pretty(&json!({"format":"cosmogon-world-flight-setup","schema_version":1,"complete":true,"study":self,"initial_state_fingerprint":research::state_fingerprint(initial)?,"data_versions":save::data_versions(initial),"source_context":context_for(&self.flight),"files":["definition.json","origin.cosmo"]})).map_err(|e|e.to_string())?)];
+        let max_file_bytes = if self.mission_span { MISSION_MAX_BYTES } else { MAX_BYTES };
         if files
             .iter()
-            .any(|(_, bytes)| bytes.len() as u64 > MAX_BYTES)
+            .any(|(_, bytes)| bytes.len() as u64 > max_file_bytes)
         {
-            return Err("Flight setup exceeds bounded file size".into());
+            return Err(if self.mission_span {
+                "Flight setup exceeds bounded mission file size".into()
+            } else {
+                "Flight setup exceeds bounded file size".into()
+            });
         }
         if path.exists() {
             return Err("Existing flight setup is protected; choose a new folder".into());
@@ -237,7 +301,7 @@ impl Bundle {
                 .find(|v| v.id == id)
                 .ok_or("Studied craft disappeared from its actual branch")?
                 .clone();
-            if study.flight.contact.is_none() {
+            if study.flight.contact.is_none() || study.mission_span {
                 orbital_samples.push(crate::vehicle_orbit::OrbitSample {
                     world_time_s: world.time,
                     elements: crate::vehicle_orbit::observe(&world, &flight)?,
@@ -313,6 +377,10 @@ impl Bundle {
                 "scope":crate::vehicle_transfer::SCOPE});
             manifest["files"].as_array_mut().unwrap().push(json!("transfers.csv"));
         }
+        if study.mission_span {
+            manifest["mission"] = mission_block(&study, &rows, &orbital_samples, &world)?;
+            manifest["files"].as_array_mut().unwrap().push(json!("mission"));
+        }
         let orbital = (!orbital_samples.is_empty()).then_some(orbital_samples);
         if let Some(samples) = &orbital {
             manifest["files"]
@@ -351,7 +419,14 @@ impl Bundle {
             ),
             (
                 "observations.json",
-                serde_json::to_vec_pretty(&self.rows).map_err(|e| e.to_string())?,
+                if self.study.mission_span {
+                    // Mission spans keep one sample per second across the whole
+                    // closeout; compact rows stay inside the doubled mission file
+                    // budget without changing any evidence values.
+                    serde_json::to_vec(&self.rows).map_err(|e| e.to_string())?
+                } else {
+                    serde_json::to_vec_pretty(&self.rows).map_err(|e| e.to_string())?
+                },
             ),
             ("trajectories.csv", trajectory_csv(&self.rows).into_bytes()),
             (
@@ -380,11 +455,16 @@ impl Bundle {
             let index=files.len()-1;
             files.insert(index,("orbital.csv",crate::vehicle_orbit::csv(samples).into_bytes()));
         }
+        let max_file_bytes = if self.study.mission_span { MISSION_MAX_BYTES } else { MAX_BYTES };
         if files
             .iter()
-            .any(|(_, bytes)| bytes.len() as u64 > MAX_BYTES)
+            .any(|(_, bytes)| bytes.len() as u64 > max_file_bytes)
         {
-            return Err("Flight export exceeds the bounded 32 MiB per-file size".into());
+            return Err(if self.study.mission_span {
+                "Mission flight export exceeds the bounded mission recording file size".into()
+            } else {
+                "Flight export exceeds the bounded 32 MiB per-file size".into()
+            });
         }
         if path.exists() {
             return Err("Existing flight recordings are protected; choose a new folder".into());
@@ -411,9 +491,10 @@ impl Bundle {
             return Err("World flight recording is incomplete or unsupported".into());
         }
         let study = Study::read(&path.join("definition.json"))?;
+        let max_file_bytes = if study.mission_span { MISSION_MAX_BYTES } else { MAX_BYTES };
         let origin = save::from_json(&crate::habitat_recording::read(
             &path.join("origin.cosmo"),
-            MAX_BYTES,
+            max_file_bytes,
         )?)
         .map_err(|e| e.to_string())?;
         let replay = Self::run(&origin, study.clone())?;
@@ -422,7 +503,7 @@ impl Bundle {
         }
         let rows: Vec<Observation> = serde_json::from_str(&crate::habitat_recording::read(
             &path.join("observations.json"),
-            MAX_BYTES,
+            max_file_bytes,
         )?)
         .map_err(|e| e.to_string())?;
         if !same_json(&rows, &replay.rows)? {
@@ -430,23 +511,23 @@ impl Bundle {
                 "Stored flight observations differ from an exact independent world replay".into(),
             );
         }
-        if crate::habitat_recording::read(&path.join("trajectories.csv"), MAX_BYTES)?
+        if crate::habitat_recording::read(&path.join("trajectories.csv"), max_file_bytes)?
             != trajectory_csv(&replay.rows)
         {
             return Err("Stored flight CSV differs from its exact numerical observations".into());
         }
-        if study.flight.contact.is_some() && crate::habitat_recording::read(&path.join("contact.csv"),MAX_BYTES)?!=contact_csv(&replay.rows) {
+        if study.flight.contact.is_some() && crate::habitat_recording::read(&path.join("contact.csv"),max_file_bytes)?!=contact_csv(&replay.rows) {
             return Err("Stored contact CSV differs from exact actual foot/work observations".into());
         }
-        if study.flight.contact.as_ref().is_some_and(|h|h.shear.is_some()) && crate::habitat_recording::read(&path.join("shear.csv"),MAX_BYTES)?!=shear_csv(&replay.rows)? {
+        if study.flight.contact.as_ref().is_some_and(|h|h.shear.is_some()) && crate::habitat_recording::read(&path.join("shear.csv"),max_file_bytes)?!=shear_csv(&replay.rows)? {
             return Err("Stored shear CSV differs from exact persistent foot/work observations".into());
         }
-        if study.flight.contact.as_ref().is_some_and(|h|h.operation.is_some()) && crate::habitat_recording::read(&path.join("operation.csv"),MAX_BYTES)?!=operation_csv(&replay.rows)? {
+        if study.flight.contact.as_ref().is_some_and(|h|h.operation.is_some()) && crate::habitat_recording::read(&path.join("operation.csv"),max_file_bytes)?!=operation_csv(&replay.rows)? {
             return Err("Stored operation CSV differs from exact operation-window observations".into());
         }
         match &replay.orbital {
             Some(samples) => {
-                if crate::habitat_recording::read(&path.join("orbital.csv"), MAX_BYTES)?
+                if crate::habitat_recording::read(&path.join("orbital.csv"), max_file_bytes)?
                     != crate::vehicle_orbit::csv(samples)
                 {
                     return Err(
@@ -461,7 +542,7 @@ impl Bundle {
         }
         let final_world = save::from_json(&crate::habitat_recording::read(
             &path.join("final.cosmo"),
-            MAX_BYTES,
+            max_file_bytes,
         )?)
         .map_err(|e| e.to_string())?;
         if !same_json(&final_world, &replay.final_world)? {
@@ -514,6 +595,7 @@ pub fn trajectory_csv(rows: &[Observation]) -> String {
         let f = &row.flight;
         let p = &f.propulsion;
         let d = &f.definition.plan.definition;
+        let held = f.cargo.as_ref().map(|c| &c.held);
         let mut fields = vec![
             index.to_string(),
             row.world_time_s.to_string(),
@@ -531,7 +613,7 @@ pub fn trajectory_csv(rows: &[Observation]) -> String {
                 f.velocity_m_s.x,
                 f.velocity_m_s.y,
                 f.velocity_m_s.z,
-                p.mass_kg(d),
+                f.mass_kg(),
                 p.propellant_kg,
                 p.exhausted_propellant_kg,
                 p.cumulative_impulse_n_s,
@@ -541,10 +623,10 @@ pub fn trajectory_csv(rows: &[Observation]) -> String {
                 p.velocity_change_m_s[2],
                 p.powered_duration_s,
                 p.fuel_limited_duration_s,
-                d.cargo.oxygen_reserve_kg,
-                d.cargo.potable_water_kg,
-                d.cargo.food_dry_kg,
-                d.cargo.food_water_kg,
+                held.map_or(d.cargo.oxygen_reserve_kg, |c| c.oxygen_reserve_kg),
+                held.map_or(d.cargo.potable_water_kg, |c| c.potable_water_kg),
+                held.map_or(d.cargo.food_dry_kg, |c| c.food_dry_kg),
+                held.map_or(d.cargo.food_water_kg, |c| c.food_water_kg),
                 d.initial_propellant_kg - p.propellant_kg - p.exhausted_propellant_kg,
             ]
             .map(|v| v.to_string()),
@@ -671,6 +753,144 @@ pub fn operation_csv(rows: &[Observation]) -> Result<String, String> {
         output.push_str(&values.join(","));output.push('\n');
     }
     Ok(output)
+}
+pub const MISSION_MODEL: &str = "cosmogon-world-vehicle-mission/1";
+pub const MISSION_SCOPE: &str =
+    "Consolidated authored phase evidence for one scripted mission span: launch, orbit insertion, entry, touchdown, supported hold and atomic delivery; not guidance, navigation or mission feasibility";
+
+/// Consolidated phase evidence for a mission-span study, derived only from
+/// the retained final ledgers, applied transfers, habitat receipts and the
+/// per-observation orbital samples. Every value replays exactly.
+fn mission_block(
+    study: &Study,
+    rows: &[Observation],
+    orbital_samples: &[crate::vehicle_orbit::OrbitSample],
+    world: &Universe,
+) -> Result<Value, String> {
+    let last = rows.last().ok_or("Mission study retains no observations")?;
+    let launch = last.flight.launch_ledger.as_ref();
+    let entry = last.flight.entry_ledger.as_ref();
+    let landing = last.flight.landing_ledger.as_ref();
+    let operation = study.flight.contact.as_ref().and_then(|h| h.operation.as_ref());
+    let window = last.flight.operation_ledger.as_ref();
+    let orbit = crate::vehicle_orbit::summary(study.flight.parent, orbital_samples)?;
+    let liftoff = launch.and_then(|l| l.liftoff_elapsed_s);
+    let launch_phase = match (&study.flight.launch, launch) {
+        (Some(limits), Some(ledger)) => {
+            let peak = ledger.peak_acceleration_m_s2;
+            json!({"required":true,"liftoff":liftoff.is_some(),"liftoff_elapsed_s":liftoff,"burnout_elapsed_s":ledger.burnout_elapsed_s,"apogee_altitude_m":ledger.apogee_altitude_m,"peak_acceleration_m_s2":peak,"within_limits":peak <= limits.maximum_acceleration_m_s2})
+        }
+        (Some(_), None) => json!({"required":true,"liftoff":false,"within_limits":false}),
+        (None, _) => json!({"required":false}),
+    };
+    let entry_phase = match (&study.flight.entry, entry) {
+        (Some(limits), Some(ledger)) => {
+            let within = ledger.peak_heat_flux_w_m2 <= limits.maximum_heat_flux_w_m2
+                && ledger.total_heat_j_m2 <= limits.maximum_total_heat_j_m2;
+            json!({"required":true,"interface_crossed":ledger.interface_elapsed_s.is_some(),"interface_elapsed_s":ledger.interface_elapsed_s,"peak_heat_flux_w_m2":ledger.peak_heat_flux_w_m2,"total_heat_j_m2":ledger.total_heat_j_m2,"within_limits":within})
+        }
+        (Some(_), None) => json!({"required":true,"interface_crossed":false,"within_limits":false}),
+        (None, _) => json!({"required":false}),
+    };
+    let touchdown_within = match (&study.flight.landing, landing) {
+        (Some(limits), Some(ledger)) => {
+            let within = matches!(
+                (ledger.touchdown_vertical_speed_m_s, ledger.touchdown_horizontal_speed_m_s),
+                (Some(v), Some(h)) if v <= limits.maximum_touchdown_vertical_speed_m_s
+                    && h <= limits.maximum_touchdown_horizontal_speed_m_s
+            );
+            json!({"required":true,"touchdown":ledger.touchdown_elapsed_s.is_some(),"touchdown_elapsed_s":ledger.touchdown_elapsed_s,"vertical_speed_m_s":ledger.touchdown_vertical_speed_m_s,"horizontal_speed_m_s":ledger.touchdown_horizontal_speed_m_s,"within_limits":within})
+        }
+        (Some(_), None) => json!({"required":true,"touchdown":false,"within_limits":false}),
+        (None, _) => json!({"required":false}),
+    };
+    let window_ok = match (operation, window) {
+        (Some(operation), Some(window)) => window.current_window_s >= operation.required_window_s,
+        _ => false,
+    };
+    let mut delivered = supply_vehicle::Cargo {
+        oxygen_reserve_kg: 0.,
+        potable_water_kg: 0.,
+        food_dry_kg: 0.,
+        food_water_kg: 0.,
+    };
+    for transfer in &last.flight.transfers {
+        delivered.oxygen_reserve_kg += transfer.accepted.oxygen_reserve_kg;
+        delivered.potable_water_kg += transfer.accepted.potable_water_kg;
+        delivered.food_dry_kg += transfer.accepted.food_dry_kg;
+        delivered.food_water_kg += transfer.accepted.food_water_kg;
+    }
+    let delivered_positive = delivered.mass_kg() > 0.;
+    let receipts: u64 = world
+        .habitats
+        .iter()
+        .filter(|h| last.flight.transfers.iter().any(|t| t.habitat_id == h.id))
+        .map(|h| h.receipts.len() as u64)
+        .sum();
+    let interface_altitude = study
+        .flight
+        .entry
+        .as_ref()
+        .map(|entry| entry.entry_interface_altitude_m)
+        .unwrap_or(0.);
+    let periapsis_above_interface = study.flight.entry.as_ref().map(|_| {
+        orbit
+            .get("minimum_periapsis_m")
+            .and_then(|v| v.as_f64())
+            .map(|periapsis| periapsis > interface_altitude)
+    });
+    // The mission ends landed on purpose and descends below the interface on
+    // purpose, so orbit evidence is "achieved at any retained observation":
+    // an elliptical state whose periapsis sits above the entry interface (or
+    // above the surface when no interface is authored). The mission-span
+    // minimum periapsis therefore never gates completion: launch, coast
+    // ascent and the authored entry all cross the interface legitimately.
+    let orbit_achieved = orbital_samples.iter().any(|sample| {
+        sample.elements.apoapsis_m.is_some() && sample.elements.periapsis_m > interface_altitude
+    });
+    let orbit_ok = orbit_achieved;
+    let entry_ok = entry_phase
+        .get("required")
+        .and_then(|v| v.as_bool())
+        != Some(true)
+        || entry_phase
+            .get("within_limits")
+            .and_then(|v| v.as_bool())
+            == Some(true);
+    let touchdown_ok = touchdown_within
+        .get("required")
+        .and_then(|v| v.as_bool())
+        != Some(true)
+        || touchdown_within
+            .get("within_limits")
+            .and_then(|v| v.as_bool())
+            == Some(true);
+    let launch_ok = launch_phase
+        .get("required")
+        .and_then(|v| v.as_bool())
+        != Some(true)
+        || launch_phase
+            .get("within_limits")
+            .and_then(|v| v.as_bool())
+            == Some(true);
+    let complete = liftoff.is_some()
+        && launch_ok
+        && orbit_ok
+        && entry_ok
+        && touchdown_ok
+        && window_ok
+        && delivered_positive;
+    Ok(json!({
+        "model":MISSION_MODEL,
+        "launch":launch_phase,
+        "orbit":{"summary":orbit,"achieved":orbit_achieved,"minimum_periapsis_above_entry_interface":periapsis_above_interface,"within_limits":orbit_ok},
+        "entry":entry_phase,
+        "landing":touchdown_within,
+        "hold":{"required_window_s":operation.map(|o|o.required_window_s),"current_window_s":window.map(|w|w.current_window_s),"within_limits":window_ok},
+        "delivery":{"transfers_applied":last.flight.transfers.len(),"accepted_kg":delivered,"habitat_receipts":receipts,"within_limits":delivered_positive},
+        "complete":complete,
+        "scope":MISSION_SCOPE
+    }))
 }
 pub fn context_for(definition: &Definition) -> Value {
     if definition.contact.is_none() { return context(); }
@@ -1001,5 +1221,130 @@ mod tests {
             .unwrap_err()
             .contains("must not carry an orbital CSV"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mission_span_admits_long_haul_studies_within_still_bounded_ceilings() {
+        let (mut world, mars) = crate::vehicle_transfer::tests::habitat_world(|_| {});
+        world.advance_to(world.time + 30., None, None);
+        let definition = crate::vehicle_transfer::tests::site_definition(
+            &world,
+            mars,
+            crate::vehicle_handling::Equipment::example(),
+        );
+        let mut study = Study::new(&world, definition, 9, 0.5).unwrap();
+        study.samples = 901;
+        study.interval_s = 4.0;
+        let refused = study.validate(&world).unwrap_err();
+        assert!(
+            refused.contains("two million") || refused.contains("twenty million"),
+            "unexpected refusal: {refused}"
+        );
+        study.mission_span = true;
+        study.validate(&world).unwrap();
+        // The doubled mission recording budget admits contact-craft studies that
+        // overflow the legacy 32 MiB row estimate at dense one-millisecond sampling.
+        study.samples = 1500;
+        study.interval_s = 0.001;
+        study.mission_span = false;
+        assert!(
+            study
+                .validate(&world)
+                .unwrap_err()
+                .contains("exceeds the bounded recording size"),
+            "legacy studies must stay under the 32 MiB row estimate"
+        );
+        study.mission_span = true;
+        study.validate(&world).unwrap();
+        study.interval_s = 3600.;
+        assert!(
+            study
+                .validate(&world)
+                .unwrap_err()
+                .contains("three hundred million")
+        );
+        study.samples = 2000;
+        study.interval_s = 100.;
+        let refused = study.validate(&world).unwrap_err();
+        assert!(refused.contains("one day"), "unexpected refusal: {refused}");
+    }
+
+    #[test]
+    fn mission_span_studies_carry_a_replayable_mission_block() {
+        let (mut world, mars) = crate::vehicle_transfer::tests::habitat_world(|d| {
+            d.config.crew = 0;
+        });
+        world.advance_to(world.time + 30., None, None);
+        let mut definition = crate::vehicle_transfer::tests::site_definition(
+            &world,
+            mars,
+            crate::vehicle_handling::Equipment::example(),
+        );
+        definition.launch = Some(crate::vehicle_launch::Limits::example());
+        definition.entry = Some(crate::vehicle_entry::Entry::example());
+        definition.landing = Some(crate::vehicle_landing::Limits::example());
+        let requested = supply_vehicle::Cargo {
+            oxygen_reserve_kg: 10.,
+            potable_water_kg: 20.,
+            food_dry_kg: 5.,
+            food_water_kg: 5.,
+        };
+        let mut study = Study::new(&world, definition, 15, 2.0).unwrap();
+        study.mission_span = true;
+        study.transfers = vec![AuthoredTransfer {
+            at_sample: 14,
+            habitat_id: 0,
+            requested: requested.clone(),
+        }];
+        let bundle = Bundle::run(&world, study).unwrap();
+        let mission = &bundle.manifest["mission"];
+        assert_eq!(mission["model"], json!(MISSION_MODEL));
+        assert_eq!(mission["complete"], json!(false));
+        assert_eq!(mission["launch"]["liftoff_elapsed_s"], json!(null));
+        assert_eq!(mission["entry"]["required"], json!(true));
+        assert_eq!(mission["entry"]["interface_crossed"], json!(false));
+        assert_eq!(mission["landing"]["required"], json!(true));
+        assert_eq!(mission["landing"]["touchdown"], json!(false));
+        assert_eq!(mission["orbit"]["achieved"], json!(false));
+        assert_eq!(mission["delivery"]["within_limits"], json!(true));
+        assert_eq!(mission["delivery"]["transfers_applied"], json!(1));
+        assert_eq!(mission["delivery"]["habitat_receipts"], json!(1));
+        assert_eq!(
+            mission["delivery"]["accepted_kg"]["oxygen_reserve_kg"],
+            json!(10.)
+        );
+        assert!(mission["orbit"]["summary"].is_object());
+        assert!(bundle.orbital.is_some());
+        assert!(bundle.manifest["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "mission"));
+        let root = std::env::temp_dir().join(format!(
+            "cosmogon-mission-manifest-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        bundle.export(&root).unwrap();
+        Bundle::read(&root).unwrap();
+        let mut changed = serde_json::from_slice::<Value>(
+            &std::fs::read(root.join("manifest.json")).unwrap(),
+        )
+        .unwrap();
+        changed["mission"]["complete"] = json!(true);
+        std::fs::write(root.join("manifest.json"), changed.to_string()).unwrap();
+        assert!(Bundle::read(&root).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn legacy_studies_omit_the_mission_span_field_in_serialization() {
+        let (_, study) = setup();
+        let text = serde_json::to_string(&study).unwrap();
+        assert!(!text.contains("mission_span"));
+        let mut study = study;
+        study.mission_span = true;
+        let text = serde_json::to_string(&study).unwrap();
+        assert!(text.contains("\"mission_span\":true"));
     }
 }

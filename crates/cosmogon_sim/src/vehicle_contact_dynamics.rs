@@ -683,10 +683,16 @@ fn sample(
             let unloaded;
             let from;
             let previous = if let Some(old) = state.feet.get(i) {
-                from = &old.surface.frame;
-                old.shear
-                    .as_ref()
-                    .ok_or("Missing persistent foot history")?
+                if f.response.normal_load_n <= 0. {
+                    from = &f.surface.frame;
+                    unloaded = crate::vehicle_shear::State::unloaded(f.surface.outward_normal)?;
+                    &unloaded
+                } else {
+                    from = &old.surface.frame;
+                    old.shear
+                        .as_ref()
+                        .ok_or("Missing persistent foot history")?
+                }
             } else {
                 from = &f.surface.frame;
                 unloaded = crate::vehicle_shear::State::unloaded(f.surface.outward_normal)?;
@@ -740,14 +746,28 @@ fn evolve_shear(
         };
         let v = middle_relative_velocity[i];
         let tangent = v - b.surface.outward_normal * v.dot(b.surface.outward_normal);
-        let increment = d.advance_in_rotating_frames(
-            a.shear.as_ref().ok_or("Missing initial foot shear")?,
-            &a.surface.frame,
-            &b.surface.frame,
-            b.surface.outward_normal,
-            tangent * (dt * fraction),
-            b.response.normal_load_n,
-        )?;
+        let separate = start >= 0. && end >= 0.;
+        let freed;
+        let increment = if separate {
+            freed = crate::vehicle_shear::State::unloaded(b.surface.outward_normal)?;
+            d.advance_in_rotating_frames(
+                &freed,
+                &b.surface.frame,
+                &b.surface.frame,
+                b.surface.outward_normal,
+                Vec3d::ZERO,
+                b.response.normal_load_n,
+            )?
+        } else {
+            d.advance_in_rotating_frames(
+                a.shear.as_ref().ok_or("Missing initial foot shear")?,
+                &a.surface.frame,
+                &b.surface.frame,
+                b.surface.outward_normal,
+                tangent * (dt * fraction),
+                b.response.normal_load_n,
+            )?
+        };
         work.add(&ShearWork {
             endpoint_relative_work_j: increment.relative_foot_work_j,
             elastic_storage_change_j: increment.elastic_storage_change_j,
@@ -1131,7 +1151,14 @@ pub(crate) fn advance(flight: &mut Flight, world: &Universe, to: f64) -> Result<
         let remaining = target_elapsed - next.propulsion.elapsed_s;
         // Only an elapsed-time floating-point remainder may be rounded away,
         // never a represented world task or a positive physical integration span.
-        if remaining <= 32. * f64::EPSILON * target_elapsed.abs().max(1.) {
+        // At real-world epochs the absolute craft clock's ulp (hundreds of
+        // nanoseconds) exceeds the residual task-tail fragment; a remainder
+        // that cannot move the representable clock is rounded away and re-pinned
+        // to the world task boundary at macro completion.
+        if remaining <= 32. * f64::EPSILON * target_elapsed.abs().max(1.)
+            || next.launched_at_s + next.propulsion.elapsed_s + remaining
+                == next.launched_at_s + next.propulsion.elapsed_s
+        {
             break;
         }
         while let Some(index) = next.pending_authored_removal() {
@@ -1239,6 +1266,55 @@ pub(crate) fn advance(flight: &mut Flight, world: &Universe, to: f64) -> Result<
             if gap > 0. {
                 step = step.min(gap);
             }
+        }
+        // Command-boundary fragments below the absolute craft-clock ulp cannot
+        // advance the represented clock; carry the propulsion ledger across the
+        // boundary without motion. The sub-ulp span's motion is unrepresentable.
+        if left > 0. && next.last_time_s + left == next.last_time_s {
+            let boundary = Command {
+                duration_s: left,
+                ..command.clone()
+            };
+            let requested = rate * left;
+            let prop = next.propulsion.propellant_kg;
+            if prop > 0. && requested > 0. && prop - (prop - requested).max(0.) == 0. {
+                next.propulsion.elapsed_s += left;
+                if let Some(c) = next.contact.as_mut() {
+                    c.cumulative_work.duration_s += left;
+                    c.last_work.duration_s += left;
+                }
+                next.last_interval = Some(crate::supply_vehicle::Interval {
+                    duration_s: left,
+                    initial_mass_kg: next.propulsion.mass_kg(d),
+                    final_mass_kg: next.propulsion.mass_kg(d),
+                    commanded_thrust_n: d.rated_thrust_n * command.throttle,
+                    requested_propellant_kg: requested,
+                    actual_propellant_kg: 0.,
+                    impulse_n_s: 0.,
+                    ideal_delta_v_m_s: 0.,
+                    powered_duration_s: 0.,
+                    fuel_limited_duration_s: 0.,
+                    initial_powered_acceleration_m_s2: None,
+                    final_powered_acceleration_m_s2: None,
+                    mass_residual_kg: 0.,
+                });
+                continue;
+            }
+            let (_, _, propulsion, interval) = world_vehicle::drift(
+                d,
+                &next.propulsion,
+                next.position_m,
+                next.velocity_m_s,
+                &boundary,
+                Vec3d::ZERO,
+            )?;
+            next.propulsion = propulsion;
+            if let Some(c) = next.contact.as_mut() {
+                c.cumulative_work.duration_s += left;
+                c.last_work.duration_s += left;
+            }
+            next.last_interval = Some(interval);
+            continue;
         }
         if !step.is_finite()
             || step <= 0.

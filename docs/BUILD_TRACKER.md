@@ -2,15 +2,16 @@
 
 Live checklist of integrated builds for the owner. ✅ = done, verified and committed; ⬜ = remaining.
 Updated **in the same commit as each build**. Numbering: entries 1–45 are the accepted history
-([MASTER_GAP_ANALYSIS](MASTER_GAP_ANALYSIS.md) is the evidence record for each). Entries 47+ are the
-forward plan; **47–51 are firm** (accepted dependency sequence in
-[VEHICLE_SUPPORT_NEXT](VEHICLE_SUPPORT_NEXT.md) and
-[CONTINUATION_HANDOFF](CONTINUATION_HANDOFF.md) → Recommended next work), later numbers are
-provisional groupings that may renumber when a build starts.
+([MASTER_GAP_ANALYSIS](MASTER_GAP_ANALYSIS.md) is the evidence record for each). **47–51 completed
+the accepted supply/mission dependency sequence**
+([VEHICLE_SUPPORT_NEXT](VEHICLE_SUPPORT_NEXT.md),
+[MISSION_CLOSEOUT](MISSION_CLOSEOUT.md)); 52+ are the forward plan
+([CONTINUATION_HANDOFF](CONTINUATION_HANDOFF.md) → Recommended next work), grouped provisionally
+and may renumber when a build starts.
 
 ---
 
-## Done — 50 builds
+## Done — 51 builds
 
 | # | Build | Status | Evidence |
 | --- | --- | --- | --- |
@@ -69,9 +70,9 @@ Released baselines: v0.3.0, v0.5.0, **v1.0.0** (`0411e9d`) — all preserved; ta
 
 ---
 
-## Remaining — 48 onward
+## Remaining — 52 onward
 
-### A. Supply & landing chain (firm order — the owner's active priority)
+### A. Supply & landing chain (firm order — the owner's active priority; complete through 51)
 
 | # | Build | Status |
 | --- | --- | --- |
@@ -79,13 +80,13 @@ Released baselines: v0.3.0, v0.5.0, **v1.0.0** (`0411e9d`) — all preserved; ta
 | 48 | ~~Authored finite launch from a surface (engine, structural/thermal limits, trajectory evidence)~~ | ✅ **DONE** |
 | 49 | ~~Osculating orbital evidence for free-flight studies and craft-to-craft rendezvous reports~~ | ✅ **DONE** |
 | 50 | ~~Entry, heating/thermal limits and terminal landing completion~~ | ✅ **DONE** |
-| 51 | End-to-end supply-mission closeout: one scripted launch → orbit → transfer → landing → delivery scenario with full evidence | ⬜ **NEXT** |
+| 51 | ~~End-to-end supply-mission closeout: one scripted launch → orbit → transfer → landing → delivery scenario with full evidence~~ | ✅ **DONE** |
 
 ### B. Settlement realism (phase 9 remainder) — provisional, ~6 builds
 
 | # | Build | Status |
 | --- | --- | --- |
-| 52 | Physical greenhouse installation + finite resource exchange with habitat stocks | ⬜ |
+| 52 | Physical greenhouse installation + finite resource exchange with habitat stocks | ⬜ **NEXT** |
 | 53 | Physical humidity/leak/wall-condensation coupling | ⬜ |
 | 54 | Equipment calibration and maintenance model | ⬜ |
 | 55 | Finite settlement construction and logistics | ⬜ |

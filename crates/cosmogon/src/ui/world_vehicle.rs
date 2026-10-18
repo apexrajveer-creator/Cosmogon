@@ -889,6 +889,140 @@ impl FlightUi {
             bundle.rows.len(),
             bundle.study.flight.plan.definition.name
         ));
+        if let Some(mission) = bundle.manifest.get("mission").filter(|m| m.is_object()) {
+            ui.separator();
+            ui.strong("Mission evidence chain (whole span)");
+            ui.label(
+                "Consolidated retained ledgers and applied transfer records; every value replays from this recording.",
+            );
+            let ok_color = egui::Color32::from_rgb(150, 225, 170);
+            let within = |v: &Value| v.get("within_limits").and_then(Value::as_bool) == Some(true);
+            let flag = |ui: &mut egui::Ui, ok: bool, text: String| {
+                if ok {
+                    ui.colored_label(ok_color, format!("■ {text}"));
+                } else {
+                    ui.colored_label(ACCENT, format!("■ {text}"));
+                }
+            };
+            let num = |v: &Value, key: &str, unit: &str, digits: usize| {
+                v[key]
+                    .as_f64()
+                    .map(|n| format!("{n:.digits$} {unit}"))
+                    .unwrap_or_else(|| "—".into())
+            };
+            if let Some(l) = mission
+                .get("launch")
+                .filter(|v| v.get("required").and_then(Value::as_bool) == Some(true))
+            {
+                flag(
+                    ui,
+                    within(l),
+                    format!(
+                        "Launch · liftoff {} · apogee {} · peak acceleration {}",
+                        num(l, "liftoff_elapsed_s", "s", 3),
+                        num(l, "apogee_altitude_m", "m", 0),
+                        num(l, "peak_acceleration_m_s2", "m/s²", 3)
+                    ),
+                );
+            }
+            if let Some(o) = mission.get("orbit") {
+                let achieved = o["achieved"].as_bool() == Some(true);
+                flag(
+                    ui,
+                    achieved && within(o),
+                    if achieved {
+                        "Orbit insertion · elliptical state above the entry interface".into()
+                    } else {
+                        "Orbit insertion · no above-interface elliptical state retained".into()
+                    },
+                );
+            }
+            if let Some(e) = mission
+                .get("entry")
+                .filter(|v| v.get("required").and_then(Value::as_bool) == Some(true))
+            {
+                let crossed = e["interface_crossed"].as_bool() == Some(true);
+                flag(
+                    ui,
+                    within(e),
+                    format!(
+                        "Entry · interface {} · peak flux {} · total heat {}",
+                        if crossed {
+                            num(e, "interface_elapsed_s", "s", 3)
+                        } else {
+                            "not crossed".into()
+                        },
+                        num(e, "peak_heat_flux_w_m2", "W/m²", 4),
+                        num(e, "total_heat_j_m2", "J/m²", 4)
+                    ),
+                );
+            }
+            if let Some(l) = mission
+                .get("landing")
+                .filter(|v| v.get("required").and_then(Value::as_bool) == Some(true))
+            {
+                let touched = l["touchdown"].as_bool() == Some(true);
+                flag(
+                    ui,
+                    within(l),
+                    format!(
+                        "Landing · {} · vertical {} · horizontal {}",
+                        if touched {
+                            format!(
+                                "touchdown {}",
+                                num(l, "touchdown_elapsed_s", "s", 3)
+                            )
+                        } else {
+                            "no touchdown".into()
+                        },
+                        num(l, "vertical_speed_m_s", "m/s", 3),
+                        num(l, "horizontal_speed_m_s", "m/s", 3)
+                    ),
+                );
+            }
+            if let Some(h) = mission.get("hold").filter(|v| v["required_window_s"].is_number()) {
+                flag(
+                    ui,
+                    within(h),
+                    format!(
+                        "Hold · current window {} of {} required",
+                        num(h, "current_window_s", "s", 3),
+                        num(h, "required_window_s", "s", 3)
+                    ),
+                );
+            }
+            if let Some(d) = mission
+                .get("delivery")
+                .filter(|v| v.get("transfers_applied").and_then(Value::as_u64) != Some(0))
+            {
+                let accepted = d["accepted_kg"]
+                    .as_object()
+                    .map(|c| {
+                        ["oxygen_reserve_kg", "potable_water_kg", "food_dry_kg", "food_water_kg"]
+                            .iter()
+                            .filter_map(|k| c[*k].as_f64())
+                            .sum::<f64>()
+                    })
+                    .unwrap_or(0.);
+                flag(
+                    ui,
+                    within(d),
+                    format!(
+                        "Delivery · {accepted:.1} kg accepted · {} habitat receipt(s)",
+                        d["habitat_receipts"].as_u64().unwrap_or(0)
+                    ),
+                );
+            }
+            let complete = mission["complete"].as_bool() == Some(true);
+            if complete {
+                ui.colored_label(ok_color, "Mission complete: every authored phase gate is satisfied.");
+            } else {
+                ui.colored_label(
+                    ACCENT,
+                    "Mission incomplete: at least one phase gate is unsatisfied at the end of this recording.",
+                );
+            }
+        }
         ui.add(
             egui::Slider::new(&mut self.selected_row, 0..=bundle.rows.len() - 1)
                 .text("Observation"),

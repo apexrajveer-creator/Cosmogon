@@ -30,6 +30,8 @@ struct Args {
     launch: Option<String>,
     entry: Option<String>,
     landing: Option<String>,
+    mission_span: bool,
+    transfer: Vec<String>,
     entry_interface_altitude: Option<f64>,
     nose_radius: Option<f64>,
     heat_flux_coefficient: Option<f64>,
@@ -95,6 +97,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         launch: None,
         entry: None,
         landing: None,
+        mission_span: false,
+        transfer: vec![],
         entry_interface_altitude: None,
         nose_radius: None,
         heat_flux_coefficient: None,
@@ -175,7 +179,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if matches!(a.cmd.as_str(),"crop-chemistry"|"crop-chemistry-inspect"|"greenhouse-supply-inspect") && !matches!(flag.as_str(),"--recording"|"--output") {return Err(format!("{flag} is not a crop supply/chemistry inspection option"));}
         if matches!(a.cmd.as_str(),"habitat-diagnose"|"habitat-crop-harvest") && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
         if a.cmd=="contact-hardware" && !matches!(flag.as_str(),"--initial"|"--target"|"--seed"|"--scenario"|"--output"|"--geographic-start"|"--static-shear"|"--operation-window") {return Err(format!("{flag} is not a contact hardware option"));}
-        if a.cmd=="flight-definition" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output"|"--target"|"--seed"|"--scenario"|"--samples"|"--interval-seconds"|"--geographic-start"|"--contact-hardware"|"--cargo-ledgers"|"--handling"|"--launch"|"--entry"|"--landing") {return Err(format!("{flag} is not a world flight definition option"));}
+        if a.cmd=="flight-definition" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output"|"--target"|"--seed"|"--scenario"|"--samples"|"--interval-seconds"|"--geographic-start"|"--contact-hardware"|"--cargo-ledgers"|"--handling"|"--launch"|"--entry"|"--landing"|"--mission-span"|"--transfer") {return Err(format!("{flag} is not a world flight definition option"));}
         if a.cmd=="launch-definition" && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario"|"--thrust-time"|"--thrust-newtons"|"--maximum-acceleration"|"--liftoff-altitude"|"--maximum-start-altitude") {return Err(format!("{flag} is not a launch-definition option"));}
         if a.cmd=="entry-definition" && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario"|"--entry-interface-altitude"|"--nose-radius"|"--heat-flux-coefficient"|"--maximum-heat-flux"|"--maximum-total-heat") {return Err(format!("{flag} is not an entry-definition option"));}
         if a.cmd=="landing-definition" && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario"|"--maximum-touchdown-vertical"|"--maximum-touchdown-horizontal"|"--liftoff-altitude") {return Err(format!("{flag} is not a landing-definition option"));}
@@ -221,6 +225,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--launch" if a.cmd=="flight-definition" => a.launch=Some(val()?),
             "--entry" if a.cmd=="flight-definition" => a.entry=Some(val()?),
             "--landing" if a.cmd=="flight-definition" => a.landing=Some(val()?),
+            "--mission-span" if a.cmd=="flight-definition" => a.mission_span=true,
+            "--transfer" if a.cmd=="flight-definition" => a.transfer.push(val()?),
             "--entry-interface-altitude" if a.cmd=="entry-definition" => {
                 let altitude=number::<f64>(val()?,&flag)?;
                 if !altitude.is_finite() || !(0.0..=1.0e7).contains(&altitude) {return Err("--entry-interface-altitude requires a finite height between 0 and 1e7 m".into());}
@@ -366,6 +372,7 @@ if a.geographic_start.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err
         if a.entry.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Entry definition requires a nonempty file".into());}
         if a.landing.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err("Landing definition requires a nonempty file".into());}
         if a.cmd=="flight-definition" && (a.entry.is_some() || a.landing.is_some()) && !(a.launch.is_some() || a.contact_hardware.is_some()) {return Err("Entry heating and terminal landing require contact gear (--contact-hardware or --launch FILE)".into());}
+        if a.cmd=="flight-definition" && a.mission_span && a.launch.is_none() {return Err("Mission span requires an authored launch definition (--launch FILE)".into());}
     }
     if matches!(a.cmd.as_str(),"entry-definition"|"landing-definition") {
         if [&a.initial,&a.output].iter().any(|p|p.as_deref().is_some_and(|s|s.trim().is_empty())) {return Err("Definition files require nonempty paths".into());}
@@ -447,7 +454,7 @@ fn help() {
     eprintln!("cosmogon-cli support-definition [--output NEW_FILE]\ncosmogon-cli flight-support --recording COMPLETE_FLIGHT_DIR [--definition LIMITS_FILE --output NEW_DIR]\ncosmogon-cli support-inspect --recording COMPLETE_SUPPORT_DIR\nConditional actual footprint/force evidence; no attachment or cargo permission");
     eprintln!("cosmogon-cli arrival-start [--output NEW_FILE]\ncosmogon-cli flight-approach --recording COMPLETE_FLIGHT_DIR [--target BODY --output NEW_DIR]\ncosmogon-cli approach-inspect --recording COMPLETE_APPROACH_DIR\nGeographic flight-definition starts: --geographic-start FILE (explicit spherical altitude and east/north/up velocities)");
     eprintln!("cosmogon-cli flight-rendezvous --recording LEFT_DIR --reference RIGHT_DIR [--output NEW_DIR]\nClosest shared-observation-time evidence between two complete replay-verified flights from one origin world; sample-grid evidence only, never continuous closest approach, intercept or docking");
-    eprintln!("cosmogon-cli flight-definition [--initial WORLD --definition PROPULSION_PLAN --target Mars --samples 121 --interval-seconds 1 --cargo-ledgers --handling --launch FILE --entry FILE --landing FILE --output NEW_FILE]\ncosmogon-cli flight-study --definition PINNED_STUDY [--initial WORLD --output NEW_DIR]\ncosmogon-cli flight-inspect --recording COMPLETE_DIR   # exact full-world flight replay; --cargo-ledgers opts into retained cargo mass ledgers; --handling opts into finite surface-handling equipment for co-located habitat transfers; --launch FILE consumes an authored surface-launch definition; --entry/--landing FILE consume authored heating/touchdown limits (contact gear required)");
+    eprintln!("cosmogon-cli flight-definition [--initial WORLD --definition PROPULSION_PLAN --target Mars --samples 121 --interval-seconds 1 --cargo-ledgers --handling --launch FILE --entry FILE --landing FILE --mission-span --transfer FILE --output NEW_FILE]\ncosmogon-cli flight-study --definition PINNED_STUDY [--initial WORLD --output NEW_DIR]\ncosmogon-cli flight-inspect --recording COMPLETE_DIR   # exact full-world flight replay; --cargo-ledgers opts into retained cargo mass ledgers; --handling opts into finite surface-handling equipment for co-located habitat transfers; --launch FILE consumes an authored surface-launch definition; --entry/--landing FILE consume authored heating/touchdown limits (contact gear required); --mission-span admits the raised work bounds and consolidated mission evidence for one authored end-to-end launch-to-delivery study (requires --launch); --transfer FILE authors an atomic habitat transfer at an exact sample");
     eprintln!("cosmogon-cli launch-definition --thrust-time SECONDS --thrust-newtons N [--maximum-acceleration M_S2 --liftoff-altitude M --maximum-start-altitude M --initial WORLD --target Mars --latitude N --longitude E --seed N --scenario S] --output NEW_FILE   # authored surface launch definition: fixed inertial zenith burn on contact gear with structural specific-force limits and liftoff/burnout/apogee evidence");
     eprintln!("cosmogon-cli entry-definition [--entry-interface-altitude M --nose-radius M --heat-flux-coefficient K --maximum-heat-flux W_M2 --maximum-total-heat J_M2 --initial WORLD --target Mars --latitude N --longitude E --seed N --scenario S] --output NEW_FILE   # authored entry-heating definition: Sutton-Graves stagnation flux with thermal limits on an atmospheric starting body");
     eprintln!("cosmogon-cli landing-definition [--maximum-touchdown-vertical M_S --maximum-touchdown-horizontal M_S --liftoff-altitude M --initial WORLD --target Mars --latitude N --longitude E --seed N --scenario S] --output NEW_FILE   # authored terminal-landing definition: touchdown-speed limits with a versioned liftoff baseline on contact gear");
@@ -701,7 +708,10 @@ fn main() {
                     let mut d=d;
                     if let Some(path)=&a.entry {d.entry=Some(world_vehicle::Definition::read(std::path::Path::new(path))?.entry.ok_or("Entry file must be an entry definition containing entry limits")?);}
                     if let Some(path)=&a.landing {d.landing=Some(world_vehicle::Definition::read(std::path::Path::new(path))?.landing.ok_or("Landing file must be a landing definition containing touchdown limits")?);}
-                    let study=flight::Study::new(&world,d,a.samples,a.interval_days*86400.)?;
+                    let mut study=if a.mission_span {flight::Study::new_mission(&world,d,a.samples,a.interval_days*86400.)?} else {flight::Study::new(&world,d,a.samples,a.interval_days*86400.)?};
+                    for path in &a.transfer {
+                        study.transfers.push(serde_json::from_value::<cosmogon_sim::world_vehicle_recording::AuthoredTransfer>(serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(path).map_err(|e|format!("Transfer definition read failed: {e}"))?).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?);
+                    }
                     if let Some(path)=&a.output {study.write(&world,std::path::Path::new(path))?;}
                     return serde_json::to_value(&study).map_err(|e|e.to_string());
                 }
@@ -1415,6 +1425,12 @@ mod argument_tests {
     fn flight_commands_refuse_missing_definitions_and_ignored_origin_controls() {
         for v in [vec!["flight-study"],vec!["flight-inspect"],vec!["flight-study","--definition"," "],vec!["flight-inspect","--recording"," "],vec!["flight-inspect","--recording","r","--output","new"],vec!["flight-study","--definition","d","--samples","3"],vec!["flight-definition","--initial","s","--seed","2"],vec!["flight-definition","--interval-days","1"]] {assert!(args(&v).is_err());}
         assert!(args(&["flight-definition","--samples","9","--interval-seconds","0.5","--target","Mars"]).is_ok());assert!(args(&["flight-study","--definition","d","--initial","s","--output","new"]).is_ok());assert!(args(&["flight-inspect","--recording","r"]).is_ok());
+        assert!(args(&["flight-definition","--mission-span"]).is_err());
+        assert!(args(&["flight-definition","--mission-span","--launch","l"]).is_ok());
+        assert!(args(&["flight-definition","--transfer","t"]).is_ok());
+        assert!(args(&["flight-study","--mission-span"]).is_err());
+        assert!(args(&["flight-definition","--mission-span","--launch","l","--transfer","t"]).unwrap().mission_span);
+        assert_eq!(args(&["flight-definition","--transfer","t1","--transfer","t2"]).unwrap().transfer,vec!["t1".to_string(),"t2".to_string()]);
     }
     #[test]
     fn transfer_arguments_are_opt_in_and_refuse_ignored_flags() {
