@@ -90,6 +90,8 @@ pub(super) fn number(ui: &mut egui::Ui, label: &str, value: &mut f64, min: f64, 
 fn config(ui: &mut egui::Ui, c: &mut Config) {
     egui::CollapsingHeader::new("Outward cabin breach").default_open(c.breach.is_some()).show(ui,|ui|super::habitat_breach::controls(ui,&mut c.breach,true));
     egui::CollapsingHeader::new("Cabin moisture").default_open(c.moisture.is_some()).show(ui,|ui|super::habitat_humidity::controls(ui,&mut c.moisture,true));
+    egui::CollapsingHeader::new("Passive wall condensation").default_open(c.wall_condensation.is_some()).show(ui,|ui|super::habitat_humidity::wall_controls(ui,&mut c.wall_condensation,true));
+    egui::CollapsingHeader::new("Structural leak").default_open(c.leak.is_some()).show(ui,|ui|super::habitat_humidity::leak_controls(ui,&mut c.leak,true));
     egui::CollapsingHeader::new("CO₂ reduction and raw water").default_open(c.sabatier.is_some()).show(ui,|ui|super::habitat_water::controls(ui,&mut c.sabatier,true));
     egui::CollapsingHeader::new("Water electrolysis").default_open(c.electrolysis.is_some()).show(ui, |ui|super::habitat_oxygen::controls(ui,&mut c.electrolysis,true));
     egui::CollapsingHeader::new("Crew and cabin")
@@ -397,7 +399,7 @@ pub fn panel(
                         ui.add_enabled_ui(!sim.is_reference(),|ui|super::habitat_breach::controls(ui,&mut form.draft.breach,true));
                     } else if form.breach_pane==0 {super::habitat_breach::readings(ui,h);} else {super::habitat_breach::model(ui);}
                 }
-                ui.add_enabled_ui(!sim.is_reference(),|ui| {if form.tab==5 {super::habitat_oxygen::controls(ui,&mut form.draft.electrolysis,false);} else if form.tab==6 {super::habitat_water::controls(ui,&mut form.draft.sabatier,false);} else if form.tab==9 {if form.moisture_pane==1 {super::habitat_humidity::controls(ui,&mut form.draft.moisture,true);}} else if form.tab!=10 && form.tab!=11 {config(ui,&mut form.draft);}});
+                ui.add_enabled_ui(!sim.is_reference(),|ui| {if form.tab==5 {super::habitat_oxygen::controls(ui,&mut form.draft.electrolysis,false);} else if form.tab==6 {super::habitat_water::controls(ui,&mut form.draft.sabatier,false);} else if form.tab==9 {if form.moisture_pane==1 {super::habitat_humidity::controls(ui,&mut form.draft.moisture,true);super::habitat_humidity::wall_controls(ui,&mut form.draft.wall_condensation,true);super::habitat_humidity::leak_controls(ui,&mut form.draft.leak,true);}} else if form.tab!=10 && form.tab!=11 {config(ui,&mut form.draft);}});
                 if form.tab!=9 && form.tab!=10 && form.tab!=11 {ui.horizontal(|ui| {
                     if ui.add_enabled(!sim.is_reference() && form.draft!=*c,egui::Button::new("Apply configuration")).clicked() {edit=Some(Edit::ConfigureHabitat {system:h.definition.body.system,id:h.id,config:Box::new(form.draft.clone())});}
                     if ui.button("Discard staged changes").clicked() {form.draft=c.clone();}

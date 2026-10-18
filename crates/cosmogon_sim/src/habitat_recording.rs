@@ -246,7 +246,7 @@ impl Recording {
             .ok_or("Missing CSV header")?
             .split(',')
             .collect::<Vec<_>>();
-        if !matches!(header.len(), 38 | 49 | 66 | 85 | 110) {
+        if !matches!(header.len(), 38 | 49 | 66 | 85 | 110 | 112 | 115 | 117) {
             return Err("Unsupported habitat CSV columns".into());
         }
         for (a, e) in a.iter().zip(&e) {

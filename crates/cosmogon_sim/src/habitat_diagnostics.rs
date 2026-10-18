@@ -517,6 +517,21 @@ pub fn explain(h: &Habitat) -> Diagnostics {
             d.explanations.push(Explanation{id:"breach",text:format!("{}; resolved {:.6} of {:.6} seconds, {} integration steps. Outside pressure, gamma and discharge are assumptions. Main heat debit is temperature-equivalent; full gas/structure/phase/enthalpy identity is separate. Processes/thermal minute precedes breach flow, so fast coupled transients remain approximate.",e.status.label(),e.integrated_seconds,b.seconds,e.integration_steps),evidence:vec!["budget.breach","budget.configuration.breach"]});
         }
     }
+    if h.uses_wall() {
+        d.heat.insert(3,term("wall_condensation_heat","Wall condensation reference heat released","W",b.wall.as_ref().map(|w|w.condensation_heat_j/b.seconds).or_else(||c.wall_condensation.is_none().then_some(0.0)),"budget.wall.condensation_heat_j / seconds; signed, negative is evaporation debit"));
+        d.water.push(term("wall_liquid","Water held as passive wall film","kg",Some(h.state.wall_liquid_kg),"state.wall_liquid_kg; held with no recycling path"));
+        d.water.push(term("wall_condensed","Net vapor condensed onto walls","kg",b.wall.as_ref().map(|w|w.net_condensed_kg).or_else(||c.wall_condensation.is_none().then_some(0.0)),"budget.wall.net_condensed_kg; lumped mass transfer, wall temperature by linear coupling"));
+        d.explanations.push(Explanation{id:"wall",text:format!("{}; wall film {:.6} kg, cumulative net {:.6} kg. Lumped surface mass transfer toward saturation at the coupled wall temperature; no ice, fogging, drips or collection.",b.wall.as_ref().map(|w|w.constraints.join("; ")).filter(|s|!s.is_empty()).unwrap_or_else(||"Wall exchange within film, vapor and rate bounds".into()),h.state.wall_liquid_kg,h.totals.wall_condensed_kg),evidence:vec!["budget.wall","budget.configuration.wall_condensation","state.wall_liquid_kg"]});
+    }
+    if h.uses_leak() {
+        d.heat.insert(3,term("leak_cooling","Structural leak enthalpy removal","W",b.leak.as_ref().map(|l|-l.cooling_j/b.seconds).or_else(||c.leak.is_none().then_some(0.0)),"-budget.leak.cooling_j / seconds; assumed cabin-gas specific heat"));
+        if let Some(mass)=d.water.iter_mut().find(|t|t.id=="mass_residual") {mass.label="Accounted cabin + escaped mass residual";mass.evidence="budget.mass_residual_kg; cabin stores plus cumulative leaked and breached gas";}
+        if let Some(l)=&b.leak {
+            d.air_and_crew.push(term("leaked_oxygen","Cabin O2 nominally leaked","kg",Some(l.leaked.oxygen_kg),"budget.leak.leaked; proportional to start-of-interval species masses"));
+            d.air_and_crew.push(term("leaked_vapor","Cabin vapor nominally leaked","kg",Some(l.leaked.vapor_kg),"budget.leak.leaked; not available for recycling"));
+            d.explanations.push(Explanation{id:"leak",text:format!("Nominal structural leak removed {:.6} kg over {:.1} s at assumed {:.1} J/kg cabin-gas heat; independent of the pressure-driven breach orifice model. No seal degradation, inward or rarefied flow is modelled.",l.leaked.mass_kg(),b.seconds,l.cooling_j/l.leaked.mass_kg().max(1e-12)),evidence:vec!["budget.leak","budget.configuration.leak","totals.leaked_gas"]});
+        }
+    }
     if h.uses_crop(){
         d.heat.push(term("crop_chemical","Crop dry chemical storage debit","W",crop.map(|v|-v.chemical_storage_j/b.seconds).or_else(||c.crop.is_none().then_some(0.)),"-budget.crop.chemical_storage_j / seconds; user-assumed dry chemical basis"));
         d.heat.push(term("crop_vapor","Crop vapor phase storage debit","W",crop.map(|v|-v.vapor_phase_j/b.seconds).or_else(||c.crop.is_none().then_some(0.)),"-budget.crop.vapor_phase_j / seconds; finite vapor transfer"));

@@ -26,6 +26,9 @@ pub fn source() -> Value {
 pub struct Ledger {
     #[serde(default,skip_serializing_if="Option::is_none")]
     pub crop_storage_debits_j: Option<[f64;2]>,
+    /// Optional [wall condensation heat released, −leak enthalpy removal] accumulation.
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub wall_leak_storage_j: Option<[f64;2]>,
     pub model: String,
     pub origin_time_s: f64,
     pub executed_seconds: f64,
@@ -40,6 +43,7 @@ impl Ledger {
     pub fn new(time: f64, capacity: f64) -> Self {
         Self {
             crop_storage_debits_j: None,
+            wall_leak_storage_j: None,
             model: MODEL.into(),
             origin_time_s: time,
             executed_seconds: 0.,
@@ -88,11 +92,13 @@ impl Ledger {
             *total += energy;
         }
         if let Some(crop)=&b.crop {let terms=self.crop_storage_debits_j.get_or_insert([0.;2]);terms[0]-=crop.chemical_storage_j;terms[1]-=crop.vapor_phase_j;}
+        if b.wall.is_some()||b.leak.is_some(){let terms=self.wall_leak_storage_j.get_or_insert([0.;2]);terms[0]+=b.wall.as_ref().map_or(0.,|w|w.condensation_heat_j);terms[1]-=b.leak.as_ref().map_or(0.,|l|l.cooling_j);}
         self.accumulated_interval_residual_j += b.thermal_residual_j;
     }
-    pub fn heat_path_sum_j(&self)->f64 {let base=self.terms_j[..10].iter().sum::<f64>();self.crop_storage_debits_j.map_or(base,|t|base+t[0]+t[1])}
+    pub fn heat_path_sum_j(&self)->f64 {let mut base=self.terms_j[..10].iter().sum::<f64>();base+=self.crop_storage_debits_j.map_or(0.,|t|t[0]+t[1]);base+=self.wall_leak_storage_j.map_or(0.,|t|t[0]+t[1]);base}
     pub fn validate(&self, time: f64) -> Result<(), String> {
         if self.crop_storage_debits_j.is_some_and(|v|v.iter().any(|x|!x.is_finite() || *x>0. || *x< -1e30)){return Err("Invalid crop chemical/phase heat debits".into());}
+        if self.wall_leak_storage_j.is_some_and(|v|v.iter().any(|x|!x.is_finite() || x.abs()>1e30)){return Err("Invalid wall/leak heat accumulation".into());}
         if self.model != MODEL {
             return Err("Unsupported cabin heat accounting model".into());
         }
@@ -206,6 +212,7 @@ pub fn span(rows: &[Sample]) -> Result<Span, String> {
         }
         if previous.crop_storage_debits_j.is_some() && l.crop_storage_debits_j.is_none() {return Err("Crop heat ledger is absent within retained range".into());}
         let old=previous.crop_storage_debits_j.unwrap_or([0.;2]);let now=l.crop_storage_debits_j.unwrap_or([0.;2]);if now[0]>old[0] || now[1]>old[1]{return Err("Crop heat counters reverse their signed accumulation".into());}
+        if previous.wall_leak_storage_j.is_some() && l.wall_leak_storage_j.is_none() {return Err("Wall/leak heat ledger is absent within retained range".into());}
         previous = l;
     }
     let mut terms = TERMS
@@ -222,13 +229,23 @@ pub fn span(rows: &[Sample]) -> Result<Span, String> {
     let mut heat = terms[..10].iter().map(|t| t.change_j).sum::<f64>();
     let storage = terms[10].change_j;
     if first.crop_storage_debits_j.is_some() || last.crop_storage_debits_j.is_some(){let a=first.crop_storage_debits_j.unwrap_or([0.;2]);let b=last.crop_storage_debits_j.unwrap_or([0.;2]);for (k,(id,label)) in [("crop_chemical","Crop dry chemical storage debit"),("crop_vapor","Crop vapor phase storage debit")].into_iter().enumerate(){let change=b[k]-a[k];heat+=change;terms.push(Term{id,label,initial_j:a[k],final_j:b[k],change_j:change});}}
+    if first.wall_leak_storage_j.is_some() || last.wall_leak_storage_j.is_some(){let a=first.wall_leak_storage_j.unwrap_or([0.;2]);let b=last.wall_leak_storage_j.unwrap_or([0.;2]);for (k,(id,label)) in [("wall_condensation_heat","Wall condensation reference heat released"),("leak_cooling","Structural leak enthalpy removal")].into_iter().enumerate(){let change=b[k]-a[k];heat+=change;terms.push(Term{id,label,initial_j:a[k],final_j:b[k],change_j:change});}}
     let executed = last.executed_seconds - first.executed_seconds;
     let missing = last.environment_missing_seconds - first.environment_missing_seconds;
     let unsupported =
         last.start_temperature_unsupported_seconds - first.start_temperature_unsupported_seconds;
     Ok(Span{source:source_for(last),origin_time_s:first.origin_time_s,completed_span_s:b.habitat.last_time-a.habitat.last_time,executed_seconds:executed,environment_missing_seconds:missing,start_temperature_unsupported_seconds:unsupported,complete_model_coverage:missing==0. && unsupported==0.,capacity_transitions:last.capacity_transitions-first.capacity_transitions,terms,heat_path_sum_j:heat,storage_sum_j:storage,heat_minus_storage_residual_j:heat-storage,accumulated_interval_residual_change_j:last.accumulated_interval_residual_j-first.accumulated_interval_residual_j,residual_convention:"Span residual is heat minus storage; saved interval residual uses storage minus heat. Independent accumulation may differ by floating-point roundoff.",limits:LIMITS})
 }
-fn source_for(l:&Ledger)->Value {let mut v=source();if l.crop_storage_debits_j.is_some(){v["optional_crop_storage"]=json!({"model":crate::crop_process::MODEL,"terms":["crop_chemical","crop_vapor"],"sign":"Negative chemical and vapor storage debits; original eleven-term array preserved"});}v}
+fn source_for(l:&Ledger)->Value {
+    let mut v=source();
+    if l.crop_storage_debits_j.is_some(){
+        v["optional_crop_storage"]=json!({"model":crate::crop_process::MODEL,"terms":["crop_chemical","crop_vapor"],"sign":"Negative chemical and vapor storage debits; original eleven-term array preserved"});
+    }
+    if l.wall_leak_storage_j.is_some() {
+        v["optional_wall_leak"]=json!({"models":[crate::moisture::WALL_MODEL,crate::habitat::LEAK_MODEL],"terms":["wall_condensation_heat","leak_cooling"],"sign":"Signed wall condensation heat release and structural leak enthalpy removal; original eleven-term array preserved"});
+    }
+    v
+}
 pub fn habitat_span(h: &Habitat) -> Value {
     match &h.heat {
         Some(l) => json!({"ledger":l,"source":source_for(l)}),

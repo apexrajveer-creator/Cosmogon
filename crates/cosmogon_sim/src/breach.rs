@@ -91,7 +91,7 @@ impl Gas {
         }
         Ok(())
     }
-    fn fraction(self, f: f64) -> Self {
+    pub(crate) fn fraction(self, f: f64) -> Self {
         Self {
             oxygen_kg: self.oxygen_kg * f,
             nitrogen_kg: self.nitrogen_kg * f,

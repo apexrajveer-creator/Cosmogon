@@ -69,6 +69,12 @@ pub struct Config {
     pub moisture: Option<crate::moisture::Config>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub breach: Option<crate::breach::Config>,
+    /// Passive signed wall condensation/evaporation; absent means no wall exchange.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wall_condensation: Option<crate::moisture::WallConfig>,
+    /// Nominal slow structural air leakage; absent means no leak (breach is separate).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leak: Option<LeakConfig>,
     /// Finite general storage for the four transferable supply stocks. Absent legacy
     /// definitions keep the historical 1e7 kg general bound byte-exactly.
     #[serde(default = "default_storage_capacity", skip_serializing_if = "is_default_storage_capacity")]
@@ -125,11 +131,74 @@ impl Default for Config {
             sabatier: None,
             moisture: None,
             breach: None,
+            wall_condensation: None,
+            leak: None,
             oxygen_reserve_capacity_kg: default_storage_capacity(),
             potable_water_capacity_kg: default_storage_capacity(),
             food_dry_capacity_kg: default_storage_capacity(),
             food_water_capacity_kg: default_storage_capacity(),
         }
+    }
+}
+pub const LEAK_MODEL: &str = "cosmogon-cabin-structural-leak/1";
+/// Nominal slow cabin gas leakage: proportional species escape with assumed constant
+/// cabin-gas specific heat. Independent of the pressure-driven breach orifice model.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LeakConfig {
+    pub model: String,
+    pub rate_kg_s: f64,
+    pub gas_specific_heat_j_kg: f64,
+}
+impl Default for LeakConfig {
+    fn default() -> Self {
+        Self {
+            model: LEAK_MODEL.into(),
+            rate_kg_s: 1.0e-6,
+            gas_specific_heat_j_kg: 1000.0,
+        }
+    }
+}
+impl LeakConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.model != LEAK_MODEL {
+            return Err(format!("Unsupported cabin leak model {}", self.model));
+        }
+        bounds(self.rate_kg_s, 0.0, 100.0, "Structural leak rate (kg/s)")?;
+        bounds(
+            self.gas_specific_heat_j_kg,
+            1.0,
+            1e5,
+            "Assumed cabin-gas specific heat (J/kg)",
+        )
+    }
+}
+/// Last completed interval's structural leak; escaped masses join the cumulative ledger.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LeakBudget {
+    pub initial_gas: crate::breach::Gas,
+    pub leaked: crate::breach::Gas,
+    pub temperature_k: f64,
+    pub cooling_j: f64,
+}
+impl LeakBudget {
+    pub fn validate(&self, c: &LeakConfig, seconds: f64) -> Result<(), String> {
+        self.initial_gas.validate()?;
+        self.leaked.validate()?;
+        let total = self.leaked.mass_kg();
+        for v in [self.temperature_k, self.cooling_j] {
+            if !v.is_finite() || v < 0.0 {
+                return Err("Invalid leak interval quantity".into());
+            }
+        }
+        if total > c.rate_kg_s * seconds + 1e-9
+            || (self.cooling_j - total * c.gas_specific_heat_j_kg * self.temperature_k).abs()
+                > 1e-8 * self.cooling_j.abs().max(1.0)
+        {
+            return Err("Leak interval disagrees with retained leak configuration".into());
+        }
+        Ok(())
     }
 }
 fn bounds(value: f64, min: f64, max: f64, name: &str) -> Result<(), String> {
@@ -223,6 +292,8 @@ impl Config {
         if let Some(c) = &self.sabatier {c.validate()?;}
         if let Some(c) = &self.moisture {c.validate()?;}
         if let Some(c) = &self.breach {c.validate()?;}
+        if let Some(c) = &self.wall_condensation {c.validate()?;}
+        if let Some(c) = &self.leak {c.validate()?;}
         // Internal oxygen production is gated only by equipment product capacities,
         // so the reserve tank must at least cover every installed oxygen ceiling.
         if let Some(c) = &self.crop {
@@ -404,6 +475,9 @@ pub struct State {
     pub water_vapor_kg: f64,
     #[serde(default, skip_serializing_if = "zero")]
     pub condensate_kg: f64,
+    /// Passive wall film liquid; held with no recycling path in this model.
+    #[serde(default, skip_serializing_if = "zero")]
+    pub wall_liquid_kg: f64,
     /// Cumulative gas outside the cabin, never available to cabin consumers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub escaped_gas: Option<crate::breach::Gas>,
@@ -425,7 +499,7 @@ impl State {
             + self.hydrogen_kg
             + self.methane_kg
             + self.sabatier_water_kg
-            + self.water_vapor_kg + self.condensate_kg
+            + self.water_vapor_kg + self.condensate_kg + self.wall_liquid_kg
             + self.crop.as_ref().map_or(0.,|c|c.mass_kg())
     }
     pub fn accounted_mass_kg(&self)->f64 {self.mass_kg()+self.escaped_gas.map(|g|g.mass_kg()).unwrap_or(0.0)}
@@ -470,6 +544,12 @@ pub struct Totals {
     pub condensed_kg: f64,
     #[serde(default, skip_serializing_if = "zero")]
     pub breach_enthalpy_j: f64,
+    /// Cumulative signed net wall condensation (positive) or evaporation (negative).
+    #[serde(default, skip_serializing_if = "zero")]
+    pub wall_condensed_kg: f64,
+    /// Cumulative nominal structural leak by species (breach escapes stay separate).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leaked_gas: Option<crate::breach::Gas>,
 }
 /// Last completed interval; instantaneous estimates are not silently mixed with these.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -509,6 +589,10 @@ pub struct Budget {
     pub moisture: Option<crate::moisture::Budget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub breach: Option<crate::breach::Budget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wall: Option<crate::moisture::WallBudget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leak: Option<LeakBudget>,
     #[serde(default, skip_serializing_if = "zero")]
     pub condensate_processed_kg: f64,
     #[serde(default, skip_serializing_if = "zero")]
@@ -566,7 +650,7 @@ impl Habitat {
             hydrogen_kg: 0.0,
             methane_kg: 0.0,
             sabatier_water_kg: 0.0,
-            water_vapor_kg:0.0,condensate_kg:0.0,escaped_gas:None,
+            water_vapor_kg:0.0,condensate_kg:0.0,wall_liquid_kg:0.0,escaped_gas:None,
             battery_j: i.battery_j,
         };
         let mut heat=definition.record_heat.then(||crate::habitat_heat::Ledger::new(time,c.heat_capacity_j_k));
@@ -636,7 +720,7 @@ impl Habitat {
             s.captured_co2_kg,
             s.hydrogen_kg,
             s.methane_kg,
-            s.sabatier_water_kg, s.water_vapor_kg, s.condensate_kg,
+            s.sabatier_water_kg, s.water_vapor_kg, s.condensate_kg, s.wall_liquid_kg,
             s.battery_j,
         ] {
             bounds(value, 0.0, 1.0e12, "Stored habitat quantity")?;
@@ -685,6 +769,8 @@ impl Habitat {
         ] {
             bounds(value, 0.0, 1.0e300, "Cumulative habitat budget")?;
         }
+        bounds(t.wall_condensed_kg, -1.0e12, 1.0e12, "Cumulative wall exchange")?;
+        if let Some(g)=t.leaked_gas {g.validate()?;}
         if self.alert_bits >= 128 {
             return Err("Unsupported habitat alert bits".into());
         }
@@ -723,8 +809,19 @@ impl Habitat {
             }
             if s.temperature_k!=b.final_temperature_k {return Err("Breach final temperature disagrees with cabin".into());}
         }
-        for (actual,expected) in [(s.water_vapor_kg,t.crew_vapor_kg+s.crop.as_ref().map_or(0.,|c|c.vapor_generated_kg)-t.condensed_kg-s.escaped_gas.map(|g|g.vapor_kg).unwrap_or(0.0)),(s.condensate_kg,t.condensed_kg-t.condensate_processed_kg)] {
-            if (actual-expected).abs()>1e-8*actual.abs().max(expected.abs()).max(t.crew_vapor_kg).max(1.0) {return Err("Moisture stores disagree with cumulative transfer history".into());}
+        for (actual,expected) in [(s.water_vapor_kg,t.crew_vapor_kg+s.crop.as_ref().map_or(0.,|c|c.vapor_generated_kg)-t.condensed_kg-t.wall_condensed_kg-s.escaped_gas.map(|g|g.vapor_kg).unwrap_or(0.0)),(s.condensate_kg,t.condensed_kg-t.condensate_processed_kg),(s.wall_liquid_kg,t.wall_condensed_kg)] {
+            if (actual-expected).abs()>1e-8*actual.abs().max(expected.abs()).max(t.crew_vapor_kg).max(t.condensed_kg).max(1.0) {return Err("Moisture stores disagree with cumulative transfer history".into());}
+        }
+        if let Some(b)=&self.budget.wall {
+            let c=self.budget.configuration.as_ref().and_then(|c|c.wall_condensation.as_ref()).ok_or("Wall interval lacks its configuration")?;
+            b.validate(c,self.budget.seconds)?;
+        }
+        if let Some(b)=&self.budget.leak {
+            let c=self.budget.configuration.as_ref().and_then(|c|c.leak.as_ref()).ok_or("Leak interval lacks its configuration")?;
+            b.validate(c,self.budget.seconds)?;
+            if let Some(g)=t.leaked_gas {
+                for (total,interval) in [(g.oxygen_kg,b.leaked.oxygen_kg),(g.nitrogen_kg,b.leaked.nitrogen_kg),(g.co2_kg,b.leaked.co2_kg),(g.vapor_kg,b.leaked.vapor_kg)] {if total+1e-8*total.max(1.0)<interval {return Err("Leak cumulative history below completed transfer".into());}}
+            } else {return Err("Leak interval lacks cumulative leaked ledger".into());}
         }
         bounds(self.budget.condensate_processed_kg,0.0,self.budget.water_processed_kg,"Condensate processed")?;
         bounds(self.budget.condensate_recovered_kg,0.0,self.budget.condensate_processed_kg,"Condensate recovered")?;
@@ -818,6 +915,7 @@ impl Habitat {
             }
         }
         if let Some(m)=&c.moisture {if m.condensate_capacity_kg<self.state.condensate_kg {return Err("New condensate capacity is below held liquid; no water discarded".into());}}
+        if let Some(w)=&c.wall_condensation {if w.liquid_capacity_kg<self.state.wall_liquid_kg {return Err("New wall liquid capacity is below held film; no water discarded".into());}}
         for (held, capacity, n) in [
             (
                 self.state.oxygen_reserve_kg,
@@ -879,7 +977,9 @@ impl Habitat {
     }
     pub fn uses_crop(&self)->bool {self.config.crop.is_some() || self.definition.config.crop.is_some() || self.state.crop.is_some() || self.budget.crop.is_some()}
     pub fn uses_breach(&self)->bool {self.config.breach.is_some() || self.definition.config.breach.is_some() || self.budget.breach.is_some() || self.state.escaped_gas.is_some() || self.totals.breach_enthalpy_j>0.0}
-    pub fn uses_moisture(&self)->bool {self.config.moisture.is_some() || self.definition.config.moisture.is_some() || self.budget.moisture.is_some() || self.totals.crew_vapor_kg>0.0 || self.state.water_vapor_kg>0.0 || self.state.condensate_kg>0.0}
+    pub fn uses_moisture(&self)->bool {self.config.moisture.is_some() || self.definition.config.moisture.is_some() || self.budget.moisture.is_some() || self.totals.crew_vapor_kg>0.0 || self.state.water_vapor_kg>0.0 || self.state.condensate_kg>0.0 || self.uses_wall()}
+    pub fn uses_wall(&self)->bool {self.config.wall_condensation.is_some() || self.definition.config.wall_condensation.is_some() || self.budget.wall.is_some() || self.state.wall_liquid_kg!=0.0 || self.totals.wall_condensed_kg!=0.0}
+    pub fn uses_leak(&self)->bool {self.config.leak.is_some() || self.definition.config.leak.is_some() || self.budget.leak.is_some() || self.totals.leaked_gas.is_some()}
     pub fn uses_sabatier(&self) -> bool {
         self.config.sabatier.is_some() || self.definition.config.sabatier.is_some() || self.budget.sabatier.is_some()
             || self.state.methane_kg>0.0 || self.state.sabatier_water_kg>0.0 || self.totals.sabatier_co2_consumed_kg>0.0
@@ -929,6 +1029,20 @@ impl Habitat {
         let old_battery = s.battery_j;
         let old_temperature = s.temperature_k;
         let crop_start=(s.potable_water_kg,s.captured_co2_kg,s.oxygen_reserve_kg);
+        // Nominal structural leak samples start-of-interval gas; mass leaves before the
+        // breach substep so breach retained identities hold on the post-leak cabin.
+        let leak = c.leak.as_ref().map(|l| {
+            let entry = s.cabin_gas();
+            let total = entry.mass_kg();
+            let leaked_mass = (l.rate_kg_s * dt).min(total).max(0.0);
+            let share = if total > 0.0 { leaked_mass / total } else { 0.0 };
+            LeakBudget {
+                initial_gas: entry,
+                leaked: entry.fraction(share),
+                temperature_k: s.temperature_k,
+                cooling_j: leaked_mass * l.gas_specific_heat_j_kg * s.temperature_k,
+            }
+        });
         let crop_request=c.crop.as_ref().zip(s.crop.as_ref()).map_or(0.,|(c,state)|state.request_w(c,self.last_time,dt));
         let generated = c.firm_power_w
             + flux * c.solar_area_m2 * c.solar_efficiency * c.atmospheric_transmission;
@@ -1096,9 +1210,15 @@ impl Habitat {
         }).transpose()?;
         let crop_debit=crop.as_ref().map_or(0.,|b|b.thermal_debit_j());
         if let Some(b)=&crop {s.potable_water_kg=(s.potable_water_kg-b.water_consumed_kg()).max(0.);s.captured_co2_kg=(s.captured_co2_kg-b.co2_consumed_kg).max(0.);s.oxygen_reserve_kg+=b.oxygen_generated_kg;s.water_vapor_kg+=b.vapor_generated_kg;}
+        // Passive wall condensation/evaporation runs on end-of-interval vapor after
+        // equipment/crop transfers; its phase heat enters the thermal balance below.
+        let wall = c.wall_condensation.as_ref().map(|w|w.exchange(s.water_vapor_kg,s.wall_liquid_kg,s.temperature_k,exterior,c.volume_m3,dt));
+        if let Some((net,_))=&wall {s.water_vapor_kg=(s.water_vapor_kg-net).max(0.0);s.wall_liquid_kg=(s.wall_liquid_kg+net).max(0.0);self.totals.wall_condensed_kg+=net;}
+        let wall_heat=wall.as_ref().map(|x| x.1.condensation_heat_j).unwrap_or(0.0);
+        let leak_cooling=leak.as_ref().map(|b|b.cooling_j).unwrap_or(0.0);
         // Reaction enthalpy leaves the thermal balance; the remaining reactor electricity
         // is waste heat. Never count all bus electricity as heat AND as reaction energy.
-        let gross = delivered + losses + metabolic - reaction_enthalpy/dt + reaction_heat/dt - crew_phase/dt + condensation_heat/dt - crop_debit/dt;
+        let gross = delivered + losses + metabolic - reaction_enthalpy/dt + reaction_heat/dt - crew_phase/dt + condensation_heat/dt - crop_debit/dt + wall_heat/dt - leak_cooling/dt;
         let rejection = rejection_capacity.min(
             ((s.temperature_k - c.temperature_setpoint_k).max(0.0) * c.heat_capacity_j_k / dt
                 + gross)
@@ -1117,6 +1237,16 @@ impl Habitat {
         s.temperature_k = old_temperature
             + (exterior - old_temperature) * x * phi
             + net * dt / c.heat_capacity_j_k * phi;
+        // Structural leak transfers join the cumulative outside ledger before the breach
+        // substep so both identities compose within one interval.
+        if let Some(b)=&leak {
+            s.oxygen_kg=(s.oxygen_kg-b.leaked.oxygen_kg).max(0.0);
+            s.nitrogen_kg=(s.nitrogen_kg-b.leaked.nitrogen_kg).max(0.0);
+            s.co2_kg=(s.co2_kg-b.leaked.co2_kg).max(0.0);
+            s.water_vapor_kg=(s.water_vapor_kg-b.leaked.vapor_kg).max(0.0);
+            s.escaped_gas.get_or_insert_with(Default::default).add(b.leaked);
+            self.totals.leaked_gas.get_or_insert_with(Default::default).add(b.leaked);
+        }
         // The existing thermal/process minute precedes the bounded finite breach substep.
         let breach=c.breach.as_ref().map(|e|crate::breach::integrate(e,s.cabin_gas(),s.temperature_k,c.volume_m3,c.heat_capacity_j_k,dt));
         let cooling=breach.as_ref().map(|b|b.lumped_cooling_j).unwrap_or(0.0);
@@ -1164,6 +1294,8 @@ impl Habitat {
             sabatier: reduction,
             breach,
             moisture,condensate_processed_kg:condensate_processed,condensate_recovered_kg:condensate_recovered,
+            wall: wall.map(|x| x.1),
+            leak,
             sabatier_water_processed_kg: product_processed,
             sabatier_water_recovered_kg: product_recovered,
         };
@@ -1204,9 +1336,9 @@ impl Habitat {
         bits
     }
     pub fn report(&self) -> serde_json::Value {
-        let mut report=serde_json::json!({"format":"cosmogon-habitat-report","schema_version":1,"habitat":self,"diagnostics":crate::habitat_diagnostics::explain(self),"oxygen_partial_pressure_pa":self.state.oxygen_pa(&self.config),"co2_partial_pressure_pa":self.state.co2_pa(&self.config),"total_pressure_pa":self.state.pressure_pa(&self.config),"data_states":{"crew_rates":"Published nominal reference model (NASA BVAD), not individual measurements","equipment_and_initial_stocks":"User-assumed design inputs","current_stores_and_budgets":"Modelled","exterior_temperature":"Global reduced climate model; local measured weather unavailable","horizontal_irradiance":"Derived from primary-star state and approximate body frame"},"electrolysis_source":self.uses_electrolysis().then(crate::electrolysis::source),"sabatier_source":self.uses_sabatier().then(crate::sabatier::source),"moisture_source":self.uses_moisture().then(crate::moisture::source),"breach_source":self.uses_breach().then(crate::breach::source),"moisture_observation":self.uses_moisture().then(||serde_json::json!({"vapor_pressure_pa":self.state.vapor_pressure_pa(&self.config),"relative_humidity":self.state.relative_humidity(&self.config),"reference_phase_energy_j":self.state.phase_energy_j(),"supersaturated":self.state.relative_humidity(&self.config).map(|v|v>1.0)})),"uncertainty":null,"uncertainty_scope":"Input and predictive model uncertainty are not quantified","source":{"url":SOURCE,"version":"NASA BVAD Rev2 February 2022, Table 3-31","equipment":"User-assumed capacities, powers, efficiencies and alert thresholds"},"limits":"Reduced nominal demand and lumped thermal model, not validated mission hardware, local weather, purification quality, medical response or safety certification. Optional reduced humidity budget; no greenhouse exchange, wall/ice condensation, seal/inward/rarefied leakage, EVA, maintenance, radiation or resupply."});
+        let mut report=serde_json::json!({"format":"cosmogon-habitat-report","schema_version":1,"habitat":self,"diagnostics":crate::habitat_diagnostics::explain(self),"oxygen_partial_pressure_pa":self.state.oxygen_pa(&self.config),"co2_partial_pressure_pa":self.state.co2_pa(&self.config),"total_pressure_pa":self.state.pressure_pa(&self.config),"data_states":{"crew_rates":"Published nominal reference model (NASA BVAD), not individual measurements","equipment_and_initial_stocks":"User-assumed design inputs","current_stores_and_budgets":"Modelled","exterior_temperature":"Global reduced climate model; local measured weather unavailable","horizontal_irradiance":"Derived from primary-star state and approximate body frame"},"electrolysis_source":self.uses_electrolysis().then(crate::electrolysis::source),"sabatier_source":self.uses_sabatier().then(crate::sabatier::source),"moisture_source":self.uses_moisture().then(crate::moisture::source),"breach_source":self.uses_breach().then(crate::breach::source),"moisture_observation":self.uses_moisture().then(||serde_json::json!({"vapor_pressure_pa":self.state.vapor_pressure_pa(&self.config),"relative_humidity":self.state.relative_humidity(&self.config),"reference_phase_energy_j":self.state.phase_energy_j(),"supersaturated":self.state.relative_humidity(&self.config).map(|v|v>1.0)})),"wall_observation":self.uses_wall().then(||serde_json::json!({"wall_liquid_kg":self.state.wall_liquid_kg,"cumulative_net_condensed_kg":self.totals.wall_condensed_kg,"model":crate::moisture::WALL_MODEL})),"leak_observation":self.uses_leak().then(||serde_json::json!({"leaked_gas":self.totals.leaked_gas,"model":LEAK_MODEL})),"leak_source":self.uses_leak().then(crate::moisture::leak_source),"uncertainty":null,"uncertainty_scope":"Input and predictive model uncertainty are not quantified","source":{"url":SOURCE,"version":"NASA BVAD Rev2 February 2022, Table 3-31","equipment":"User-assumed capacities, powers, efficiencies and alert thresholds"},"limits":"Reduced nominal demand and lumped thermal model, not validated mission hardware, local weather, purification quality, medical response or safety certification. Optional reduced humidity budget, passive lumped wall condensation (no ice) and nominal proportional structural leak; no greenhouse exchange, seal/inward/rarefied leakage, EVA, maintenance, radiation or resupply."});
         if self.heat.is_some() {report["heat_accounting"]=crate::habitat_heat::habitat_span(self);}
-        if self.uses_crop() {report["crop_source"]=crate::crop_process::source();report["data_states"]["crop_operation"] = serde_json::json!("Finite modelled transfers under user-assumed ideal maintained source conditions; not calibrated biology/chamber hardware");report["limits"]=serde_json::json!("Reduced nominal demand and lumped thermal model with optional conserved maintained-reference crop transfers. No independently controlled chamber, calibrated crop physiology, complete diet credit, wall/ice condensation, seal/inward/rarefied leakage, EVA, maintenance, radiation or resupply. Crop-specific source/progress/energy assumptions are retained separately in crop_source.");}
+        if self.uses_crop() {report["crop_source"]=crate::crop_process::source();report["data_states"]["crop_operation"] = serde_json::json!("Finite modelled transfers under user-assumed ideal maintained source conditions; not calibrated biology/chamber hardware");report["limits"]=serde_json::json!("Reduced nominal demand and lumped thermal model with optional conserved maintained-reference crop transfers. No independently controlled chamber, calibrated crop physiology, complete diet credit, ice condensation, seal/inward/rarefied leakage, EVA, maintenance, radiation or resupply. Passive lumped wall condensation and nominal structural leak are optional and separately sourced; crop-specific source/progress/energy assumptions are retained separately in crop_source.");}
         report
     }
 }
@@ -1332,7 +1464,12 @@ pub fn sample(u: &Universe, id: u64) -> Result<Sample, String> {
 }
 /// Shared actual observation formatting for export and recorded consistency checks.
 pub(crate) fn samples_csv(rows: &[Sample]) -> String {
-    let mut csv=String::from("simulation_time_s,completed_habitat_time_s,interval_s,temperature_k,total_pressure_pa,oxygen_partial_pressure_pa,co2_partial_pressure_pa,battery_j,oxygen_kg,oxygen_reserve_kg,potable_water_kg,wastewater_kg,brine_kg,food_dry_kg,food_water_kg,dry_waste_kg,captured_co2_kg,environment_available,temperature_domain_supported,horizontal_irradiance_w_m2,exterior_temperature_k,generated_w,requested_w,delivered_w,unserved_w,battery_losses_w,curtailed_w,served_cycle_fraction,metabolic_heat_w,heater_w,radiator_rejection_w,conduction_w,thermal_storage_w,mass_residual_kg,electric_residual_j,thermal_residual_j,total_unserved_j,total_unserved_person_seconds,hydrogen_kg,electrolysis_requested_w,electrolysis_delivered_w,electrolysis_oxygen_generated_kg,electrolysis_hydrogen_generated_kg,electrolysis_water_consumed_kg,electrolysis_electricity_j,electrolysis_reaction_enthalpy_j,electrolysis_waste_heat_j,total_reaction_enthalpy_j,electrolysis_constraints,methane_kg,sabatier_water_kg,sabatier_requested_w,sabatier_delivered_w,sabatier_co2_consumed_kg,sabatier_hydrogen_consumed_kg,sabatier_methane_generated_kg,sabatier_water_generated_kg,sabatier_electricity_j,sabatier_reaction_heat_j,sabatier_total_heat_j,sabatier_water_processed_kg,sabatier_water_recovered_kg,total_sabatier_co2_consumed_kg,total_sabatier_heat_j,total_sabatier_water_processed_kg,sabatier_constraints,water_vapor_kg,condensate_kg,vapor_pressure_pa,relative_humidity,saturation_pressure_pa,reference_phase_energy_j,moisture_requested_w,moisture_delivered_w,crew_vapor_kg,crew_phase_energy_j,condensed_kg,condensation_heat_j,moisture_electricity_j,moisture_constraints,condensate_processed_kg,condensate_recovered_kg,total_crew_vapor_kg,total_condensed_kg,total_condensate_processed_kg,escaped_oxygen_kg,escaped_nitrogen_kg,escaped_co2_kg,escaped_vapor_kg,accounted_mass_kg,breach_initial_pressure_pa,breach_final_pressure_pa,breach_initial_temperature_k,breach_final_temperature_k,breach_initial_rate_kg_s,breach_final_rate_kg_s,breach_integrated_seconds,breach_steps,breach_oxygen_kg,breach_nitrogen_kg,breach_co2_kg,breach_vapor_kg,breach_lumped_cooling_j,breach_structure_energy_change_j,breach_gas_energy_change_j,breach_phase_energy_change_j,breach_outflow_enthalpy_j,breach_energy_residual_j,breach_status,total_breach_enthalpy_j\n");
+    let wall_present = rows.iter().any(|r| r.habitat.uses_wall());
+    let leak_present = rows.iter().any(|r| r.habitat.uses_leak());
+    let mut csv=String::from("simulation_time_s,completed_habitat_time_s,interval_s,temperature_k,total_pressure_pa,oxygen_partial_pressure_pa,co2_partial_pressure_pa,battery_j,oxygen_kg,oxygen_reserve_kg,potable_water_kg,wastewater_kg,brine_kg,food_dry_kg,food_water_kg,dry_waste_kg,captured_co2_kg,environment_available,temperature_domain_supported,horizontal_irradiance_w_m2,exterior_temperature_k,generated_w,requested_w,delivered_w,unserved_w,battery_losses_w,curtailed_w,served_cycle_fraction,metabolic_heat_w,heater_w,radiator_rejection_w,conduction_w,thermal_storage_w,mass_residual_kg,electric_residual_j,thermal_residual_j,total_unserved_j,total_unserved_person_seconds,hydrogen_kg,electrolysis_requested_w,electrolysis_delivered_w,electrolysis_oxygen_generated_kg,electrolysis_hydrogen_generated_kg,electrolysis_water_consumed_kg,electrolysis_electricity_j,electrolysis_reaction_enthalpy_j,electrolysis_waste_heat_j,total_reaction_enthalpy_j,electrolysis_constraints,methane_kg,sabatier_water_kg,sabatier_requested_w,sabatier_delivered_w,sabatier_co2_consumed_kg,sabatier_hydrogen_consumed_kg,sabatier_methane_generated_kg,sabatier_water_generated_kg,sabatier_electricity_j,sabatier_reaction_heat_j,sabatier_total_heat_j,sabatier_water_processed_kg,sabatier_water_recovered_kg,total_sabatier_co2_consumed_kg,total_sabatier_heat_j,total_sabatier_water_processed_kg,sabatier_constraints,water_vapor_kg,condensate_kg,vapor_pressure_pa,relative_humidity,saturation_pressure_pa,reference_phase_energy_j,moisture_requested_w,moisture_delivered_w,crew_vapor_kg,crew_phase_energy_j,condensed_kg,condensation_heat_j,moisture_electricity_j,moisture_constraints,condensate_processed_kg,condensate_recovered_kg,total_crew_vapor_kg,total_condensed_kg,total_condensate_processed_kg,escaped_oxygen_kg,escaped_nitrogen_kg,escaped_co2_kg,escaped_vapor_kg,accounted_mass_kg,breach_initial_pressure_pa,breach_final_pressure_pa,breach_initial_temperature_k,breach_final_temperature_k,breach_initial_rate_kg_s,breach_final_rate_kg_s,breach_integrated_seconds,breach_steps,breach_oxygen_kg,breach_nitrogen_kg,breach_co2_kg,breach_vapor_kg,breach_lumped_cooling_j,breach_structure_energy_change_j,breach_gas_energy_change_j,breach_phase_energy_change_j,breach_outflow_enthalpy_j,breach_energy_residual_j,breach_status,total_breach_enthalpy_j");
+    if wall_present {csv.push_str(",wall_liquid_kg,total_wall_condensed_kg");}
+    if leak_present {csv.push_str(",leaked_oxygen_kg,leaked_nitrogen_kg,leaked_co2_kg,leaked_vapor_kg,total_leaked_gas_kg");}
+    csv.push('\n');
     for row in rows {
         let h = &row.habitat;
         let s = &h.state;
@@ -1420,6 +1557,8 @@ pub(crate) fn samples_csv(rows: &[Sample]) -> String {
         for i in 0..18 {csv.push(',');if let Some(v)=bv {csv.push_str(&v[i].to_string());}}
         csv.push(',');if let Some(e)=&b.breach {csv.push_str(e.status.label());}
         csv.push(',');csv.push_str(&h.totals.breach_enthalpy_j.to_string());
+        if wall_present {csv.push(',');csv.push_str(&s.wall_liquid_kg.to_string());csv.push(',');csv.push_str(&h.totals.wall_condensed_kg.to_string());}
+        if leak_present {let leaked=h.totals.leaked_gas.unwrap_or_default();for v in [leaked.oxygen_kg,leaked.nitrogen_kg,leaked.co2_kg,leaked.vapor_kg,leaked.mass_kg()] {csv.push(',');csv.push_str(&v.to_string());}}
         csv.push('\n');
     }
     csv
@@ -1564,6 +1703,167 @@ mod tests {
             ..h.config.clone()
         };
         assert!(h.check_config(&c).is_err());
+    }
+    fn moisture_world(wall: bool, leak: bool) -> Habitat {
+        let mut d = Definition::at(BodyRef { system: 0, body: 0 }, 0.0, 0.0);
+        d.config.crew = 1;
+        d.config.moisture = Some(crate::moisture::Config::default());
+        d.config.firm_power_w = 10_000.0;
+        d.config.base_load_w = 0.0;
+        d.config.scrubber_power_w = 0.0;
+        d.config.recycler_power_w = 0.0;
+        d.config.heater_limit_w = 0.0;
+        d.config.radiator_pump_w = 0.0;
+        d.config.radiator_area_m2 = 0.0;
+        d.config.conductance_w_k = 0.0;
+        d.config.heat_capacity_j_k = 1e9;
+        if wall {
+            d.config.wall_condensation = Some(crate::moisture::WallConfig {
+                wall_coupling: 0.0,
+                ..Default::default()
+            });
+        }
+        if leak {
+            d.config.leak = Some(LeakConfig {
+                rate_kg_s: 1.0e-4,
+                ..Default::default()
+            });
+        }
+        Habitat::new(0, d, 0.0).unwrap()
+    }
+    fn cold_env() -> Environment {
+        Environment {
+            irradiance_w_m2: Some(0.0),
+            exterior_temperature_k: Some(275.15),
+        }
+    }
+    #[test]
+    fn passive_wall_condensation_moves_vapor_to_film_and_keeps_identities() {
+        let mut h = moisture_world(true, false);
+        let mut dry = moisture_world(false, false);
+        for n in 1..=5760 {
+            h.step(n as f64 * PERIOD, cold_env()).unwrap();
+            dry.step(n as f64 * PERIOD, cold_env()).unwrap();
+            h.validate(h.last_time).unwrap();
+            assert!(h.budget.mass_residual_kg.abs() < 1e-9);
+            assert!(h.budget.electric_residual_j.abs() < 1e-6);
+        }
+        assert!(h.state.wall_liquid_kg > 0.0);
+        assert!(h.totals.wall_condensed_kg > 0.0);
+        assert_eq!(h.state.wall_liquid_kg, h.totals.wall_condensed_kg);
+        assert!(h.state.water_vapor_kg < dry.state.water_vapor_kg);
+        assert!(h.uses_wall() && h.uses_moisture());
+        let b = h.budget.wall.as_ref().unwrap();
+        assert!(b.net_condensed_kg.is_finite());
+        if b.net_condensed_kg != 0.0 {
+            assert!((b.condensation_heat_j - b.net_condensed_kg * crate::moisture::REFERENCE_PHASE_J_KG).abs() < 1e-6);
+        }
+    }
+    #[test]
+    fn structural_leak_removes_proportional_gas_cools_and_keeps_accounted_mass() {
+        let mut h = moisture_world(false, true);
+        let accounted = h.state.accounted_mass_kg();
+        for n in 1..=60 {
+            h.step(n as f64 * PERIOD, cold_env()).unwrap();
+            h.validate(h.last_time).unwrap();
+            assert!(h.budget.mass_residual_kg.abs() < 1e-9);
+        }
+        let leaked = h.totals.leaked_gas.unwrap();
+        assert!(leaked.mass_kg() > 0.0);
+        assert!((h.state.accounted_mass_kg() - accounted).abs() < 1e-8);
+        let escaped = h.state.escaped_gas.unwrap();
+        assert!((escaped.mass_kg() - leaked.mass_kg()).abs() < 1e-12);
+        let lb = h.budget.leak.as_ref().unwrap();
+        let share = lb.leaked.mass_kg() / lb.initial_gas.mass_kg();
+        for (a, b) in [
+            (lb.leaked.oxygen_kg, lb.initial_gas.oxygen_kg * share),
+            (lb.leaked.nitrogen_kg, lb.initial_gas.nitrogen_kg * share),
+            (lb.leaked.co2_kg, lb.initial_gas.co2_kg * share),
+            (lb.leaked.vapor_kg, lb.initial_gas.vapor_kg * share),
+        ] {
+            assert!((a - b).abs() < 1e-9 * b.abs().max(1.0));
+        }
+        assert!(lb.cooling_j > 0.0);
+        let cp = h.config.leak.as_ref().unwrap().gas_specific_heat_j_kg;
+        assert!((lb.cooling_j - lb.leaked.mass_kg() * cp * lb.temperature_k).abs() < 1e-6);
+    }
+    #[test]
+    fn leak_and_breach_compose_within_one_interval() {
+        let mut h = moisture_world(false, true);
+        h.config.breach = Some(crate::breach::Config::default());
+        for n in 1..=120 {
+            h.step(n as f64 * PERIOD, cold_env()).unwrap();
+            h.validate(h.last_time).unwrap();
+            assert!(h.budget.mass_residual_kg.abs() < 1e-9);
+        }
+        assert!(h.budget.leak.is_some() && h.budget.breach.is_some());
+        let escaped = h.state.escaped_gas.unwrap();
+        let leaked = h.totals.leaked_gas.unwrap();
+        assert!(escaped.vapor_kg >= leaked.vapor_kg - 1e-12);
+        assert!(h.uses_leak() && h.uses_breach());
+    }
+    #[test]
+    fn wall_and_leak_refusals_leave_configuration_and_state_unchanged() {
+        let mut h = moisture_world(true, true);
+        // Held film above a new capacity is refused by config gating.
+        let mut grown = h.clone();
+        grown.state.wall_liquid_kg = 10.0;
+        let mut small = h.config.clone();
+        small.wall_condensation.as_mut().unwrap().liquid_capacity_kg = 1.0;
+        assert!(grown.check_config(&small).is_err());
+        // Tampered cumulative counters fail the retained identities.
+        let mut bad = h.clone();
+        bad.totals.wall_condensed_kg += 1.0;
+        assert!(bad.validate(bad.last_time).is_err());
+        h.step(PERIOD, cold_env()).unwrap();
+        h.validate(h.last_time).unwrap();
+        let mut bad = h.clone();
+        bad.totals.leaked_gas = Some(Default::default());
+        assert!(bad.validate(bad.last_time).is_err());
+        // Absent optional sections never serialize.
+        let plain = moisture_world(false, false);
+        let json = serde_json::to_string(&plain).unwrap();
+        for key in ["wall_condensation", "wall_liquid_kg", "wall_condensed_kg", "\"leak\"", "leaked_gas", "\"wall\""] {
+            assert!(!json.contains(key), "legacy serialization leaked {key}");
+        }
+    }
+    #[test]
+    fn heat_ledger_wall_and_leak_supplement_closes_span_residual() {
+        let mut d = Definition::at(BodyRef { system: 0, body: 0 }, 0.0, 0.0);
+        d.record_heat = true;
+        d.config.crew = 1;
+        d.config.moisture = Some(crate::moisture::Config::default());
+        d.config.wall_condensation = Some(crate::moisture::WallConfig::default());
+        d.config.leak = Some(LeakConfig {
+            rate_kg_s: 1.0e-5,
+            ..Default::default()
+        });
+        d.config.firm_power_w = 10_000.0;
+        d.config.base_load_w = 0.0;
+        d.config.scrubber_power_w = 0.0;
+        d.config.recycler_power_w = 0.0;
+        d.config.heater_limit_w = 0.0;
+        d.config.radiator_pump_w = 0.0;
+        d.config.radiator_area_m2 = 0.0;
+        d.config.conductance_w_k = 0.0;
+        d.config.heat_capacity_j_k = 1e9;
+        let mut h = Habitat::new(0, d, 0.0).unwrap();
+        let mut rows = Vec::new();
+        for n in 1..=240 {
+            h.step(n as f64 * PERIOD, cold_env()).unwrap();
+            h.validate(h.last_time).unwrap();
+            rows.push(Sample {
+                simulation_time_s: n as f64 * PERIOD,
+                habitat: h.clone(),
+            });
+        }
+        let l = h.heat.as_ref().unwrap();
+        l.validate(h.last_time).unwrap();
+        assert!(l.wall_leak_storage_j.is_some());
+        let s = crate::habitat_heat::span(&rows).unwrap();
+        assert!((s.heat_path_sum_j - s.storage_sum_j).abs() < 1.0);
+        assert!(s.terms.iter().any(|t| t.id == "wall_condensation_heat"));
+        assert!(s.terms.iter().any(|t| t.id == "leak_cooling"));
     }
 }
 

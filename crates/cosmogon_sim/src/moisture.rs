@@ -216,13 +216,165 @@ impl Budget {
         Ok(())
     }
 }
+pub const WALL_MODEL: &str = "cosmogon-cabin-wall-condensation/1";
+/// Passive signed vapor↔wall-liquid exchange. Wall temperature is an explicit linear
+/// coupling assumption; the flux is a lumped surface mass-transfer assumption.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct WallConfig {
+    pub model: String,
+    pub area_m2: f64,
+    pub mass_transfer_kg_s_m2_pa: f64,
+    pub wall_coupling: f64,
+    pub liquid_capacity_kg: f64,
+    pub rate_kg_s: f64,
+}
+impl Default for WallConfig {
+    fn default() -> Self {
+        Self {
+            model: WALL_MODEL.into(),
+            area_m2: 50.0,
+            mass_transfer_kg_s_m2_pa: 1.0e-8,
+            wall_coupling: 0.5,
+            liquid_capacity_kg: 5.0,
+            rate_kg_s: 1.0e-3,
+        }
+    }
+}
+impl WallConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.model != WALL_MODEL {
+            return Err(format!("Unsupported wall condensation model {}", self.model));
+        }
+        for (v, min, max, label) in [
+            (self.area_m2, 0.0, 1e5, "Wall condensation area (m²)"),
+            (
+                self.mass_transfer_kg_s_m2_pa,
+                0.0,
+                1e-6,
+                "Assumed wall mass-transfer coefficient (kg/(s·m²·Pa))",
+            ),
+            (self.wall_coupling, 0.0, 1.0, "Assumed wall thermal coupling"),
+            (
+                self.liquid_capacity_kg,
+                0.0,
+                1e7,
+                "Wall liquid film capacity (kg)",
+            ),
+            (self.rate_kg_s, 0.0, 100.0, "Wall exchange rate limit (kg/s)"),
+        ] {
+            if !v.is_finite() || !(min..=max).contains(&v) {
+                return Err(format!(
+                    "{label} must be finite and between {min} and {max}"
+                ));
+            }
+        }
+        Ok(())
+    }
+    /// Signed net condensation (positive) or evaporation (negative) over one interval.
+    /// Outside the NIST saturation domain no exchange occurs.
+    pub fn exchange(
+        &self,
+        vapor_kg: f64,
+        wall_liquid_kg: f64,
+        cabin_temperature_k: f64,
+        exterior_temperature_k: f64,
+        volume_m3: f64,
+        seconds: f64,
+    ) -> (f64, WallBudget) {
+        let wall_temperature_k =
+            exterior_temperature_k + self.wall_coupling * (cabin_temperature_k - exterior_temperature_k);
+        let saturation = saturation_pa(wall_temperature_k);
+        let mut constraints = Vec::new();
+        let Some(saturation) = saturation else {
+            constraints.push("wall temperature outside the 273.15–303 K saturation fit".into());
+            return (
+                0.0,
+                WallBudget {
+                    wall_temperature_k: Some(wall_temperature_k),
+                    saturation_pa: None,
+                    net_condensed_kg: 0.0,
+                    condensation_heat_j: 0.0,
+                    constraints,
+                },
+            );
+        };
+        let p_vapor = vapor_pressure_pa(vapor_kg, cabin_temperature_k, volume_m3);
+        let driving = p_vapor - saturation;
+        let rated = self.mass_transfer_kg_s_m2_pa * self.area_m2 * driving * seconds;
+        let capped = rated.clamp(-self.rate_kg_s * seconds, self.rate_kg_s * seconds);
+        let net = if capped > 0.0 {
+            capped.min(vapor_kg).min((self.liquid_capacity_kg - wall_liquid_kg).max(0.0))
+        } else {
+            capped.max(-wall_liquid_kg)
+        };
+        if rated > capped {
+            constraints.push("finite wall exchange rate limit".into());
+        }
+        if capped > 0.0 && vapor_kg < capped {
+            constraints.push("start vapor available for condensation".into());
+        }
+        if capped > 0.0 && self.liquid_capacity_kg - wall_liquid_kg < capped {
+            constraints.push("wall liquid film capacity headroom".into());
+        }
+        if capped < 0.0 && wall_liquid_kg < -capped {
+            constraints.push("held wall liquid available for evaporation".into());
+        }
+        (
+            net,
+            WallBudget {
+                wall_temperature_k: Some(wall_temperature_k),
+                saturation_pa: Some(saturation),
+                net_condensed_kg: net,
+                condensation_heat_j: net * REFERENCE_PHASE_J_KG,
+                constraints,
+            },
+        )
+    }
+}
+/// Last completed interval's passive wall exchange; signed condensation is positive.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct WallBudget {
+    pub wall_temperature_k: Option<f64>,
+    pub saturation_pa: Option<f64>,
+    pub net_condensed_kg: f64,
+    pub condensation_heat_j: f64,
+    pub constraints: Vec<String>,
+}
+impl WallBudget {
+    pub fn validate(&self, c: &WallConfig, seconds: f64) -> Result<(), String> {
+        for v in [self.net_condensed_kg, self.condensation_heat_j] {
+            if !v.is_finite() {
+                return Err("Invalid wall condensation interval quantity".into());
+            }
+        }
+        if self.wall_temperature_k.is_some_and(|v| !v.is_finite() || v <= 0.0)
+            || self.saturation_pa.is_some_and(|v| !v.is_finite() || v <= 0.0)
+            || self.net_condensed_kg.abs() > c.rate_kg_s * seconds + 1e-9
+            || (self.condensation_heat_j - self.net_condensed_kg * REFERENCE_PHASE_J_KG).abs()
+                > 1e-8 * self.condensation_heat_j.abs().max(1.0)
+            || (self.saturation_pa.is_none() && self.net_condensed_kg != 0.0)
+        {
+            return Err("Wall interval disagrees with retained wall configuration".into());
+        }
+        Ok(())
+    }
+}
+pub fn leak_source() -> serde_json::Value {
+    serde_json::json!({"model":crate::habitat::LEAK_MODEL,
+        "version":"Explicit engineering assumption; no empirical leakage dataset claimed",
+        "description":"Nominal slow cabin gas leakage proportional to current species masses with assumed constant cabin-gas specific heat enthalpy removal; independent of the pressure-driven breach orifice model.",
+        "uncertainty":null,"limits":"No seal degradation, pressure- or damage-driven flow, inward/rarefied flow, humidity-dependent leak rate, wall icing or collection plumbing."})
+}
 pub fn source() -> serde_json::Value {
     serde_json::json!({"model":MODEL,"saturation_source":SATURATION_SOURCE,"gas_source":GAS_SOURCE,"liquid_source":crate::electrolysis::ENTHALPY_SOURCE,"crew_source":crate::habitat::SOURCE,
         "version":"NIST SRD69 selected coefficients/CODATA, retrieved 2026-10-09; NASA BVAD Rev2 Table3-31",
         "antoine":{"a":5.40221,"b":1838.675,"c":-31.737,"equation":"log10(P_bar)=A-B/(T_K+C)","supported_temperature_k":[273.15,303.0]},
+        "wall_condensation":{"model":WALL_MODEL,"flux":"rate_kg_s = k·area·(p_vapor − p_sat(T_wall)) with T_wall = T_exterior + coupling·(T_cabin − T_exterior)","sign":"Positive net condenses vapor onto walls; negative evaporates held wall liquid","phase_energy":"net·REFERENCE_PHASE_J_KG released (condensation) or debited (evaporation) from cabin sensible heat","domain":"Wall temperature must lie in the 273.15–303 K NIST saturation fit; otherwise no exchange","film":"Bounded by liquid_capacity_kg and a finite rate_kg_s cap; wall liquid is held, with no recycling path"},
         "water_molar_mass_kg_mol":WATER_MOLAR_KG,"gas_constant_j_mol_k":R,"gas_formation_kj_mol":-241.826,"liquid_formation_kj_mol":-285.830,"reference_phase_j_kg":REFERENCE_PHASE_J_KG,"reference_temperature_k":298.15,
         "nominal_respiration_perspiration_kg_person_day":2.946,"reference_latent_j_person_day":6_118_000.0,"inferred_default_airborne_fraction":REFERENCE_AIRBORNE_FRACTION,
-        "uncertainty":null,"limits":"Well-mixed ideal vapor and constant reference phase enthalpy; assumed moisture partition and equipment. No wall/ice condensation, temperature-dependent latent heat/COP, purification quality, crop exchange or field calibration. Supersaturation is retained explicitly."})
+        "uncertainty":null,"limits":"Well-mixed ideal vapor and constant reference phase enthalpy; assumed moisture partition, equipment and passive wall coupling (lumped mass transfer, wall temperature by linear cabin↔exterior coupling). No ice condensation, temperature-dependent latent heat/COP, purification quality, crop exchange or field calibration. Supersaturation is retained explicitly."})
 }
 
 #[cfg(test)]
@@ -534,5 +686,59 @@ mod tests {
         assert!(habitat::export(&initial, &a, 0, &rows, &root).is_err());
         std::fs::remove_dir_all(root).unwrap();
 
+    }
+    #[test]
+    fn wall_exchange_is_signed_bounded_and_domain_refused() {
+        let w = WallConfig::default();
+        // Cold wall in domain: supersaturated cabin vapor condenses, bounded by film headroom.
+        let small = WallConfig {
+            liquid_capacity_kg: 1.0e-9,
+            ..Default::default()
+        };
+        let (net, b) = w.exchange(20.0, 0.0, 293.15, 275.15, 500.0, 60.0);
+        assert!(net > 0.0);
+        assert!(net <= w.rate_kg_s * 60.0 + 1e-12);
+        assert!(b.condensation_heat_j > 0.0);
+        near(b.condensation_heat_j, net * REFERENCE_PHASE_J_KG, 1e-6);
+        let (capped, _) = small.exchange(20.0, 0.0, 293.15, 275.15, 500.0, 60.0);
+        assert_eq!(capped, 1.0e-9);
+        // Warm wall with a held film evaporates, bounded by held liquid.
+        let (evap, eb) = w.exchange(1.0e-6, 0.5, 293.15, 303.0, 500.0, 60.0);
+        assert!(evap < 0.0 && (-0.5..=0.0).contains(&evap));
+        assert!(eb.condensation_heat_j < 0.0);
+        let (dry, db) = w.exchange(1.0e-9, 0.0, 293.15, 303.0, 500.0, 60.0);
+        assert_eq!(dry, 0.0);
+        assert!(db.constraints.iter().any(|c| c.contains("evaporation")));
+        // Outside the saturation domain the exchange is exactly zero.
+        let (none, nb) = w.exchange(1.0, 0.5, 293.15, 200.0, 500.0, 60.0);
+        assert_eq!(none, 0.0);
+        assert!(nb.saturation_pa.is_none());
+        assert!(nb.constraints.iter().any(|c| c.contains("saturation fit")));
+        nb.validate(&w, 60.0).unwrap();
+        b.validate(&w, 60.0).unwrap();
+        eb.validate(&w, 60.0).unwrap();
+    }
+    #[test]
+    fn wall_and_leak_config_validation_refuses_invalid_models_and_bounds() {
+        let w = WallConfig {
+            model: "future/2".into(),
+            ..Default::default()
+        };
+        assert!(w.validate().is_err());
+        let w = WallConfig {
+            mass_transfer_kg_s_m2_pa: f64::NAN,
+            ..Default::default()
+        };
+        assert!(w.validate().is_err());
+        let l = crate::habitat::LeakConfig {
+            model: "future/2".into(),
+            ..Default::default()
+        };
+        assert!(l.validate().is_err());
+        let l = crate::habitat::LeakConfig {
+            gas_specific_heat_j_kg: 0.0,
+            ..Default::default()
+        };
+        assert!(l.validate().is_err());
     }
 }
