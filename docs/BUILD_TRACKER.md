@@ -11,7 +11,7 @@ and may renumber when a build starts.
 
 ---
 
-## Done — 53 builds
+## Done — 54 builds
 
 | # | Build | Status | Evidence |
 | --- | --- | --- | --- |
@@ -68,6 +68,7 @@ and may renumber when a build starts.
 | 51 | End-to-end supply-mission closeout | ✅ | gap 51, MISSION_CLOSEOUT.md (618 tests) |
 | 52 | Physical greenhouse installation + finite habitat-stock exchange | ✅ | gap 52, PHYSICAL_GREENHOUSE.md (622 tests) |
 | 53 | Physical wall condensation + nominal structural leak | ✅ | gap 53, WALL_CONDENSATION_LEAK.md (629 tests) |
+| 54 | Equipment calibration and scheduled maintenance | ✅ | gap 54, EQUIPMENT_MAINTENANCE.md (639 tests) |
 
 Released baselines: v0.3.0, v0.5.0, **v1.0.0** (`0411e9d`) — all preserved; tags untouched.
 
@@ -91,8 +92,8 @@ Released baselines: v0.3.0, v0.5.0, **v1.0.0** (`0411e9d`) — all preserved; ta
 | --- | --- | --- |
 | 52 | ~~Physical greenhouse installation + finite resource exchange with habitat stocks~~ | ✅ **DONE** |
 | 53 | ~~Physical humidity/leak/wall-condensation coupling~~ | ✅ **DONE** |
-| 54 | Equipment calibration and maintenance model | ⬜ **NEXT** |
-| 55 | Finite settlement construction and logistics | ⬜ |
+| 54 | ~~Equipment calibration and maintenance model~~ | ✅ **DONE** |
+| 55 | Finite settlement construction and logistics | ⬜ **NEXT** |
 | 56 | Life-support validation beyond reference assumptions (calibration/uncertainty) | ⬜ |
 | 57 | Environmental hazard completeness (breach/radiation propagation) | ⬜ |
 

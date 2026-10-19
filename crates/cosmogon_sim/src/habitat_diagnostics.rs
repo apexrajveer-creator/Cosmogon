@@ -532,6 +532,23 @@ pub fn explain(h: &Habitat) -> Diagnostics {
             d.explanations.push(Explanation{id:"leak",text:format!("Nominal structural leak removed {:.6} kg over {:.1} s at assumed {:.1} J/kg cabin-gas heat; independent of the pressure-driven breach orifice model. No seal degradation, inward or rarefied flow is modelled.",l.leaked.mass_kg(),b.seconds,l.cooling_j/l.leaked.mass_kg().max(1e-12)),evidence:vec!["budget.leak","budget.configuration.leak","totals.leaked_gas"]});
         }
     }
+    if h.uses_maintenance() {
+        let names=["scrubber","recycler","heater","radiator","moisture","electrolysis","sabatier"];
+        let mut parts:Vec<String>=Vec::new();
+        if let Some(mb)=&b.maintenance {
+            for (i,slot) in mb.slots().into_iter().enumerate() {
+                if let Some(x)=slot {parts.push(format!("{} condition {:.3}→{:.3}, operating {:.0} s, maintaining {:.0} s, scale {:.3}",names[i],x.condition_before,x.condition_after,x.operating_s,x.maintenance_s,x.effective_scale));}
+            }
+        }
+        if parts.is_empty() {
+            if let Some(ms)=&h.state.maintenance {
+                for (i,slot) in ms.slots().into_iter().enumerate() {
+                    if let Some(x)=slot {parts.push(format!("{} condition {:.3} (held between intervals)",names[i],x.condition));}
+                }
+            }
+        }
+        d.explanations.push(Explanation{id:"maintenance",text:format!("{}; cumulative maintenance window time {:.3} h. Capacity scales by authored calibration × condition; worn equipment still draws nominal process power until a window replaces it with maintenance power. No stochastic failure or measured reliability claim.",if parts.is_empty(){"No completed maintenance interval evidence".into()} else {parts.join("; ")},h.totals.maintenance_hours),evidence:vec!["budget.maintenance","budget.configuration.maintenance","state.maintenance","totals.maintenance_hours"]});
+    }
     if h.uses_crop(){
         d.heat.push(term("crop_chemical","Crop dry chemical storage debit","W",crop.map(|v|-v.chemical_storage_j/b.seconds).or_else(||c.crop.is_none().then_some(0.)),"-budget.crop.chemical_storage_j / seconds; user-assumed dry chemical basis"));
         d.heat.push(term("crop_vapor","Crop vapor phase storage debit","W",crop.map(|v|-v.vapor_phase_j/b.seconds).or_else(||c.crop.is_none().then_some(0.)),"-budget.crop.vapor_phase_j / seconds; finite vapor transfer"));
