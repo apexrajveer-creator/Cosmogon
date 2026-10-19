@@ -57,6 +57,13 @@ struct Args {
     habitat_id: Option<u64>,
     nutrient_kg: Option<f64>,
     store_kg: Option<f64>,
+    material_kg: Option<f64>,
+    from_id: Option<u64>,
+    to_id: Option<u64>,
+    oxygen_kg: Option<f64>,
+    water_kg: Option<f64>,
+    food_dry_kg: Option<f64>,
+    food_water_kg: Option<f64>,
     from_site: Option<String>,
     to_site: Option<String>,
     latitude: f64,
@@ -126,6 +133,13 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         habitat_id: None,
         nutrient_kg: None,
         store_kg: None,
+        material_kg: None,
+        from_id: None,
+        to_id: None,
+        oxygen_kg: None,
+        water_kg: None,
+        food_dry_kg: None,
+        food_water_kg: None,
         from_site: None,
         to_site: None,
         latitude: 0.0,
@@ -184,6 +198,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if matches!(a.cmd.as_str(),"habitat-diagnose"|"habitat-crop-harvest") && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output") {return Err(format!("{flag} is not a habitat diagnosis option"));}
         if a.cmd=="habitat-crop-install" && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output"|"--definition"|"--nutrient-kg") {return Err(format!("{flag} is not a greenhouse installation option"));}
         if a.cmd=="habitat-crop-store" && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output"|"--store-kg") {return Err(format!("{flag} is not a crop food store option"));}
+        if a.cmd=="habitat-construction-supply" && !matches!(flag.as_str(),"--initial"|"--habitat-id"|"--output"|"--material-kg") {return Err(format!("{flag} is not a construction material supply option"));}
+        if a.cmd=="habitat-stock-transfer" && !matches!(flag.as_str(),"--initial"|"--from-id"|"--to-id"|"--output"|"--oxygen-kg"|"--water-kg"|"--food-dry-kg"|"--food-water-kg") {return Err(format!("{flag} is not a habitat stock transfer option"));}
         if a.cmd=="contact-hardware" && !matches!(flag.as_str(),"--initial"|"--target"|"--seed"|"--scenario"|"--output"|"--geographic-start"|"--static-shear"|"--operation-window") {return Err(format!("{flag} is not a contact hardware option"));}
         if a.cmd=="flight-definition" && !matches!(flag.as_str(),"--initial"|"--definition"|"--output"|"--target"|"--seed"|"--scenario"|"--samples"|"--interval-seconds"|"--geographic-start"|"--contact-hardware"|"--cargo-ledgers"|"--handling"|"--launch"|"--entry"|"--landing"|"--mission-span"|"--transfer") {return Err(format!("{flag} is not a world flight definition option"));}
         if a.cmd=="launch-definition" && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario"|"--thrust-time"|"--thrust-newtons"|"--maximum-acceleration"|"--liftoff-altitude"|"--maximum-start-altitude") {return Err(format!("{flag} is not a launch-definition option"));}
@@ -322,10 +338,17 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--from-index" => {if a.cmd!="habitat-balance" {return Err("--from-index requires habitat-balance".into());} let n=number::<usize>(val()?,&flag)?;if n>=1024{return Err("Initial index must be between 0 and 1023".into());}a.from_index=Some(n);},
             "--reference-index" => {if a.cmd!="habitat-pressure" {return Err("--reference-index requires habitat-pressure".into());}let n=number::<usize>(val()?,&flag)?;if n>=1024 {return Err("Reference index must be between 0 and 1023".into());}a.reference_index=Some(n);},
             "--initial" => a.initial = Some(val()?),
-            "--habitat-id" => {if !matches!(a.cmd.as_str(),"habitat"|"habitat-sweep"|"greenhouse"|"greenhouse-supplies"|"habitat-diagnose"|"habitat-crop-harvest"|"habitat-crop-install"|"habitat-crop-store") {return Err("--habitat-id requires habitat, habitat-sweep, habitat-diagnose, greenhouse or crop edits".into());}a.habitat_id=Some(number(val()?,&flag)?);},
+            "--habitat-id" => {if !matches!(a.cmd.as_str(),"habitat"|"habitat-sweep"|"greenhouse"|"greenhouse-supplies"|"habitat-diagnose"|"habitat-crop-harvest"|"habitat-crop-install"|"habitat-crop-store"|"habitat-construction-supply") {return Err("--habitat-id requires habitat, habitat-sweep, habitat-diagnose, greenhouse, crop or construction edits".into());}a.habitat_id=Some(number(val()?,&flag)?);},
             "--definition" => a.definition = Some(val()?),
             "--nutrient-kg" => {if a.cmd!="habitat-crop-install" {return Err("--nutrient-kg requires habitat-crop-install".into());}let v=number::<f64>(val()?,&flag)?;if !v.is_finite() || !(0.0..=1.0e7).contains(&v) {return Err("--nutrient-kg requires a finite charge between 0 and 1e7 kg".into());}a.nutrient_kg=Some(v);},
             "--store-kg" => {if a.cmd!="habitat-crop-store" {return Err("--store-kg requires habitat-crop-store".into());}let v=number::<f64>(val()?,&flag)?;if !v.is_finite() || !(0.0..=1.0e7).contains(&v) {return Err("--store-kg requires a finite request between 0 and 1e7 kg".into());}a.store_kg=Some(v);},
+            "--material-kg" => {if a.cmd!="habitat-construction-supply" {return Err("--material-kg requires habitat-construction-supply".into());}let v=number::<f64>(val()?,&flag)?;if !v.is_finite() || !(0.0..=1.0e7).contains(&v) {return Err("--material-kg requires a finite charge between 0 and 1e7 kg".into());}a.material_kg=Some(v);},
+            "--from-id" => {if a.cmd!="habitat-stock-transfer" {return Err("--from-id requires habitat-stock-transfer".into());}a.from_id=Some(number(val()?, &flag)?);},
+            "--to-id" => {if a.cmd!="habitat-stock-transfer" {return Err("--to-id requires habitat-stock-transfer".into());}a.to_id=Some(number(val()?, &flag)?);},
+            "--oxygen-kg" => {if a.cmd!="habitat-stock-transfer" {return Err("--oxygen-kg requires habitat-stock-transfer".into());}let v=number::<f64>(val()?,&flag)?;if !v.is_finite() || !(0.0..=1.0e7).contains(&v) {return Err("--oxygen-kg requires a finite amount between 0 and 1e7 kg".into());}a.oxygen_kg=Some(v);},
+            "--water-kg" => {if a.cmd!="habitat-stock-transfer" {return Err("--water-kg requires habitat-stock-transfer".into());}let v=number::<f64>(val()?,&flag)?;if !v.is_finite() || !(0.0..=1.0e7).contains(&v) {return Err("--water-kg requires a finite amount between 0 and 1e7 kg".into());}a.water_kg=Some(v);},
+            "--food-dry-kg" => {if a.cmd!="habitat-stock-transfer" {return Err("--food-dry-kg requires habitat-stock-transfer".into());}let v=number::<f64>(val()?,&flag)?;if !v.is_finite() || !(0.0..=1.0e7).contains(&v) {return Err("--food-dry-kg requires a finite amount between 0 and 1e7 kg".into());}a.food_dry_kg=Some(v);},
+            "--food-water-kg" => {if a.cmd!="habitat-stock-transfer" {return Err("--food-water-kg requires habitat-stock-transfer".into());}let v=number::<f64>(val()?,&flag)?;if !v.is_finite() || !(0.0..=1.0e7).contains(&v) {return Err("--food-water-kg requires a finite amount between 0 and 1e7 kg".into());}a.food_water_kg=Some(v);},
             "--alignment" => {if a.cmd!="habitat-compare" {return Err("--alignment requires habitat-compare".into());}a.alignment=val()?;},
             "--parameter" => a.parameter = val()?,
             "--from" => a.sweep_start = Some(number(val()?, &flag)?),
@@ -414,6 +437,8 @@ if a.geographic_start.as_deref().is_some_and(|p|p.trim().is_empty()) {return Err
     if a.cmd=="habitat-crop-harvest" && (a.initial.is_none() || a.habitat_id.is_none() || a.output.is_none()) {return Err("habitat-crop-harvest requires --initial SAVE --habitat-id ID --output NEW_DIR".into());}
     if a.cmd=="habitat-crop-install" && (a.initial.is_none() || a.habitat_id.is_none() || a.definition.is_none() || a.nutrient_kg.is_none() || a.output.is_none()) {return Err("habitat-crop-install requires --initial SAVE --habitat-id ID --definition CROP_CONFIG --nutrient-kg KG --output NEW_DIR".into());}
     if a.cmd=="habitat-crop-store" && (a.initial.is_none() || a.habitat_id.is_none() || a.output.is_none()) {return Err("habitat-crop-store requires --initial SAVE --habitat-id ID --output NEW_DIR".into());}
+    if a.cmd=="habitat-construction-supply" && (a.initial.is_none() || a.habitat_id.is_none() || a.material_kg.is_none() || a.output.is_none()) {return Err("habitat-construction-supply requires --initial SAVE --habitat-id ID --material-kg KG --output NEW_DIR".into());}
+    if a.cmd=="habitat-stock-transfer" && (a.initial.is_none() || a.from_id.is_none() || a.to_id.is_none() || a.output.is_none() || (a.oxygen_kg.is_none() && a.water_kg.is_none() && a.food_dry_kg.is_none() && a.food_water_kg.is_none())) {return Err("habitat-stock-transfer requires --initial SAVE --from-id ID --to-id ID, at least one species amount flag and --output NEW_DIR".into());}
     if a.cmd=="habitat-diagnose" && (a.initial.is_none() || a.habitat_id.is_none()) {return Err("habitat-diagnose requires --initial SAVE and explicit --habitat-id ID".into());}
     if a.cmd=="habitat-rerun" && (a.recording.as_deref().is_none_or(|p|p.trim().is_empty()) || a.output.as_deref().is_none_or(|p|p.trim().is_empty())){return Err("habitat-rerun requires --recording COMPLETE_DESIGN --output NEW_DIR".into());}
     if a.cmd=="habitat-verify" && a.recording.is_none() {return Err("habitat-verify requires --recording COMPLETE_PAIRED_FOLDER".into());}
@@ -476,7 +501,7 @@ fn help() {
     eprintln!("cosmogon-cli habitat-figure --recording FOLDER --definition GRAPH_LAYOUT --output NEW_DIR [--reference ORDINARY_B]");
     eprintln!("cosmogon-cli habitat-sweep --initial SAVE --output NEW_DIR --parameter firm_power_w --from 0 --to 4000 --runs 3 [--samples 25 --interval-days 0.041666666666666664]\n  or --definition SWEEP_PLAN; optional --habitat-id ID\ncosmogon-cli habitat-compare --recording A --reference B [--measure water --alignment elapsed|world --output NEW_DIR]");
     eprintln!("cosmogon-cli habitat-diagnose --initial SAVE --habitat-id ID [--output NEW_DIR]   # explain completed power/water/heat");
-    eprintln!("cosmogon-cli habitat-crop-install --initial SAVE --habitat-id ID --definition CROP_CONFIG --nutrient-kg KG --output NEW_DIR   # explicit runtime greenhouse installation granting only its nutrient charge\ncosmogon-cli habitat-crop-store --initial SAVE --habitat-id ID [--store-kg KG] --output NEW_DIR   # bounded 1:1 conversion of harvested edible dry material into the habitat dry-food tank");
+    eprintln!("cosmogon-cli habitat-crop-install --initial SAVE --habitat-id ID --definition CROP_CONFIG --nutrient-kg KG --output NEW_DIR   # explicit runtime greenhouse installation granting only its nutrient charge\ncosmogon-cli habitat-crop-store --initial SAVE --habitat-id ID [--store-kg KG] --output NEW_DIR   # bounded 1:1 conversion of harvested edible dry material into the habitat dry-food tank\ncosmogon-cli habitat-construction-supply --initial SAVE --habitat-id ID --material-kg KG --output NEW_DIR   # explicit bounded supply of processed construction material\ncosmogon-cli habitat-stock-transfer --initial SAVE --from-id ID --to-id ID [--oxygen-kg KG --water-kg KG --food-dry-kg KG --food-water-kg KG] --output NEW_DIR   # conserved same-body transfer of finite habitat supply stocks");
     eprintln!("cosmogon-cli habitat-verify --recording COMPLETE_PAIRED_FOLDER [--output NEW_REPORT_DIR]   # recompute every actual row and endpoint");
     eprintln!("cosmogon-cli habitat-pressure --recording BRANCH_FOLDER --observation INDEX [--reference-index INDEX] [--output NEW_DIR]\ncosmogon-cli habitat-inspect --recording STUDY_FOLDER [--observation INDEX --output NEW_TRAJECTORY_DIR]   # validate and inspect recorded habitat observations");
     println!(
@@ -497,6 +522,11 @@ fn help() {
       --nutrient-kg KG --output NEW_DIR  Runtime installation; grants only its nutrient charge.
   habitat-crop-store --initial SAVE --habitat-id ID [--store-kg KG]
       --output NEW_DIR  Bounded 1:1 harvested-edible → habitat dry-food conversion.
+  habitat-construction-supply --initial SAVE --habitat-id ID --material-kg KG
+      --output NEW_DIR  Explicit bounded charge of processed construction material.
+  habitat-stock-transfer --initial SAVE --from-id ID --to-id ID
+      [--oxygen-kg --water-kg --food-dry-kg --food-water-kg]
+      --output NEW_DIR  Conserved same-body transfer of finite habitat supply stocks.
   habitat-crop-definition [--target Mars --output NEW_FILE]  Explicit finite crop setup; maintained assumption starts false
   habitat-definition [--target Mars --latitude N --longitude E] [--initial SAVE]
       [--output NEW_FILE]        Create a complete editable preset for this world.
@@ -614,6 +644,8 @@ fn main() {
         "habitat-crop-harvest" => {if let Err(e)=habitat_crop_harvest(&a){eprintln!("Crop harvest failed: {e}");std::process::exit(1);}},
         "habitat-crop-install" => {if let Err(e)=habitat_crop_install(&a){eprintln!("Crop install failed: {e}");std::process::exit(1);}},
         "habitat-crop-store" => {if let Err(e)=habitat_crop_store(&a){eprintln!("Crop food store failed: {e}");std::process::exit(1);}},
+        "habitat-construction-supply" => {if let Err(e)=habitat_construction_supply(&a){eprintln!("Construction material supply failed: {e}");std::process::exit(1);}},
+        "habitat-stock-transfer" => {if let Err(e)=habitat_stock_transfer(&a){eprintln!("Habitat stock transfer failed: {e}");std::process::exit(1);}},
         "habitat-diagnose" => {if let Err(e)=habitat_diagnose(&a) {eprintln!("Habitat diagnosis failed: {e}");std::process::exit(1);}},
         "habitat-verify" => {
             match habitat_verify(&a) {Ok(v)=>{println!("{}",serde_json::to_string_pretty(&v).unwrap());if v["verified"]!=true {eprintln!("Replay differs from saved observations; results are preserved.");std::process::exit(1);}},Err(e)=>{eprintln!("Habitat replay did not complete: {e}");std::process::exit(1);}}
@@ -1277,6 +1309,51 @@ fn habitat_crop_store(a:&Args)->Result<(),String> {
     println!("{}",serde_json::to_string_pretty(&u.habitats.iter().find(|h|h.id==id).expect("stored").report()).map_err(|e|e.to_string())?);Ok(())
 }
 
+/// Explicit bounded supply of processed construction material into an existing
+/// habitat's finite construction stock. The edit grants only the declared
+/// charge; nothing beyond the requested amount or installed capacity moves.
+fn habitat_construction_supply(a:&Args)->Result<(),String> {
+    use std::io::Write;
+    let mut u=save::read_file(std::path::Path::new(a.initial.as_deref().ok_or("Initial world required")?)).map_err(|e|e.to_string())?;
+    let before=u.clone();let id=a.habitat_id.ok_or("Habitat identity required")?;
+    let system=u.habitats.iter().find(|h|h.id==id).ok_or("No such habitat")?.definition.body.system;
+    let requested_kg=a.material_kg.ok_or("Material charge required")?;
+    let edit=cosmogon_sim::sandbox::Edit::SupplyHabitatConstructionMaterial {system,id,requested_kg};
+    let action=serde_json::json!({"format":"cosmogon-construction-supply","schema_version":1,"edit":edit,"before_state_fingerprint":cosmogon_sim::research::state_fingerprint(&before)?});
+    u.apply_edit(edit)?;
+    let p=std::path::Path::new(a.output.as_deref().ok_or("New output folder required")?);
+    let row=cosmogon_sim::habitat::sample(&u,id)?;
+    cosmogon_sim::habitat::export(&u,&u,id,&[row],p)?;
+    for (name,text) in [("before-construction-supply.cosmo",save::to_json(&before,"Before explicit construction material supply").map_err(|e|e.to_string())?),("supply-action.json",serde_json::to_string_pretty(&action).map_err(|e|e.to_string())?)] {let mut f=std::fs::OpenOptions::new().write(true).create_new(true).open(p.join(name)).map_err(|e|e.to_string())?;f.write_all(text.as_bytes()).map_err(|e|e.to_string())?;}
+    println!("{}",serde_json::to_string_pretty(&u.habitats.iter().find(|h|h.id==id).expect("supplied").report()).map_err(|e|e.to_string())?);Ok(())
+}
+
+/// Atomic conserved transfer of the four finite supply stocks between two
+/// habitats of the same body. Per-species accepted amounts are bounded by the
+/// sender's held stock and the recipient's free storage; refusal leaves both
+/// sides unchanged and both habitats keep paired retained records.
+fn habitat_stock_transfer(a:&Args)->Result<(),String> {
+    use std::io::Write;
+    let mut u=save::read_file(std::path::Path::new(a.initial.as_deref().ok_or("Initial world required")?)).map_err(|e|e.to_string())?;
+    let before=u.clone();let from=a.from_id.ok_or("Source habitat identity required")?;let to=a.to_id.ok_or("Recipient habitat identity required")?;
+    let system=u.habitats.iter().find(|h|h.id==from).ok_or("No such source habitat")?.definition.body.system;
+    let requested=cosmogon_sim::supply_vehicle::Cargo {
+        oxygen_reserve_kg:a.oxygen_kg.unwrap_or(0.0),
+        potable_water_kg:a.water_kg.unwrap_or(0.0),
+        food_dry_kg:a.food_dry_kg.unwrap_or(0.0),
+        food_water_kg:a.food_water_kg.unwrap_or(0.0),
+    };
+    let edit=cosmogon_sim::sandbox::Edit::TransferHabitatStock {system,from,to,requested:requested.clone()};
+    let action=serde_json::json!({"format":"cosmogon-habitat-stock-transfer","schema_version":1,"edit":edit,"before_state_fingerprint":cosmogon_sim::research::state_fingerprint(&before)?});
+    u.apply_edit(edit)?;
+    let p=std::path::Path::new(a.output.as_deref().ok_or("New output folder required")?);
+    let row=cosmogon_sim::habitat::sample(&u,to)?;
+    cosmogon_sim::habitat::export(&u,&u,to,&[row],p)?;
+    for (name,text) in [("before-stock-transfer.cosmo",save::to_json(&before,"Before explicit habitat stock transfer").map_err(|e|e.to_string())?),("transfer-action.json",serde_json::to_string_pretty(&action).map_err(|e|e.to_string())?)] {let mut f=std::fs::OpenOptions::new().write(true).create_new(true).open(p.join(name)).map_err(|e|e.to_string())?;f.write_all(text.as_bytes()).map_err(|e|e.to_string())?;}
+    let sender=u.habitats.iter().find(|h|h.id==from).expect("source");let recipient=u.habitats.iter().find(|h|h.id==to).expect("recipient");
+    println!("{}",serde_json::to_string_pretty(&serde_json::json!({"format":"cosmogon-habitat-stock-transfer-result","schema_version":1,"requested":requested,"moved":sender.stock_transfers.last().map(|r|&r.moved),"source_report":sender.report(),"recipient_report":recipient.report()})).map_err(|e|e.to_string())?);Ok(())
+}
+
 /// Create a world containing one finite habitat, saved as a protected
 /// `.cosmo` file. This is the headless entry point for habitat-bearing
 /// worlds used by flight transfer studies.
@@ -1563,6 +1640,59 @@ mod argument_tests {
         let s=args(&["habitat-crop-store","--initial","s","--habitat-id","0","--store-kg","1","--output","o"]).unwrap();
         assert_eq!(s.store_kg,Some(1.));
         assert!(args(&["habitat-crop-store","--initial","s","--habitat-id","0","--output","o"]).is_ok());
+    }
+    #[test]
+    fn settlement_commands_refuse_ignored_or_incomplete_inputs() {
+        for v in [
+            vec!["habitat-construction-supply"],
+            vec!["habitat-construction-supply","--initial","s","--habitat-id","0"],
+            vec!["habitat-construction-supply","--initial","s","--habitat-id","0","--material-kg","50"],
+            vec!["habitat-construction-supply","--initial","s","--habitat-id","0","--material-kg","-1","--output","o"],
+            vec!["habitat-construction-supply","--initial","s","--habitat-id","0","--material-kg","50","--output","o","--samples","3"],
+            vec!["habitat-construction-supply","--store-kg","1"],
+            vec!["habitat-stock-transfer"],
+            vec!["habitat-stock-transfer","--initial","s","--from-id","0","--to-id","1","--output","o"],
+            vec!["habitat-stock-transfer","--initial","s","--from-id","0","--output","o","--oxygen-kg","10"],
+            vec!["habitat-stock-transfer","--initial","s","--from-id","0","--to-id","1","--oxygen-kg","-5","--output","o"],
+            vec!["habitat-stock-transfer","--initial","s","--from-id","0","--to-id","1","--oxygen-kg","10","--output","o","--habitat-id","3"],
+        ] {
+            assert!(args(&v).is_err(), "{v:?}");
+        }
+        let c = args(&[
+            "habitat-construction-supply",
+            "--initial",
+            "s",
+            "--habitat-id",
+            "7",
+            "--material-kg",
+            "125.5",
+            "--output",
+            "o",
+        ])
+        .unwrap();
+        assert_eq!(c.material_kg, Some(125.5));
+        assert_eq!(c.habitat_id, Some(7));
+        let t = args(&[
+            "habitat-stock-transfer",
+            "--initial",
+            "s",
+            "--from-id",
+            "0",
+            "--to-id",
+            "1",
+            "--water-kg",
+            "30",
+            "--food-dry-kg",
+            "5",
+            "--output",
+            "o",
+        ])
+        .unwrap();
+        assert_eq!(t.from_id, Some(0));
+        assert_eq!(t.to_id, Some(1));
+        assert_eq!(t.water_kg, Some(30.0));
+        assert_eq!(t.food_dry_kg, Some(5.0));
+        assert!(t.oxygen_kg.is_none());
     }
     #[test]
     fn crop_chemistry_requires_explicit_source_and_refuses_ignored_arguments() {

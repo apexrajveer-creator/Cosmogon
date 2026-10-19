@@ -549,6 +549,13 @@ pub fn explain(h: &Habitat) -> Diagnostics {
         }
         d.explanations.push(Explanation{id:"maintenance",text:format!("{}; cumulative maintenance window time {:.3} h. Capacity scales by authored calibration × condition; worn equipment still draws nominal process power until a window replaces it with maintenance power. No stochastic failure or measured reliability claim.",if parts.is_empty(){"No completed maintenance interval evidence".into()} else {parts.join("; ")},h.totals.maintenance_hours),evidence:vec!["budget.maintenance","budget.configuration.maintenance","state.maintenance","totals.maintenance_hours"]});
     }
+    if h.uses_construction(){
+        let text=match &b.construction {
+            Some(k)=>format!("Construction consumed {:.6} kg of held material over {:.0} s at served fraction {:.3} (requested {:.1} W, delivered {:.1} W), adding {:.6} m³ of live cabin volume; {:.6} kg held, {:.6} kg converted to structure, cumulative {:.6} m³ built.{} No structural strength, assembly physics or field calibration is claimed.",k.consumed_kg,b.seconds,k.served_fraction,k.requested_w,k.delivered_w,k.volume_added_m3,h.state.construction_material_kg,h.state.construction_structure_kg,h.totals.constructed_volume_m3,if k.constraints.is_empty(){String::new()}else{format!(" Constraints: {}.",k.constraints.join("; "))}),
+            None=>format!("Construction configuration is currently disabled; {:.6} kg held material and {:.6} kg structure mass are retained, cumulative {:.6} m³ built. No completed construction interval evidence.",h.state.construction_material_kg,h.state.construction_structure_kg,h.totals.constructed_volume_m3),
+        };
+        d.explanations.push(Explanation{id:"construction",text,evidence:vec!["budget.construction","budget.configuration.construction","state.construction_material_kg","state.construction_structure_kg","totals.constructed_volume_m3","config.volume_m3"]});
+    }
     if h.uses_crop(){
         d.heat.push(term("crop_chemical","Crop dry chemical storage debit","W",crop.map(|v|-v.chemical_storage_j/b.seconds).or_else(||c.crop.is_none().then_some(0.)),"-budget.crop.chemical_storage_j / seconds; user-assumed dry chemical basis"));
         d.heat.push(term("crop_vapor","Crop vapor phase storage debit","W",crop.map(|v|-v.vapor_phase_j/b.seconds).or_else(||c.crop.is_none().then_some(0.)),"-budget.crop.vapor_phase_j / seconds; finite vapor transfer"));
@@ -608,7 +615,7 @@ pub fn explain(h: &Habitat) -> Diagnostics {
 pub fn report(h: &Habitat, world_time_s: f64) -> Result<serde_json::Value, String> {
     h.validate(world_time_s)?;
     Ok(
-        serde_json::json!({"format":"cosmogon-habitat-diagnostic-report","schema_version":1,"world_time_s":world_time_s,"time_coordinate":"seconds since J2000; interval end can precede world time","diagnostics":explain(h),"habitat":h,"source":{"crew":SOURCE,"electrolysis":h.uses_electrolysis().then(crate::electrolysis::source),"sabatier":h.uses_sabatier().then(crate::sabatier::source),"moisture":h.uses_moisture().then(crate::moisture::source),"breach":h.uses_breach().then(crate::breach::source)}}),
+        serde_json::json!({"format":"cosmogon-habitat-diagnostic-report","schema_version":1,"world_time_s":world_time_s,"time_coordinate":"seconds since J2000; interval end can precede world time","diagnostics":explain(h),"habitat":h,"source":{"crew":SOURCE,"electrolysis":h.uses_electrolysis().then(crate::electrolysis::source),"sabatier":h.uses_sabatier().then(crate::sabatier::source),"moisture":h.uses_moisture().then(crate::moisture::source),"breach":h.uses_breach().then(crate::breach::source),"construction":h.uses_construction().then(crate::habitat_construction::source)}}),
     )
 }
 pub fn from_world(u: &Universe, id: u64) -> Result<serde_json::Value, String> {

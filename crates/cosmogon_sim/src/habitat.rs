@@ -78,6 +78,9 @@ pub struct Config {
     /// Optional scheduled equipment wear/maintenance and authored capacity calibration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub maintenance: Option<crate::habitat_maintenance::MaintenanceConfig>,
+    /// Optional continuous cabin construction from held finite material stock.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub construction: Option<crate::habitat_construction::Config>,
     /// Finite general storage for the four transferable supply stocks. Absent legacy
     /// definitions keep the historical 1e7 kg general bound byte-exactly.
     #[serde(default = "default_storage_capacity", skip_serializing_if = "is_default_storage_capacity")]
@@ -137,6 +140,7 @@ impl Default for Config {
             wall_condensation: None,
             leak: None,
             maintenance: None,
+            construction: None,
             oxygen_reserve_capacity_kg: default_storage_capacity(),
             potable_water_capacity_kg: default_storage_capacity(),
             food_dry_capacity_kg: default_storage_capacity(),
@@ -310,6 +314,7 @@ impl Config {
                 return Err("Sabatier maintenance requires enabled CO₂ reduction".into());
             }
         }
+        if let Some(k) = &self.construction {k.validate()?;}
         // Internal oxygen production is gated only by equipment product capacities,
         // so the reserve tank must at least cover every installed oxygen ceiling.
         if let Some(c) = &self.crop {
@@ -500,6 +505,12 @@ pub struct State {
     /// Held per-component equipment condition/cycle; absent when maintenance is disabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub maintenance: Option<crate::habitat_maintenance::MaintenanceState>,
+    /// Held finite processed construction material; zero when construction is unused.
+    #[serde(default, skip_serializing_if = "zero")]
+    pub construction_material_kg: f64,
+    /// Cumulative material converted into cabin structure mass (volume comes from config).
+    #[serde(default, skip_serializing_if = "zero")]
+    pub construction_structure_kg: f64,
     pub battery_j: f64,
 }
 impl State {
@@ -519,6 +530,7 @@ impl State {
             + self.methane_kg
             + self.sabatier_water_kg
             + self.water_vapor_kg + self.condensate_kg + self.wall_liquid_kg
+            + self.construction_material_kg + self.construction_structure_kg
             + self.crop.as_ref().map_or(0.,|c|c.mass_kg())
     }
     pub fn accounted_mass_kg(&self)->f64 {self.mass_kg()+self.escaped_gas.map(|g|g.mass_kg()).unwrap_or(0.0)}
@@ -572,6 +584,12 @@ pub struct Totals {
     /// Cumulative component maintenance window time across all components (hours).
     #[serde(default, skip_serializing_if = "zero")]
     pub maintenance_hours: f64,
+    /// Cumulative cabin volume added through construction.
+    #[serde(default, skip_serializing_if = "zero")]
+    pub constructed_volume_m3: f64,
+    /// Cumulative construction material converted into structure.
+    #[serde(default, skip_serializing_if = "zero")]
+    pub construction_material_used_kg: f64,
 }
 /// Last completed interval; instantaneous estimates are not silently mixed with these.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -617,6 +635,8 @@ pub struct Budget {
     pub leak: Option<LeakBudget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub maintenance: Option<crate::habitat_maintenance::MaintenanceBudget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub construction: Option<crate::habitat_construction::Budget>,
     #[serde(default, skip_serializing_if = "zero")]
     pub condensate_processed_kg: f64,
     #[serde(default, skip_serializing_if = "zero")]
@@ -630,6 +650,60 @@ pub struct Budget {
 pub struct Environment {
     pub irradiance_w_m2: Option<f64>,
     pub exterior_temperature_k: Option<f64>,
+}
+pub const STOCK_TRANSFER_MODEL: &str = "cosmogon-habitat-stock-transfer/1";
+/// Retained intra-settlement stock movement evidence on one side of a transfer.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct StockTransfer {
+    pub model: String,
+    pub counterparty: u64,
+    pub world_time_s: f64,
+    pub moved: crate::supply_vehicle::Cargo,
+    pub outbound: bool,
+}
+/// Paired outbound/inbound record agreement across every habitat pair.
+pub(crate) fn validate_stock_transfers(u: &Universe) -> Result<(), String> {
+    // Pairing keys are time and masses; each side's counterparty is fixed by the filter.
+    let key = |r: &StockTransfer| {
+        (
+            r.world_time_s,
+            r.moved.oxygen_reserve_kg,
+            r.moved.potable_water_kg,
+            r.moved.food_dry_kg,
+            r.moved.food_water_kg,
+        )
+    };
+    for a in &u.habitats {
+        for r in &a.stock_transfers {
+            if !u.habitats.iter().any(|h| h.id == r.counterparty) {
+                return Err("Habitat stock transfer counterparty no longer exists".into());
+            }
+        }
+        for b in &u.habitats {
+            if a.id == b.id {
+                continue;
+            }
+            let mut outs: Vec<_> = a
+                .stock_transfers
+                .iter()
+                .filter(|r| r.outbound && r.counterparty == b.id)
+                .map(key)
+                .collect();
+            let mut ins: Vec<_> = b
+                .stock_transfers
+                .iter()
+                .filter(|r| !r.outbound && r.counterparty == a.id)
+                .map(key)
+                .collect();
+            outs.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+            ins.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+            if outs != ins {
+                return Err("Habitat stock transfer records disagree with their counterparty".into());
+            }
+        }
+    }
+    Ok(())
 }
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Habitat {
@@ -646,6 +720,9 @@ pub struct Habitat {
     /// Applied atomic cargo receipts from co-located supported craft transfers.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub receipts: Vec<crate::vehicle_transfer::Receipt>,
+    /// Retained intra-settlement stock transfer records (both directions).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stock_transfers: Vec<StockTransfer>,
 }
 impl Habitat {
     pub fn new(id: u64, definition: Definition, time: f64) -> Result<Self, String> {
@@ -676,6 +753,8 @@ impl Habitat {
             sabatier_water_kg: 0.0,
             water_vapor_kg:0.0,condensate_kg:0.0,wall_liquid_kg:0.0,escaped_gas:None,
             maintenance: c.maintenance.as_ref().map(|_| Default::default()),
+            construction_material_kg: 0.0,
+            construction_structure_kg: 0.0,
             battery_j: i.battery_j,
         };
         let mut heat=definition.record_heat.then(||crate::habitat_heat::Ledger::new(time,c.heat_capacity_j_k));
@@ -691,11 +770,29 @@ impl Habitat {
             alert_bits: 0,
             heat,
             receipts: vec![],
+            stock_transfers: vec![],
         })
     }
     pub(crate) fn validate(&self, time: f64) -> Result<(), String> {
         self.definition.validate()?;
         crate::vehicle_transfer::validate_receipts(self, time)?;
+        for r in &self.stock_transfers {
+            if r.model != STOCK_TRANSFER_MODEL {
+                return Err("Unsupported retained habitat stock transfer model".into());
+            }
+            if r.counterparty == self.id {
+                return Err("Habitat stock transfer counterparty must differ".into());
+            }
+            bounds(r.world_time_s, -1.0e16, time, "Habitat stock transfer time")?;
+            for v in [
+                r.moved.oxygen_reserve_kg,
+                r.moved.potable_water_kg,
+                r.moved.food_dry_kg,
+                r.moved.food_water_kg,
+            ] {
+                bounds(v, 0.0, 1.0e7, "Habitat stock transfer mass")?;
+            }
+        }
         if self.definition.record_heat != self.heat.is_some() {return Err("Heat ledger and original definition disagree".into());}
         if let Some(heat)=&self.heat {heat.validate(self.last_time)?;}
         self.check_config(&self.config)?;
@@ -746,6 +843,8 @@ impl Habitat {
             s.hydrogen_kg,
             s.methane_kg,
             s.sabatier_water_kg, s.water_vapor_kg, s.condensate_kg, s.wall_liquid_kg,
+            s.construction_material_kg,
+            s.construction_structure_kg,
             s.battery_j,
         ] {
             bounds(value, 0.0, 1.0e12, "Stored habitat quantity")?;
@@ -853,6 +952,13 @@ impl Habitat {
             let c=self.budget.configuration.as_ref().and_then(|c|c.maintenance.as_ref()).ok_or("Maintenance interval lacks its configuration")?;
             b.validate(c,self.budget.seconds)?;
         }
+        if let Some(b)=&self.budget.construction {
+            let c=self.budget.configuration.as_ref().and_then(|c|c.construction.as_ref()).ok_or("Construction interval lacks its configuration")?;
+            b.validate(c,b.material_after_kg)?;
+        }
+        if let Some(k)=self.config.construction.as_ref().or(self.definition.config.construction.as_ref()) {
+            bounds(s.construction_material_kg,0.0,k.material_capacity_kg,"Construction material")?;
+        }
         if let Some(ms)=&s.maintenance {
             if let Some(m)=self.config.maintenance.as_ref().or(self.definition.config.maintenance.as_ref()) {
                 for (slot,(config,name)) in ms.slots().into_iter().zip(m.components()) {
@@ -952,6 +1058,7 @@ impl Habitat {
             }
         }
         if let Some(m)=&c.moisture {if m.condensate_capacity_kg<self.state.condensate_kg {return Err("New condensate capacity is below held liquid; no water discarded".into());}}
+        if let Some(k)=&c.construction {if k.material_capacity_kg<self.state.construction_material_kg {return Err("New construction material capacity is below held stock; no material discarded".into());}}
         if let Some(w)=&c.wall_condensation {if w.liquid_capacity_kg<self.state.wall_liquid_kg {return Err("New wall liquid capacity is below held film; no water discarded".into());}}
         for (held, capacity, n) in [
             (
@@ -1018,6 +1125,7 @@ impl Habitat {
     pub fn uses_wall(&self)->bool {self.config.wall_condensation.is_some() || self.definition.config.wall_condensation.is_some() || self.budget.wall.is_some() || self.state.wall_liquid_kg!=0.0 || self.totals.wall_condensed_kg!=0.0}
     pub fn uses_leak(&self)->bool {self.config.leak.is_some() || self.definition.config.leak.is_some() || self.budget.leak.is_some() || self.totals.leaked_gas.is_some()}
     pub fn uses_maintenance(&self)->bool {self.config.maintenance.is_some() || self.definition.config.maintenance.is_some() || self.budget.maintenance.is_some() || self.state.maintenance.is_some() || self.totals.maintenance_hours>0.0}
+    pub fn uses_construction(&self)->bool {self.config.construction.is_some() || self.definition.config.construction.is_some() || self.budget.construction.is_some() || self.state.construction_material_kg>0.0 || self.state.construction_structure_kg>0.0 || self.totals.constructed_volume_m3>0.0 || self.totals.construction_material_used_kg>0.0}
     pub fn uses_sabatier(&self) -> bool {
         self.config.sabatier.is_some() || self.definition.config.sabatier.is_some() || self.budget.sabatier.is_some()
             || self.state.methane_kg>0.0 || self.state.sabatier_water_kg>0.0 || self.totals.sabatier_co2_consumed_kg>0.0
@@ -1087,6 +1195,7 @@ impl Habitat {
             }
         });
         let crop_request=c.crop.as_ref().zip(s.crop.as_ref()).map_or(0.,|(c,state)|state.request_w(c,self.last_time,dt));
+        let construction_request=c.construction.as_ref().map_or(0.,|k|k.power_w);
         let generated = c.firm_power_w
             + flux * c.solar_area_m2 * c.solar_efficiency * c.atmospheric_transmission;
         let heater_request =
@@ -1133,6 +1242,7 @@ impl Habitat {
             sabatier_slot_w + fx(6).maintenance_w,
             moisture_slot_w + fx(4).maintenance_w,
             crop_request,
+            construction_request,
         ];
         let requested: f64 = requests.iter().sum();
         let discharge = (requested - generated)
@@ -1147,7 +1257,7 @@ impl Habitat {
             - discharge / c.discharge_efficiency * dt)
             .max(0.0);
         let mut available = generated + discharge;
-        let mut supplied = [0.0; 9];
+        let mut supplied = [0.0; 10];
         for (i, request) in requests.iter().enumerate() {
             supplied[i] = available.min(*request);
             available -= supplied[i];
@@ -1173,6 +1283,35 @@ impl Habitat {
             let (b,hours)=crate::habitat_maintenance::settle(m,s.maintenance.as_mut(),dt,served);
             self.totals.maintenance_hours+=hours.iter().sum::<f64>();
             b
+        });
+        // Construction consumes held material at the served power fraction; consumed mass
+        // becomes structure mass here and the live volume grows only after this interval's
+        // configuration has been retained in the budget.
+        let mut construction_volume_add = 0.0;
+        let construction = c.construction.as_ref().map(|k| {
+            let served = fraction(9);
+            let before = s.construction_material_kg;
+            let (consumed, volume_added, volume_constraint) =
+                crate::habitat_construction::draw(k, before, c.volume_m3, dt, served);
+            s.construction_material_kg = (before - consumed).max(0.0);
+            s.construction_structure_kg += consumed;
+            self.totals.constructed_volume_m3 += volume_added;
+            self.totals.construction_material_used_kg += consumed;
+            construction_volume_add = volume_added;
+            let mut constraints: Vec<String> = volume_constraint.into_iter().collect();
+            if served < 1.0 {
+                constraints.push("construction power curtailed".into());
+            }
+            crate::habitat_construction::Budget {
+                material_before_kg: before,
+                material_after_kg: s.construction_material_kg,
+                consumed_kg: consumed,
+                volume_added_m3: volume_added,
+                requested_w: k.power_w,
+                delivered_w: supplied[9],
+                served_fraction: served,
+                constraints,
+            }
         });
         // A mechanical regulator transfers stored oxygen; it creates no new oxygen.
         let oxygen_target = c.oxygen_setpoint_pa * c.volume_m3 * O2 / (R * s.temperature_k);
@@ -1359,9 +1498,13 @@ impl Habitat {
             wall: wall.map(|x| x.1),
             leak,
             maintenance,
+            construction,
             sabatier_water_processed_kg: product_processed,
             sabatier_water_recovered_kg: product_recovered,
         };
+        if construction_volume_add > 0.0 {
+            self.config.volume_m3 += construction_volume_add;
+        }
         if let Some(heat)=&mut self.heat {heat.record(&self.budget);}
         self.totals.reaction_enthalpy_j += reaction_enthalpy;
         self.totals.sabatier_heat_j += reaction_heat;
@@ -1399,7 +1542,7 @@ impl Habitat {
         bits
     }
     pub fn report(&self) -> serde_json::Value {
-        let mut report=serde_json::json!({"format":"cosmogon-habitat-report","schema_version":1,"habitat":self,"diagnostics":crate::habitat_diagnostics::explain(self),"oxygen_partial_pressure_pa":self.state.oxygen_pa(&self.config),"co2_partial_pressure_pa":self.state.co2_pa(&self.config),"total_pressure_pa":self.state.pressure_pa(&self.config),"data_states":{"crew_rates":"Published nominal reference model (NASA BVAD), not individual measurements","equipment_and_initial_stocks":"User-assumed design inputs","current_stores_and_budgets":"Modelled","exterior_temperature":"Global reduced climate model; local measured weather unavailable","horizontal_irradiance":"Derived from primary-star state and approximate body frame"},"electrolysis_source":self.uses_electrolysis().then(crate::electrolysis::source),"sabatier_source":self.uses_sabatier().then(crate::sabatier::source),"moisture_source":self.uses_moisture().then(crate::moisture::source),"breach_source":self.uses_breach().then(crate::breach::source),"moisture_observation":self.uses_moisture().then(||serde_json::json!({"vapor_pressure_pa":self.state.vapor_pressure_pa(&self.config),"relative_humidity":self.state.relative_humidity(&self.config),"reference_phase_energy_j":self.state.phase_energy_j(),"supersaturated":self.state.relative_humidity(&self.config).map(|v|v>1.0)})),"wall_observation":self.uses_wall().then(||serde_json::json!({"wall_liquid_kg":self.state.wall_liquid_kg,"cumulative_net_condensed_kg":self.totals.wall_condensed_kg,"model":crate::moisture::WALL_MODEL})),"leak_observation":self.uses_leak().then(||serde_json::json!({"leaked_gas":self.totals.leaked_gas,"model":LEAK_MODEL})),"leak_source":self.uses_leak().then(crate::moisture::leak_source),"maintenance_observation":self.uses_maintenance().then(||serde_json::json!({"components":self.state.maintenance,"cumulative_maintenance_hours":self.totals.maintenance_hours,"model":crate::habitat_maintenance::MAINTENANCE_MODEL})),"maintenance_source":self.uses_maintenance().then(crate::habitat_maintenance::source),"uncertainty":null,"uncertainty_scope":"Input and predictive model uncertainty are not quantified","source":{"url":SOURCE,"version":"NASA BVAD Rev2 February 2022, Table 3-31","equipment":"User-assumed capacities, powers, efficiencies and alert thresholds"},"limits":"Reduced nominal demand and lumped thermal model, not validated mission hardware, local weather, purification quality, medical response or safety certification. Optional reduced humidity budget, passive lumped wall condensation (no ice), nominal proportional structural leak and scheduled equipment wear/maintenance with authored capacity calibration; no greenhouse exchange, seal/inward/rarefied leakage, EVA, radiation or resupply."});
+        let mut report=serde_json::json!({"format":"cosmogon-habitat-report","schema_version":1,"habitat":self,"diagnostics":crate::habitat_diagnostics::explain(self),"oxygen_partial_pressure_pa":self.state.oxygen_pa(&self.config),"co2_partial_pressure_pa":self.state.co2_pa(&self.config),"total_pressure_pa":self.state.pressure_pa(&self.config),"data_states":{"crew_rates":"Published nominal reference model (NASA BVAD), not individual measurements","equipment_and_initial_stocks":"User-assumed design inputs","current_stores_and_budgets":"Modelled","exterior_temperature":"Global reduced climate model; local measured weather unavailable","horizontal_irradiance":"Derived from primary-star state and approximate body frame"},"electrolysis_source":self.uses_electrolysis().then(crate::electrolysis::source),"sabatier_source":self.uses_sabatier().then(crate::sabatier::source),"moisture_source":self.uses_moisture().then(crate::moisture::source),"breach_source":self.uses_breach().then(crate::breach::source),"moisture_observation":self.uses_moisture().then(||serde_json::json!({"vapor_pressure_pa":self.state.vapor_pressure_pa(&self.config),"relative_humidity":self.state.relative_humidity(&self.config),"reference_phase_energy_j":self.state.phase_energy_j(),"supersaturated":self.state.relative_humidity(&self.config).map(|v|v>1.0)})),"wall_observation":self.uses_wall().then(||serde_json::json!({"wall_liquid_kg":self.state.wall_liquid_kg,"cumulative_net_condensed_kg":self.totals.wall_condensed_kg,"model":crate::moisture::WALL_MODEL})),"leak_observation":self.uses_leak().then(||serde_json::json!({"leaked_gas":self.totals.leaked_gas,"model":LEAK_MODEL})),"leak_source":self.uses_leak().then(crate::moisture::leak_source),"maintenance_observation":self.uses_maintenance().then(||serde_json::json!({"components":self.state.maintenance,"cumulative_maintenance_hours":self.totals.maintenance_hours,"model":crate::habitat_maintenance::MAINTENANCE_MODEL})),"maintenance_source":self.uses_maintenance().then(crate::habitat_maintenance::source),"construction_observation":self.uses_construction().then(||serde_json::json!({"held_material_kg":self.state.construction_material_kg,"structure_mass_kg":self.state.construction_structure_kg,"cumulative_volume_added_m3":self.totals.constructed_volume_m3,"cumulative_material_used_kg":self.totals.construction_material_used_kg,"live_volume_m3":self.config.volume_m3,"model":crate::habitat_construction::CONSTRUCTION_MODEL})),"construction_source":self.uses_construction().then(crate::habitat_construction::source),"uncertainty":null,"uncertainty_scope":"Input and predictive model uncertainty are not quantified","source":{"url":SOURCE,"version":"NASA BVAD Rev2 February 2022, Table 3-31","equipment":"User-assumed capacities, powers, efficiencies and alert thresholds"},"limits":"Reduced nominal demand and lumped thermal model, not validated mission hardware, local weather, purification quality, medical response or safety certification. Optional reduced humidity budget, passive lumped wall condensation (no ice), nominal proportional structural leak and scheduled equipment wear/maintenance with authored capacity calibration; no greenhouse exchange, seal/inward/rarefied leakage, EVA, radiation or resupply. Continuous cabin construction from held material with an authored bulk ratio is optional and separately sourced; no structural strength, assembly physics, dust, crew labour or vehicle-mediated material delivery."});
         if self.heat.is_some() {report["heat_accounting"]=crate::habitat_heat::habitat_span(self);}
         if self.uses_crop() {report["crop_source"]=crate::crop_process::source();report["data_states"]["crop_operation"] = serde_json::json!("Finite modelled transfers under user-assumed ideal maintained source conditions; not calibrated biology/chamber hardware");report["limits"]=serde_json::json!("Reduced nominal demand and lumped thermal model with optional conserved maintained-reference crop transfers. No independently controlled chamber, calibrated crop physiology, complete diet credit, ice condensation, seal/inward/rarefied leakage, EVA, radiation or resupply. Passive lumped wall condensation and nominal structural leak are optional and separately sourced; scheduled equipment wear/maintenance with authored capacity calibration is optional and separately sourced; crop-specific source/progress/energy assumptions are retained separately in crop_source.");}
         report
@@ -1530,10 +1673,12 @@ pub(crate) fn samples_csv(rows: &[Sample]) -> String {
     let wall_present = rows.iter().any(|r| r.habitat.uses_wall());
     let leak_present = rows.iter().any(|r| r.habitat.uses_leak());
     let maintenance_present = rows.iter().any(|r| r.habitat.uses_maintenance());
+    let construction_present = rows.iter().any(|r| r.habitat.uses_construction());
     let mut csv=String::from("simulation_time_s,completed_habitat_time_s,interval_s,temperature_k,total_pressure_pa,oxygen_partial_pressure_pa,co2_partial_pressure_pa,battery_j,oxygen_kg,oxygen_reserve_kg,potable_water_kg,wastewater_kg,brine_kg,food_dry_kg,food_water_kg,dry_waste_kg,captured_co2_kg,environment_available,temperature_domain_supported,horizontal_irradiance_w_m2,exterior_temperature_k,generated_w,requested_w,delivered_w,unserved_w,battery_losses_w,curtailed_w,served_cycle_fraction,metabolic_heat_w,heater_w,radiator_rejection_w,conduction_w,thermal_storage_w,mass_residual_kg,electric_residual_j,thermal_residual_j,total_unserved_j,total_unserved_person_seconds,hydrogen_kg,electrolysis_requested_w,electrolysis_delivered_w,electrolysis_oxygen_generated_kg,electrolysis_hydrogen_generated_kg,electrolysis_water_consumed_kg,electrolysis_electricity_j,electrolysis_reaction_enthalpy_j,electrolysis_waste_heat_j,total_reaction_enthalpy_j,electrolysis_constraints,methane_kg,sabatier_water_kg,sabatier_requested_w,sabatier_delivered_w,sabatier_co2_consumed_kg,sabatier_hydrogen_consumed_kg,sabatier_methane_generated_kg,sabatier_water_generated_kg,sabatier_electricity_j,sabatier_reaction_heat_j,sabatier_total_heat_j,sabatier_water_processed_kg,sabatier_water_recovered_kg,total_sabatier_co2_consumed_kg,total_sabatier_heat_j,total_sabatier_water_processed_kg,sabatier_constraints,water_vapor_kg,condensate_kg,vapor_pressure_pa,relative_humidity,saturation_pressure_pa,reference_phase_energy_j,moisture_requested_w,moisture_delivered_w,crew_vapor_kg,crew_phase_energy_j,condensed_kg,condensation_heat_j,moisture_electricity_j,moisture_constraints,condensate_processed_kg,condensate_recovered_kg,total_crew_vapor_kg,total_condensed_kg,total_condensate_processed_kg,escaped_oxygen_kg,escaped_nitrogen_kg,escaped_co2_kg,escaped_vapor_kg,accounted_mass_kg,breach_initial_pressure_pa,breach_final_pressure_pa,breach_initial_temperature_k,breach_final_temperature_k,breach_initial_rate_kg_s,breach_final_rate_kg_s,breach_integrated_seconds,breach_steps,breach_oxygen_kg,breach_nitrogen_kg,breach_co2_kg,breach_vapor_kg,breach_lumped_cooling_j,breach_structure_energy_change_j,breach_gas_energy_change_j,breach_phase_energy_change_j,breach_outflow_enthalpy_j,breach_energy_residual_j,breach_status,total_breach_enthalpy_j");
     if wall_present {csv.push_str(",wall_liquid_kg,total_wall_condensed_kg");}
     if leak_present {csv.push_str(",leaked_oxygen_kg,leaked_nitrogen_kg,leaked_co2_kg,leaked_vapor_kg,total_leaked_gas_kg");}
     if maintenance_present {csv.push_str(",maintenance_operating_s,maintenance_active_s,worst_equipment_condition,total_maintenance_hours");}
+    if construction_present {csv.push_str(",construction_material_kg,construction_requested_w,construction_delivered_w,construction_volume_added_m3,total_constructed_volume_m3");}
     csv.push('\n');
     for row in rows {
         let h = &row.habitat;
@@ -1629,6 +1774,9 @@ pub(crate) fn samples_csv(rows: &[Sample]) -> String {
             if let Some(mb)=&b.maintenance {for x in mb.slots().into_iter().flatten() {operating_s+=x.operating_s;active_s+=x.maintenance_s;worst=worst.min(x.condition_after);}}
             else if let Some(ms)=&s.maintenance {for x in ms.slots().into_iter().flatten() {worst=worst.min(x.condition);}}
             for v in [operating_s,active_s,worst,h.totals.maintenance_hours] {csv.push(',');csv.push_str(&v.to_string());}
+        }
+        if construction_present {
+            for v in [s.construction_material_kg,b.construction.as_ref().map_or(0.0,|k|k.requested_w),b.construction.as_ref().map_or(0.0,|k|k.delivered_w),b.construction.as_ref().map_or(0.0,|k|k.volume_added_m3),h.totals.constructed_volume_m3] {csv.push(',');csv.push_str(&v.to_string());}
         }
         csv.push('\n');
     }
@@ -2020,8 +2168,10 @@ mod tests {
             ..Default::default()
         });
         assert!(Habitat::new(0, d, 0.0).is_err());
-        let mut bad = crate::habitat_maintenance::ComponentMaintenance::default();
-        bad.wear_per_hour = -1.0;
+        let bad = crate::habitat_maintenance::ComponentMaintenance {
+            wear_per_hour: -1.0,
+            ..Default::default()
+        };
         let mut d = Definition::at(BodyRef { system: 0, body: 0 }, 0.0, 0.0);
         d.config.maintenance = Some(crate::habitat_maintenance::MaintenanceConfig {
             scrubber: Some(bad),
@@ -2068,6 +2218,155 @@ mod tests {
         );
         assert_eq!(csv.lines().next().unwrap().split(',').count(), 114);
         assert!(csv.lines().next().unwrap().ends_with("total_maintenance_hours"));
+    }
+    fn construction_world() -> Habitat {
+        let mut d = Definition::at(BodyRef { system: 0, body: 0 }, 0.0, 0.0);
+        d.config.crew = 0;
+        d.config.firm_power_w = 10_000.0;
+        d.config.base_load_w = 0.0;
+        d.config.recycler_power_w = 0.0;
+        d.config.heater_limit_w = 0.0;
+        d.config.radiator_pump_w = 0.0;
+        d.config.radiator_area_m2 = 0.0;
+        d.config.conductance_w_k = 0.0;
+        d.config.heat_capacity_j_k = 1e9;
+        d.config.construction = Some(crate::habitat_construction::Config {
+            material_capacity_kg: 1000.0,
+            build_rate_kg_s: 1.0,
+            power_w: 200.0,
+            volume_per_kg_m3: 0.01,
+            ..Default::default()
+        });
+        let mut h = Habitat::new(0, d, 0.0).unwrap();
+        h.state.construction_material_kg = 500.0;
+        h
+    }
+    #[test]
+    fn construction_consumes_material_and_grows_live_volume() {
+        let mut h = construction_world();
+        assert!(h.uses_construction());
+        h.step(60.0, cold_env()).unwrap();
+        h.validate(60.0).unwrap();
+        let b = h.budget.construction.as_ref().unwrap();
+        // Fully served minute at 1 kg/s: 60 kg consumed, 0.6 m³ built.
+        assert_eq!(b.consumed_kg, 60.0);
+        assert_eq!(b.volume_added_m3, 0.6);
+        assert_eq!(b.served_fraction, 1.0);
+        assert_eq!(b.material_before_kg, 500.0);
+        assert_eq!(b.material_after_kg, 440.0);
+        assert!(b.constraints.is_empty());
+        // The retained interval configuration ran at the pre-add volume.
+        assert_eq!(b.material_after_kg, h.state.construction_material_kg);
+        assert!(h.budget.configuration.as_ref().unwrap().volume_m3 < h.config.volume_m3);
+        assert!((h.config.volume_m3 - 500.6).abs() < 1e-9);
+        assert!((h.totals.constructed_volume_m3 - 0.6).abs() < 1e-12);
+        assert!((h.totals.construction_material_used_kg - 60.0).abs() < 1e-12);
+        assert!((h.state.construction_structure_kg - 60.0).abs() < 1e-12);
+        // Material became structure: accounted mass is conserved, not created.
+        assert!(h.budget.mass_residual_kg.abs() < 1e-9);
+        assert!(h.budget.electric_residual_j.abs() < 1e-6);
+        h.step(120.0, cold_env()).unwrap();
+        h.validate(120.0).unwrap();
+        assert!((h.state.construction_material_kg - 380.0).abs() < 1e-9);
+        assert!((h.config.volume_m3 - 501.2).abs() < 1e-9);
+        assert!(h.budget.mass_residual_kg.abs() < 1e-9);
+    }
+    #[test]
+    fn construction_stops_without_served_power_and_at_volume_bound() {
+        // Starved bus: the base load consumes every available watt before construction.
+        let mut h = construction_world();
+        h.config.base_load_w = 1.0e6;
+        h.step(60.0, cold_env()).unwrap();
+        h.validate(60.0).unwrap();
+        let b = h.budget.construction.as_ref().unwrap();
+        assert_eq!(b.served_fraction, 0.0);
+        assert_eq!(b.consumed_kg, 0.0);
+        assert_eq!(h.state.construction_material_kg, 500.0);
+        assert!(!b.constraints.is_empty());
+        // A held stock that already sits at the authored volume bound never builds.
+        let mut h = construction_world();
+        h.config.volume_m3 = 1.0e6;
+        h.step(60.0, cold_env()).unwrap();
+        h.validate(60.0).unwrap();
+        let b = h.budget.construction.as_ref().unwrap();
+        assert_eq!(b.consumed_kg, 0.0);
+        assert!(b.constraints.iter().any(|c| c.contains("upper bound")));
+        assert_eq!(h.state.construction_material_kg, 500.0);
+    }
+    #[test]
+    fn legacy_world_serializes_without_construction_state() {
+        let mut h = habitat();
+        for n in 1..=10 {
+            h.step(n as f64 * PERIOD, environment()).unwrap();
+        }
+        assert!(!h.uses_construction());
+        assert_eq!(h.state.construction_material_kg, 0.0);
+        assert_eq!(h.state.construction_structure_kg, 0.0);
+        assert!(h.budget.construction.is_none());
+        assert_eq!(h.totals.constructed_volume_m3, 0.0);
+        let value = serde_json::to_value(&h.state).unwrap();
+        assert!(value.get("construction_material_kg").is_none());
+        assert!(value.get("construction_structure_kg").is_none());
+        let value = serde_json::to_value(&h.totals).unwrap();
+        assert!(value.get("constructed_volume_m3").is_none());
+        let value = serde_json::to_value(&h.config).unwrap();
+        assert!(value.get("construction").is_none());
+    }
+    #[test]
+    fn construction_world_is_deterministic_and_csv_tail_is_additive() {
+        let mut a = construction_world();
+        let mut b = a.clone();
+        let mut rows = Vec::new();
+        for n in 1..=10 {
+            a.step(n as f64 * PERIOD, cold_env()).unwrap();
+            b.step(n as f64 * PERIOD, cold_env()).unwrap();
+            rows.push(Sample {
+                simulation_time_s: n as f64 * PERIOD,
+                habitat: a.clone(),
+            });
+        }
+        assert_eq!(a, b);
+        let csv = samples_csv(&rows);
+        assert_eq!(
+            csv.lines().next().unwrap().split(',').count(),
+            csv.lines().last().unwrap().split(',').count()
+        );
+        assert_eq!(csv.lines().next().unwrap().split(',').count(), 115);
+        assert!(csv
+            .lines()
+            .next()
+            .unwrap()
+            .ends_with("total_constructed_volume_m3"));
+    }
+    #[test]
+    fn disabling_construction_freezes_held_material_and_reenable_resumes() {
+        let mut h = construction_world();
+        h.step(60.0, cold_env()).unwrap();
+        let held = h.state.construction_material_kg;
+        let mut off = h.config.clone();
+        off.construction = None;
+        h.check_config(&off).unwrap();
+        h.config = off;
+        h.step(120.0, cold_env()).unwrap();
+        h.validate(120.0).unwrap();
+        assert!(h.budget.construction.is_none());
+        assert_eq!(h.state.construction_material_kg, held);
+        let mut on = h.config.clone();
+        on.construction = Some(crate::habitat_construction::Config::default());
+        h.check_config(&on).unwrap();
+        h.config = on;
+        h.step(180.0, cold_env()).unwrap();
+        h.validate(180.0).unwrap();
+        assert!(h.budget.construction.is_some());
+        assert!(h.state.construction_material_kg < held);
+    }
+    #[test]
+    fn construction_capacity_cannot_drop_below_held_material() {
+        let h = construction_world();
+        let mut small = h.config.clone();
+        small.construction.as_mut().unwrap().material_capacity_kg = 100.0;
+        let error = h.check_config(&small).unwrap_err();
+        assert!(error.contains("below held stock"), "{error}");
     }
 }
 
@@ -2412,9 +2711,7 @@ mod integration_tests {
     #[test]
     fn maintenance_save_pin_is_conditional_and_enforced() {
         let (mut u, r) = world();
-        assert!(save::data_versions(&u)
-            .get("cosmogon-cabin-maintenance")
-            .is_none());
+        assert!(!save::data_versions(&u).contains_key("cosmogon-cabin-maintenance"));
         let mut d = Definition::at(r, 0.0, 0.0);
         d.config.maintenance = Some(crate::habitat_maintenance::MaintenanceConfig {
             scrubber: Some(Default::default()),
@@ -2441,5 +2738,175 @@ mod integration_tests {
             .unwrap()
             .remove("cosmogon-cabin-maintenance");
         assert!(save::from_json(&bad.to_string()).is_err());
+    }
+
+    #[test]
+    fn construction_supply_edit_is_bounded_pinned_and_builds_volume() {
+        let (mut u, r) = world();
+        assert!(!save::data_versions(&u).contains_key("cosmogon-cabin-construction"));
+        let mut d = Definition::at(r, 0.0, 0.0);
+        d.config.crew = 0;
+        d.config.construction = Some(crate::habitat_construction::Config::default());
+        u.apply_edit(Edit::CreateHabitat {
+            definition: Box::new(d),
+        })
+        .unwrap();
+        let id = u.habitats[0].id;
+        // Declared supply may never exceed the installed capacity.
+        let error = u
+            .apply_edit(Edit::SupplyHabitatConstructionMaterial {
+                system: r.system,
+                id,
+                requested_kg: 2000.0,
+            })
+            .unwrap_err();
+        assert!(error.contains("exceeds held capacity"), "{error}");
+        assert_eq!(u.habitats[0].state.construction_material_kg, 0.0);
+        u.apply_edit(Edit::SupplyHabitatConstructionMaterial {
+            system: r.system,
+            id,
+            requested_kg: 600.0,
+        })
+        .unwrap();
+        assert_eq!(u.habitats[0].state.construction_material_kg, 600.0);
+        let before_volume = u.habitats[0].config.volume_m3;
+        u.advance_by(600.0);
+        let h = &u.habitats[0];
+        assert!(h.uses_construction());
+        assert!(h.config.volume_m3 > before_volume);
+        assert!(h.state.construction_material_kg < 600.0);
+        assert!(h.state.construction_structure_kg > 0.0);
+        assert!(h.budget.mass_residual_kg.abs() < 1e-6);
+        assert_eq!(
+            save::data_versions(&u)["cosmogon-cabin-construction"],
+            crate::habitat_construction::CONSTRUCTION_MODEL
+        );
+        let serialized = save::to_json(&u, "Construction fixture").unwrap();
+        let resumed = save::from_json(&serialized).unwrap();
+        assert_eq!(resumed.habitats, u.habitats);
+        let mut bad: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+        bad["header"]["data_versions"]["cosmogon-cabin-construction"] = "future/2".into();
+        assert!(save::from_json(&bad.to_string()).is_err());
+        bad["header"]["data_versions"]
+            .as_object_mut()
+            .unwrap()
+            .remove("cosmogon-cabin-construction");
+        assert!(save::from_json(&bad.to_string()).is_err());
+    }
+
+    #[test]
+    fn habitat_stock_transfer_is_conserved_paired_and_pinned() {
+        let (mut u, r) = world();
+        assert!(!save::data_versions(&u).contains_key("cosmogon-habitat-stock-transfer"));
+        u.apply_edit(Edit::CreateHabitat {
+            definition: Box::new(Definition::at(r, 0.0, 0.0)),
+        })
+        .unwrap();
+        u.apply_edit(Edit::CreateHabitat {
+            definition: Box::new(Definition::at(r, 1.0, 1.0)),
+        })
+        .unwrap();
+        let (a, b) = (u.habitats[0].id, u.habitats[1].id);
+        u.advance_by(120.0);
+        let before_a = u.habitats[0].held_cargo();
+        let before_b = u.habitats[1].held_cargo();
+        let requested = crate::supply_vehicle::Cargo {
+            oxygen_reserve_kg: 50.0,
+            potable_water_kg: 80.0,
+            food_dry_kg: 30.0,
+            food_water_kg: 20.0,
+        };
+        u.apply_edit(Edit::TransferHabitatStock {
+            system: r.system,
+            from: a,
+            to: b,
+            requested: requested.clone(),
+        })
+        .unwrap();
+        let after_a = u.habitats[0].held_cargo();
+        let after_b = u.habitats[1].held_cargo();
+        // Species-by-species conservation: sender decrease equals receiver increase.
+        for (sent, got) in [
+            (
+                before_a.oxygen_reserve_kg - after_a.oxygen_reserve_kg,
+                after_b.oxygen_reserve_kg - before_b.oxygen_reserve_kg,
+            ),
+            (
+                before_a.potable_water_kg - after_a.potable_water_kg,
+                after_b.potable_water_kg - before_b.potable_water_kg,
+            ),
+            (
+                before_a.food_dry_kg - after_a.food_dry_kg,
+                after_b.food_dry_kg - before_b.food_dry_kg,
+            ),
+            (
+                before_a.food_water_kg - after_a.food_water_kg,
+                after_b.food_water_kg - before_b.food_water_kg,
+            ),
+        ] {
+            assert!((sent - got).abs() < 1e-9, "{sent} vs {got}");
+            assert!(sent > 0.0);
+        }
+        assert!(u.habitats[0]
+            .stock_transfers
+            .iter()
+            .any(|t| t.outbound && t.counterparty == b));
+        assert!(u.habitats[1]
+            .stock_transfers
+            .iter()
+            .any(|t| !t.outbound && t.counterparty == a));
+        crate::habitat::validate_stock_transfers(&u).unwrap();
+        assert_eq!(
+            save::data_versions(&u)["cosmogon-habitat-stock-transfer"],
+            crate::habitat::STOCK_TRANSFER_MODEL
+        );
+        let serialized = save::to_json(&u, "Transfer fixture").unwrap();
+        let resumed = save::from_json(&serialized).unwrap();
+        assert_eq!(resumed.habitats, u.habitats);
+        // Dropping one side's paired evidence must refuse the save.
+        let mut bad: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+        bad["universe"]["habitats"][1]["stock_transfers"] = serde_json::json!([]);
+        assert!(save::from_json(&bad.to_string()).is_err());
+        // A request that accepts no material refuses and changes neither side.
+        let error = u
+            .apply_edit(Edit::TransferHabitatStock {
+                system: r.system,
+                from: a,
+                to: b,
+                requested: crate::supply_vehicle::Cargo {
+                    oxygen_reserve_kg: 0.0,
+                    potable_water_kg: 0.0,
+                    food_dry_kg: 0.0,
+                    food_water_kg: 0.0,
+                },
+            })
+            .unwrap_err();
+        assert!(error.contains("accepts no material"), "{error}");
+        assert_eq!(u.habitats[0].held_cargo(), after_a);
+        assert_eq!(u.habitats[1].held_cargo(), after_b);
+        // A transfer across bodies is refused before anything moves.
+        if let Some(earth) = u.systems[0].find_body("Earth") {
+            u.apply_edit(Edit::CreateHabitat {
+                definition: Box::new(Definition::at(
+                    BodyRef {
+                        system: r.system,
+                        body: earth as u32,
+                    },
+                    0.0,
+                    0.0,
+                )),
+            })
+            .unwrap();
+            let far = u.habitats[2].id;
+            let error = u
+                .apply_edit(Edit::TransferHabitatStock {
+                    system: r.system,
+                    from: a,
+                    to: far,
+                    requested,
+                })
+                .unwrap_err();
+            assert!(error.contains("same body"), "{error}");
+        }
     }
 }

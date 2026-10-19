@@ -118,6 +118,15 @@ pub enum Edit {
     /// into the habitat's finite dry-food store. Inedible material never
     /// converts; the rejected remainder stays in the harvested store.
     StoreHabitatCropFood { system:u32,id:u64,requested_kg:f64 },
+    /// Explicit bounded supply of processed construction material into an
+    /// existing habitat's finite construction stock. Refuses to exceed the
+    /// installed capacity; nothing is granted beyond the declared charge.
+    SupplyHabitatConstructionMaterial { system:u32,id:u64,requested_kg:f64 },
+    /// Atomic conserved transfer of the four finite supply stocks between two
+    /// habitats of the same body. Per-species accepted amounts are bounded by
+    /// the sender's held stock and the recipient's free storage; a transfer
+    /// that accepts no material refuses and changes neither side.
+    TransferHabitatStock { system:u32,from:u64,to:u64,requested:crate::supply_vehicle::Cargo },
     RemoveHabitat { system: u32, id: u64 },
     SetStar { system: u32, property: StarProperty },
     /// Choose analytic (Kepler) or N-body gravity and its settings.
@@ -129,7 +138,7 @@ pub enum Edit {
 impl Edit {
     pub fn system(&self) -> u32 {
         match self {
-            Edit::AddBody { system, .. } | Edit::SetStar { system, .. } | Edit::SetPhysics { system, .. } | Edit::Intervene { system, .. } | Edit::ConfigureHabitat {system,..} | Edit::RemoveHabitat {system,..} | Edit::HarvestHabitatCrop {system,..} | Edit::InstallHabitatCrop {system,..} | Edit::StoreHabitatCropFood {system,..} | Edit::RemoveVehicle {system,..} | Edit::RemoveVehicleCargo {system,..} | Edit::TransferVehicleCargoToHabitat {system,..} => *system,
+            Edit::AddBody { system, .. } | Edit::SetStar { system, .. } | Edit::SetPhysics { system, .. } | Edit::Intervene { system, .. } | Edit::ConfigureHabitat {system,..} | Edit::RemoveHabitat {system,..} | Edit::HarvestHabitatCrop {system,..} | Edit::InstallHabitatCrop {system,..} | Edit::StoreHabitatCropFood {system,..} | Edit::SupplyHabitatConstructionMaterial {system,..} | Edit::TransferHabitatStock {system,..} | Edit::RemoveVehicle {system,..} | Edit::RemoveVehicleCargo {system,..} | Edit::TransferVehicleCargoToHabitat {system,..} => *system,
             Edit::CreateHabitat {definition} => definition.body.system,
             Edit::CreateVehicle {definition} => definition.parent.system,
             Edit::RemoveBody { body } | Edit::SetState { body, .. } | Edit::Impulse { body, .. } | Edit::SetOrbit { body, .. } | Edit::SetProperty { body, .. } | Edit::SetMarsTerrain { body, .. } => body.system,
@@ -503,6 +512,32 @@ fn validate(u: &Universe, e: &Edit) -> Result<(), String> {
             let headroom=(h.config.food_dry_capacity_kg-h.state.food_dry_kg).max(0.);
             crop.store_food(*requested_kg,headroom)?;
         }
+        Edit::SupplyHabitatConstructionMaterial {system,id,requested_kg} => {
+            let h=u.habitats.iter().find(|h|h.id==*id && h.definition.body.system==*system).ok_or("No such habitat")?;
+            let k=h.config.construction.as_ref().or(h.definition.config.construction.as_ref()).ok_or("Habitat has no construction configuration")?;
+            if !requested_kg.is_finite() || !(0.0..=1e7).contains(requested_kg) {return Err("Construction material supply must be finite and between 0 and 10000000".into());}
+            if h.state.construction_material_kg + requested_kg > k.material_capacity_kg {return Err("Construction material supply exceeds held capacity".into());}
+        }
+        Edit::TransferHabitatStock {system,from,to,requested} => {
+            if from==to {return Err("Source and recipient habitats must differ".into());}
+            let a=u.habitats.iter().find(|h|h.id==*from && h.definition.body.system==*system).ok_or("No such source habitat")?;
+            let b=u.habitats.iter().find(|h|h.id==*to && h.definition.body.system==*system).ok_or("No such recipient habitat")?;
+            if a.definition.body!=b.definition.body {return Err("Habitat stock transfer requires both habitats on the same body".into());}
+            if !crate::vehicle_cargo_mass::finite_cargo(requested) {return Err("Stock transfer request lacks finite species amounts".into());}
+            for v in [requested.oxygen_reserve_kg,requested.potable_water_kg,requested.food_dry_kg,requested.food_water_kg] {
+                if !(0.0..=1e7).contains(&v) {return Err("Stock transfer species amount must be between 0 and 10000000".into());}
+            }
+            // Step both sides to the edit clock so free space and receipts agree.
+            let t=u.time;
+            let mut pa=a.clone();let mut pb=b.clone();
+            let ea=u.habitat_environment(&pa.definition,t);pa.step(t,ea)?;
+            let eb=u.habitat_environment(&pb.definition,t);pb.step(t,eb)?;
+            let accepted=stock_transfer_accepted(&pa,&pb,requested);
+            if accepted.mass_kg()<=0.0 {return Err("Habitat stock transfer accepts no material".into());}
+            let mut qa=pa;let mut qb=pb;
+            apply_stock_transfer(&mut qa,&mut qb,t,accepted.clone())?;
+            qa.validate(t)?;qb.validate(t)?;
+        }
         Edit::RemoveHabitat {system,id} => {if !u.habitats.iter().any(|h|h.id==*id && h.definition.body.system==*system) {return Err("No such habitat".into());}}
         Edit::SetMarsTerrain { body, dataset } => {
             body_ok(body)?;
@@ -555,6 +590,8 @@ fn describe(u: &Universe, e: &Edit) -> String {
         Edit::HarvestHabitatCrop {id,..} => format!("Harvested completed crop in habitat {id}"),
         Edit::InstallHabitatCrop {id,nutrient_kg,..} => format!("Installed greenhouse in habitat {id} with {nutrient_kg} kg nutrient-equivalent"),
         Edit::StoreHabitatCropFood {id,requested_kg,..} => format!("Stored up to {requested_kg} kg harvested crop food in habitat {id}"),
+        Edit::SupplyHabitatConstructionMaterial {id,requested_kg,..} => format!("Supplied up to {requested_kg} kg construction material to habitat {id}"),
+        Edit::TransferHabitatStock {from,to,requested,..} => format!("Transferred up to {:.3} kg of supply stock from habitat {from} to habitat {to}",requested.mass_kg()),
         Edit::RemoveHabitat {id,..} => format!("Removed habitat {id}"),
         Edit::SetMarsTerrain { body, dataset } => format!("Set terrain of {} to {}", name(body), dataset.mola().expect("validated MOLA").label()),
         Edit::SetStar { system, property } => {
@@ -576,6 +613,34 @@ fn describe(u: &Universe, e: &Edit) -> String {
         }
         Edit::Intervene { civ, action, .. } => format!("{} — {}", action.label(), u.civs.get(*civ as usize).map(|c| c.name.as_str()).unwrap_or("?")),
     }
+}
+
+/// Per-species accepted transfer mass: bounded by the sender's held stock and
+/// the recipient's free storage, exactly clamped against both tanks.
+fn stock_transfer_accepted(from: &crate::habitat::Habitat, to: &crate::habitat::Habitat, requested: &crate::supply_vehicle::Cargo) -> crate::supply_vehicle::Cargo {
+    let pair = |held: f64, free: f64, want: f64| want.min(held).min(free.max(0.0));
+    crate::supply_vehicle::Cargo {
+        oxygen_reserve_kg: pair(from.state.oxygen_reserve_kg, to.config.oxygen_reserve_capacity_kg - to.state.oxygen_reserve_kg, requested.oxygen_reserve_kg),
+        potable_water_kg: pair(from.state.potable_water_kg, to.config.potable_water_capacity_kg - to.state.potable_water_kg, requested.potable_water_kg),
+        food_dry_kg: pair(from.state.food_dry_kg, to.config.food_dry_capacity_kg - to.state.food_dry_kg, requested.food_dry_kg),
+        food_water_kg: pair(from.state.food_water_kg, to.config.food_water_capacity_kg - to.state.food_water_kg, requested.food_water_kg),
+    }
+}
+
+/// Conserved apply: sender decreases equal receiver increases, clamped so neither
+/// tank ever overshoots its bound; both sides keep a paired retained record.
+fn apply_stock_transfer(from: &mut crate::habitat::Habitat, to: &mut crate::habitat::Habitat, t: f64, accepted: crate::supply_vehicle::Cargo) -> Result<(), String> {
+    from.state.oxygen_reserve_kg -= accepted.oxygen_reserve_kg;
+    from.state.potable_water_kg -= accepted.potable_water_kg;
+    from.state.food_dry_kg -= accepted.food_dry_kg;
+    from.state.food_water_kg -= accepted.food_water_kg;
+    to.state.oxygen_reserve_kg = (to.state.oxygen_reserve_kg + accepted.oxygen_reserve_kg).min(to.config.oxygen_reserve_capacity_kg);
+    to.state.potable_water_kg = (to.state.potable_water_kg + accepted.potable_water_kg).min(to.config.potable_water_capacity_kg);
+    to.state.food_dry_kg = (to.state.food_dry_kg + accepted.food_dry_kg).min(to.config.food_dry_capacity_kg);
+    to.state.food_water_kg = (to.state.food_water_kg + accepted.food_water_kg).min(to.config.food_water_capacity_kg);
+    from.stock_transfers.push(crate::habitat::StockTransfer { model: crate::habitat::STOCK_TRANSFER_MODEL.into(), counterparty: to.id, world_time_s: t, moved: accepted.clone(), outbound: true });
+    to.stock_transfers.push(crate::habitat::StockTransfer { model: crate::habitat::STOCK_TRANSFER_MODEL.into(), counterparty: from.id, world_time_s: t, moved: accepted, outbound: false });
+    Ok(())
 }
 
 impl Universe {
@@ -657,7 +722,7 @@ impl Universe {
             self.history.push(Event {time:t,category:Category::Space,importance:3,title:summary.clone(),detail:"Authored finite test-particle spacecraft initial conditions. No settlement loading, safe landing or cargo delivery is implied.".into(),system:Some(parent.system),body:Some(parent.body),civ:None});
             return Ok(EditOutcome {created:None,summary});
         }
-        if matches!(edit,Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::HarvestHabitatCrop {..} | Edit::InstallHabitatCrop {..} | Edit::StoreHabitatCropFood {..} | Edit::RemoveHabitat {..}) {
+        if matches!(edit,Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::HarvestHabitatCrop {..} | Edit::InstallHabitatCrop {..} | Edit::StoreHabitatCropFood {..} | Edit::SupplyHabitatConstructionMaterial {..} | Edit::TransferHabitatStock {..} | Edit::RemoveHabitat {..}) {
             let summary=describe(self,&edit);
             let body=match &edit {
                 Edit::CreateHabitat {definition} => {
@@ -700,6 +765,26 @@ impl Universe {
                     let take=preview.state.crop.as_mut().ok_or("No installed crop")?.store_food(*requested_kg,headroom)?;
                     preview.state.food_dry_kg+=take;
                     let body=preview.definition.body;self.habitats[i]=preview;body
+                }
+                Edit::SupplyHabitatConstructionMaterial {id,requested_kg,..} => {
+                    let i=self.habitats.iter().position(|h|h.id==*id).expect("validated habitat");
+                    let mut preview=self.habitats[i].clone();
+                    let env=self.habitat_environment(&preview.definition,t);
+                    preview.step(t,env)?;
+                    preview.state.construction_material_kg+=*requested_kg;
+                    let body=preview.definition.body;self.habitats[i]=preview;body
+                }
+                Edit::TransferHabitatStock {from,to,requested,..} => {
+                    let ia=self.habitats.iter().position(|h|h.id==*from).expect("validated source habitat");
+                    let ib=self.habitats.iter().position(|h|h.id==*to).expect("validated recipient habitat");
+                    let mut pa=self.habitats[ia].clone();
+                    let ea=self.habitat_environment(&pa.definition,t);pa.step(t,ea)?;
+                    let mut pb=self.habitats[ib].clone();
+                    let eb=self.habitat_environment(&pb.definition,t);pb.step(t,eb)?;
+                    let accepted=stock_transfer_accepted(&pa,&pb,requested);
+                    apply_stock_transfer(&mut pa,&mut pb,t,accepted)?;
+                    let body=pa.definition.body;
+                    self.habitats[ia]=pa;self.habitats[ib]=pb;body
                 }
                 Edit::RemoveHabitat {id,..} => {let i=self.habitats.iter().position(|h|h.id==*id).expect("validated habitat");self.habitats.remove(i).definition.body}
                 _=>unreachable!(),
@@ -904,7 +989,7 @@ impl Universe {
                     sys.deactivate_dynamics(t)?;
                 }
             }
-            Edit::CreateVehicle {..} | Edit::RemoveVehicle {..} | Edit::RemoveVehicleCargo {..} | Edit::TransferVehicleCargoToHabitat {..} | Edit::Intervene { .. } | Edit::SetMarsTerrain { .. } | Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::HarvestHabitatCrop {..} | Edit::InstallHabitatCrop {..} | Edit::StoreHabitatCropFood {..} | Edit::RemoveHabitat {..} => unreachable!("handled above"),
+            Edit::CreateVehicle {..} | Edit::RemoveVehicle {..} | Edit::RemoveVehicleCargo {..} | Edit::TransferVehicleCargoToHabitat {..} | Edit::Intervene { .. } | Edit::SetMarsTerrain { .. } | Edit::CreateHabitat {..} | Edit::ConfigureHabitat {..} | Edit::HarvestHabitatCrop {..} | Edit::InstallHabitatCrop {..} | Edit::StoreHabitatCropFood {..} | Edit::SupplyHabitatConstructionMaterial {..} | Edit::TransferHabitatStock {..} | Edit::RemoveHabitat {..} => unreachable!("handled above"),
         }
 
         let sys = &mut self.systems[s];

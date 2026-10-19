@@ -132,6 +132,8 @@ pub fn data_versions(u: &Universe) -> std::collections::BTreeMap<String, String>
     if u.habitats.iter().any(crate::habitat::Habitat::uses_wall) {m.insert("cosmogon-cabin-wall-condensation".into(),crate::moisture::WALL_MODEL.into());}
     if u.habitats.iter().any(crate::habitat::Habitat::uses_leak) {m.insert("cosmogon-cabin-structural-leak".into(),crate::habitat::LEAK_MODEL.into());}
     if u.habitats.iter().any(crate::habitat::Habitat::uses_maintenance) {m.insert("cosmogon-cabin-maintenance".into(),crate::habitat_maintenance::MAINTENANCE_MODEL.into());}
+    if u.habitats.iter().any(crate::habitat::Habitat::uses_construction) {m.insert("cosmogon-cabin-construction".into(),crate::habitat_construction::CONSTRUCTION_MODEL.into());}
+    if u.habitats.iter().any(|h|!h.stock_transfers.is_empty()) || u.edits.iter().any(|r|matches!(&r.edit, crate::sandbox::Edit::TransferHabitatStock {..})) {m.insert("cosmogon-habitat-stock-transfer".into(),crate::habitat::STOCK_TRANSFER_MODEL.into());}
     if !u.vehicles.is_empty() || u.next_vehicle_id > 0 {
         m.insert("cosmogon-finite-world-vehicle".into(),crate::world_vehicle::MODEL.into());
         m.insert("cosmogon-supply-vehicle-reference".into(),crate::supply_vehicle::MODEL.into());
@@ -212,6 +214,10 @@ pub fn from_json(s: &str) -> Result<Universe, SaveError> {
         && terrain_versions.get("cosmogon-cabin-structural-leak").and_then(Value::as_str)!=Some(crate::habitat::LEAK_MODEL) {return Err(SaveError::Model("Missing or mismatched cabin structural leak version".into()));}
     if (expected.contains_key("cosmogon-cabin-maintenance") || terrain_versions.get("cosmogon-cabin-maintenance").is_some())
         && terrain_versions.get("cosmogon-cabin-maintenance").and_then(Value::as_str)!=Some(crate::habitat_maintenance::MAINTENANCE_MODEL) {return Err(SaveError::Model("Missing or mismatched cabin maintenance version".into()));}
+    if (expected.contains_key("cosmogon-cabin-construction") || terrain_versions.get("cosmogon-cabin-construction").is_some())
+        && terrain_versions.get("cosmogon-cabin-construction").and_then(Value::as_str)!=Some(crate::habitat_construction::CONSTRUCTION_MODEL) {return Err(SaveError::Model("Missing or mismatched cabin construction version".into()));}
+    if (expected.contains_key("cosmogon-habitat-stock-transfer") || terrain_versions.get("cosmogon-habitat-stock-transfer").is_some())
+        && terrain_versions.get("cosmogon-habitat-stock-transfer").and_then(Value::as_str)!=Some(crate::habitat::STOCK_TRANSFER_MODEL) {return Err(SaveError::Model("Missing or mismatched habitat stock transfer version".into()));}
     if (expected.contains_key("cosmogon-cabin-heat-accounting") || terrain_versions.get("cosmogon-cabin-heat-accounting").is_some()) && terrain_versions.get("cosmogon-cabin-heat-accounting").and_then(Value::as_str)!=Some(crate::habitat_heat::MODEL) {return Err(SaveError::Model("Missing or mismatched cabin heat accounting version".into()));}
     if !u.habitats.is_empty() {
         if terrain_versions.get("cosmogon-habitat-budgets").and_then(Value::as_str)!=Some(crate::habitat::MODEL) {return Err(SaveError::Model("Missing or mismatched model version".into()));}
@@ -223,6 +229,7 @@ pub fn from_json(s: &str) -> Result<Universe, SaveError> {
             h.validate(u.time).map_err(SaveError::Model)?;
             if h.id>=u.next_habitat_id || !ids.insert(h.id) || u.systems.get(h.definition.body.system as usize).and_then(|s|s.bodies.get(h.definition.body.body as usize)).is_none() {return Err(SaveError::Model("Duplicate habitat identifier or invalid world reference".into()));}
         }
+        crate::habitat::validate_stock_transfers(&u).map_err(SaveError::Model)?;
     }
     for (id,model) in [("cosmogon-finite-world-vehicle",crate::world_vehicle::MODEL),("cosmogon-supply-vehicle-reference",crate::supply_vehicle::MODEL),("cosmogon-finite-terrain-contact",crate::vehicle_contact::MODEL),("cosmogon-world-vehicle-contact-capability",crate::world_vehicle::CONTACT_MODEL),("cosmogon-finite-foot-shear",crate::vehicle_shear::MODEL),("cosmogon-persistent-terrain-contact",crate::vehicle_contact_dynamics::SHEAR_MODEL),("cosmogon-world-vehicle-shear-capability",crate::world_vehicle::SHEAR_MODEL),("cosmogon-vehicle-surface-operation",crate::vehicle_operation::MODEL),("cosmogon-vehicle-cargo-flight",crate::vehicle_cargo_mass::MODEL),("cosmogon-vehicle-handling",crate::vehicle_handling::MODEL),("cosmogon-vehicle-transfer",crate::vehicle_transfer::MODEL),("cosmogon-vehicle-launch",crate::vehicle_launch::MODEL),("cosmogon-vehicle-entry",crate::vehicle_entry::MODEL),("cosmogon-vehicle-landing",crate::vehicle_landing::MODEL)] {
         if (expected.contains_key(id) || terrain_versions.get(id).is_some()) && terrain_versions.get(id).and_then(Value::as_str) != Some(model) {
