@@ -556,6 +556,15 @@ pub fn explain(h: &Habitat) -> Diagnostics {
         };
         d.explanations.push(Explanation{id:"construction",text,evidence:vec!["budget.construction","budget.configuration.construction","state.construction_material_kg","state.construction_structure_kg","totals.constructed_volume_m3","config.volume_m3"]});
     }
+    if h.uses_calibration(){
+        let text=match (h.config.calibration.as_ref().or(h.definition.config.calibration.as_ref()),&b.calibration) {
+            (Some(k),Some(x))=>format!("Authored life-support calibration applies crew demand ×{:.3} (band ±{:.0}%), CO₂ capture ×{:.3} (±{:.0}%), water processing ×{:.3} (±{:.0}%) and O₂ makeup ×{:.3} (±{:.0}%). Last interval applied crew cycle {:.6} person-days [{:.6}, {:.6}], O₂ makeup {:.6} kg [{:.6}, {:.6}], CO₂ captured {:.6} kg [{:.6}, {:.6}], water processed {:.6} kg [{:.6}, {:.6}]. Bands are authored sensitivity bounds around the applied exchanges, not measured variance.",k.crew_demand.central,k.crew_demand.relative_band*100.0,k.scrubber.central,k.scrubber.relative_band*100.0,k.recycler.central,k.recycler.relative_band*100.0,k.oxygen_makeup.central,k.oxygen_makeup.relative_band*100.0,x.crew_cycle_person_days.applied,x.crew_cycle_person_days.low,x.crew_cycle_person_days.high,x.oxygen_makeup_kg.applied,x.oxygen_makeup_kg.low,x.oxygen_makeup_kg.high,x.co2_captured_kg.applied,x.co2_captured_kg.low,x.co2_captured_kg.high,x.water_processed_kg.applied,x.water_processed_kg.low,x.water_processed_kg.high),
+            (Some(k),None)=>format!("Authored life-support calibration is configured (crew demand ×{:.3}, CO₂ capture ×{:.3}, water processing ×{:.3}, O₂ makeup ×{:.3}) but no completed calibrated interval is retained yet. Factors are authored design inputs, not fitted measurements.",k.crew_demand.central,k.scrubber.central,k.recycler.central,k.oxygen_makeup.central),
+            (None,Some(x))=>format!("Calibration interval evidence is retained without a live configuration (crew cycle {:.6} person-days [{:.6}, {:.6}], O₂ makeup {:.6} kg [{:.6}, {:.6}], CO₂ captured {:.6} kg [{:.6}, {:.6}], water processed {:.6} kg [{:.6}, {:.6}]).",x.crew_cycle_person_days.applied,x.crew_cycle_person_days.low,x.crew_cycle_person_days.high,x.oxygen_makeup_kg.applied,x.oxygen_makeup_kg.low,x.oxygen_makeup_kg.high,x.co2_captured_kg.applied,x.co2_captured_kg.low,x.co2_captured_kg.high,x.water_processed_kg.applied,x.water_processed_kg.low,x.water_processed_kg.high),
+            (None,None)=>"Calibration evidence claimed without configuration or interval records".into(),
+        };
+        d.explanations.push(Explanation{id:"calibration",text,evidence:vec!["budget.calibration","budget.configuration.calibration","config.calibration"]});
+    }
     if h.uses_crop(){
         d.heat.push(term("crop_chemical","Crop dry chemical storage debit","W",crop.map(|v|-v.chemical_storage_j/b.seconds).or_else(||c.crop.is_none().then_some(0.)),"-budget.crop.chemical_storage_j / seconds; user-assumed dry chemical basis"));
         d.heat.push(term("crop_vapor","Crop vapor phase storage debit","W",crop.map(|v|-v.vapor_phase_j/b.seconds).or_else(||c.crop.is_none().then_some(0.)),"-budget.crop.vapor_phase_j / seconds; finite vapor transfer"));
@@ -615,7 +624,7 @@ pub fn explain(h: &Habitat) -> Diagnostics {
 pub fn report(h: &Habitat, world_time_s: f64) -> Result<serde_json::Value, String> {
     h.validate(world_time_s)?;
     Ok(
-        serde_json::json!({"format":"cosmogon-habitat-diagnostic-report","schema_version":1,"world_time_s":world_time_s,"time_coordinate":"seconds since J2000; interval end can precede world time","diagnostics":explain(h),"habitat":h,"source":{"crew":SOURCE,"electrolysis":h.uses_electrolysis().then(crate::electrolysis::source),"sabatier":h.uses_sabatier().then(crate::sabatier::source),"moisture":h.uses_moisture().then(crate::moisture::source),"breach":h.uses_breach().then(crate::breach::source),"construction":h.uses_construction().then(crate::habitat_construction::source)}}),
+        serde_json::json!({"format":"cosmogon-habitat-diagnostic-report","schema_version":1,"world_time_s":world_time_s,"time_coordinate":"seconds since J2000; interval end can precede world time","diagnostics":explain(h),"habitat":h,"source":{"crew":SOURCE,"electrolysis":h.uses_electrolysis().then(crate::electrolysis::source),"sabatier":h.uses_sabatier().then(crate::sabatier::source),"moisture":h.uses_moisture().then(crate::moisture::source),"breach":h.uses_breach().then(crate::breach::source),"construction":h.uses_construction().then(crate::habitat_construction::source),"calibration":h.uses_calibration().then(crate::habitat_calibration::source)}}),
     )
 }
 pub fn from_world(u: &Universe, id: u64) -> Result<serde_json::Value, String> {

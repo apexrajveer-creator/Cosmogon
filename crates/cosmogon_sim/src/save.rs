@@ -133,6 +133,7 @@ pub fn data_versions(u: &Universe) -> std::collections::BTreeMap<String, String>
     if u.habitats.iter().any(crate::habitat::Habitat::uses_leak) {m.insert("cosmogon-cabin-structural-leak".into(),crate::habitat::LEAK_MODEL.into());}
     if u.habitats.iter().any(crate::habitat::Habitat::uses_maintenance) {m.insert("cosmogon-cabin-maintenance".into(),crate::habitat_maintenance::MAINTENANCE_MODEL.into());}
     if u.habitats.iter().any(crate::habitat::Habitat::uses_construction) {m.insert("cosmogon-cabin-construction".into(),crate::habitat_construction::CONSTRUCTION_MODEL.into());}
+    if u.habitats.iter().any(crate::habitat::Habitat::uses_calibration) {m.insert("cosmogon-life-support-calibration".into(),crate::habitat_calibration::CALIBRATION_MODEL.into());}
     if u.habitats.iter().any(|h|!h.stock_transfers.is_empty()) || u.edits.iter().any(|r|matches!(&r.edit, crate::sandbox::Edit::TransferHabitatStock {..})) {m.insert("cosmogon-habitat-stock-transfer".into(),crate::habitat::STOCK_TRANSFER_MODEL.into());}
     if !u.vehicles.is_empty() || u.next_vehicle_id > 0 {
         m.insert("cosmogon-finite-world-vehicle".into(),crate::world_vehicle::MODEL.into());
@@ -216,6 +217,8 @@ pub fn from_json(s: &str) -> Result<Universe, SaveError> {
         && terrain_versions.get("cosmogon-cabin-maintenance").and_then(Value::as_str)!=Some(crate::habitat_maintenance::MAINTENANCE_MODEL) {return Err(SaveError::Model("Missing or mismatched cabin maintenance version".into()));}
     if (expected.contains_key("cosmogon-cabin-construction") || terrain_versions.get("cosmogon-cabin-construction").is_some())
         && terrain_versions.get("cosmogon-cabin-construction").and_then(Value::as_str)!=Some(crate::habitat_construction::CONSTRUCTION_MODEL) {return Err(SaveError::Model("Missing or mismatched cabin construction version".into()));}
+    if (expected.contains_key("cosmogon-life-support-calibration") || terrain_versions.get("cosmogon-life-support-calibration").is_some())
+        && terrain_versions.get("cosmogon-life-support-calibration").and_then(Value::as_str)!=Some(crate::habitat_calibration::CALIBRATION_MODEL) {return Err(SaveError::Model("Missing or mismatched life-support calibration version".into()));}
     if (expected.contains_key("cosmogon-habitat-stock-transfer") || terrain_versions.get("cosmogon-habitat-stock-transfer").is_some())
         && terrain_versions.get("cosmogon-habitat-stock-transfer").and_then(Value::as_str)!=Some(crate::habitat::STOCK_TRANSFER_MODEL) {return Err(SaveError::Model("Missing or mismatched habitat stock transfer version".into()));}
     if (expected.contains_key("cosmogon-cabin-heat-accounting") || terrain_versions.get("cosmogon-cabin-heat-accounting").is_some()) && terrain_versions.get("cosmogon-cabin-heat-accounting").and_then(Value::as_str)!=Some(crate::habitat_heat::MODEL) {return Err(SaveError::Model("Missing or mismatched cabin heat accounting version".into()));}

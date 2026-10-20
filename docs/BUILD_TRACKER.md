@@ -11,7 +11,7 @@ and may renumber when a build starts.
 
 ---
 
-## Done — 55 builds
+## Done — 56 builds
 
 | # | Build | Status | Evidence |
 | --- | --- | --- | --- |
@@ -70,6 +70,7 @@ and may renumber when a build starts.
 | 53 | Physical wall condensation + nominal structural leak | ✅ | gap 53, WALL_CONDENSATION_LEAK.md (629 tests) |
 | 54 | Equipment calibration and scheduled maintenance | ✅ | gap 54, EQUIPMENT_MAINTENANCE.md (639 tests) |
 | 55 | Finite settlement construction and logistics | ✅ | gap 55, SETTLEMENT_CONSTRUCTION.md (651 tests) |
+| 56 | Life-support validation beyond reference assumptions (calibration/uncertainty) | ✅ | gap 56, LIFE_SUPPORT_CALIBRATION.md (662 tests) |
 
 Released baselines: v0.3.0, v0.5.0, **v1.0.0** (`0411e9d`) — all preserved; tags untouched.
 
@@ -95,8 +96,8 @@ Released baselines: v0.3.0, v0.5.0, **v1.0.0** (`0411e9d`) — all preserved; ta
 | 53 | ~~Physical humidity/leak/wall-condensation coupling~~ | ✅ **DONE** |
 | 54 | ~~Equipment calibration and maintenance model~~ | ✅ **DONE** |
 | 55 | ~~Finite settlement construction and logistics~~ | ✅ **DONE** |
-| 56 | Life-support validation beyond reference assumptions (calibration/uncertainty) | ⬜ **NEXT** |
-| 57 | Environmental hazard completeness (breach/radiation propagation) | ⬜ |
+| 56 | ~~Life-support validation beyond reference assumptions (calibration/uncertainty)~~ | ✅ **DONE** |
+| 57 | Environmental hazard completeness (breach/radiation propagation) | ⬜ **NEXT** |
 
 ### C. Research & scientific validation — provisional, ~3 builds
 
@@ -156,7 +157,7 @@ Released baselines: v0.3.0, v0.5.0, **v1.0.0** (`0411e9d`) — all preserved; ta
 
 ---
 
-**Totals:** 50 done / ~39 remaining (≈89 builds total; remaining ≈240–340 focused hours, graphics
+**Totals:** 56 done / ~33 remaining (≈89 builds total; remaining ≈240–340 focused hours, graphics
 the dominant wildcard). Cluster sizes in sections B–G are estimates and renumber as builds land;
 section A never renumbers. Update this file in the same commit as each build, and append the new
 gap entry to [MASTER_GAP_ANALYSIS](MASTER_GAP_ANALYSIS.md) when the build is accepted.

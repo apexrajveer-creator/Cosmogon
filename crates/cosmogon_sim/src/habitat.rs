@@ -81,6 +81,10 @@ pub struct Config {
     /// Optional continuous cabin construction from held finite material stock.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub construction: Option<crate::habitat_construction::Config>,
+    /// Optional authored life-support calibration factors with retained sensitivity
+    /// bands. Absent legacy definitions stay byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calibration: Option<crate::habitat_calibration::Config>,
     /// Finite general storage for the four transferable supply stocks. Absent legacy
     /// definitions keep the historical 1e7 kg general bound byte-exactly.
     #[serde(default = "default_storage_capacity", skip_serializing_if = "is_default_storage_capacity")]
@@ -141,6 +145,7 @@ impl Default for Config {
             leak: None,
             maintenance: None,
             construction: None,
+            calibration: None,
             oxygen_reserve_capacity_kg: default_storage_capacity(),
             potable_water_capacity_kg: default_storage_capacity(),
             food_dry_capacity_kg: default_storage_capacity(),
@@ -315,6 +320,7 @@ impl Config {
             }
         }
         if let Some(k) = &self.construction {k.validate()?;}
+        if let Some(k) = &self.calibration {k.validate()?;}
         // Internal oxygen production is gated only by equipment product capacities,
         // so the reserve tank must at least cover every installed oxygen ceiling.
         if let Some(c) = &self.crop {
@@ -637,6 +643,8 @@ pub struct Budget {
     pub maintenance: Option<crate::habitat_maintenance::MaintenanceBudget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub construction: Option<crate::habitat_construction::Budget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calibration: Option<crate::habitat_calibration::Budget>,
     #[serde(default, skip_serializing_if = "zero")]
     pub condensate_processed_kg: f64,
     #[serde(default, skip_serializing_if = "zero")]
@@ -956,6 +964,10 @@ impl Habitat {
             let c=self.budget.configuration.as_ref().and_then(|c|c.construction.as_ref()).ok_or("Construction interval lacks its configuration")?;
             b.validate(c,b.material_after_kg)?;
         }
+        if let Some(b)=&self.budget.calibration {
+            let c=self.budget.configuration.as_ref().and_then(|c|c.calibration.as_ref()).ok_or("Calibration interval lacks its configuration")?;
+            b.validate(c)?;
+        }
         if let Some(k)=self.config.construction.as_ref().or(self.definition.config.construction.as_ref()) {
             bounds(s.construction_material_kg,0.0,k.material_capacity_kg,"Construction material")?;
         }
@@ -1126,6 +1138,7 @@ impl Habitat {
     pub fn uses_leak(&self)->bool {self.config.leak.is_some() || self.definition.config.leak.is_some() || self.budget.leak.is_some() || self.totals.leaked_gas.is_some()}
     pub fn uses_maintenance(&self)->bool {self.config.maintenance.is_some() || self.definition.config.maintenance.is_some() || self.budget.maintenance.is_some() || self.state.maintenance.is_some() || self.totals.maintenance_hours>0.0}
     pub fn uses_construction(&self)->bool {self.config.construction.is_some() || self.definition.config.construction.is_some() || self.budget.construction.is_some() || self.state.construction_material_kg>0.0 || self.state.construction_structure_kg>0.0 || self.totals.constructed_volume_m3>0.0 || self.totals.construction_material_used_kg>0.0}
+    pub fn uses_calibration(&self)->bool {self.config.calibration.is_some() || self.definition.config.calibration.is_some() || self.budget.calibration.is_some()}
     pub fn uses_sabatier(&self) -> bool {
         self.config.sabatier.is_some() || self.definition.config.sabatier.is_some() || self.budget.sabatier.is_some()
             || self.state.methane_kg>0.0 || self.state.sabatier_water_kg>0.0 || self.totals.sabatier_co2_consumed_kg>0.0
@@ -1170,6 +1183,11 @@ impl Habitat {
             return Ok(());
         }
         let c = &self.config;
+        let cal = c.calibration.as_ref();
+        let crew_factor = cal.map_or(1.0, |k| k.crew_demand.central);
+        let scrubber_factor = cal.map_or(1.0, |k| k.scrubber.central);
+        let recycler_factor = cal.map_or(1.0, |k| k.recycler.central);
+        let makeup_factor = cal.map_or(1.0, |k| k.oxygen_makeup.central);
         let s = &mut self.state;
         let old_mass = s.accounted_mass_kg();
         let old_battery = s.battery_j;
@@ -1208,9 +1226,9 @@ impl Habitat {
         };
         // Reserve nominal crew water before planning optional production. New recycle
         // water and freed product headroom wait one interval, so requests stay causal.
-        let reactor_start_stocks = (s.potable_water_kg-c.crew as f64*3.217*dt/SECONDS_PER_DAY,s.oxygen_reserve_kg,s.hydrogen_kg);
+        let reactor_start_stocks = (s.potable_water_kg-c.crew as f64*crew_factor*3.217*dt/SECONDS_PER_DAY,s.oxygen_reserve_kg,s.hydrogen_kg);
         let planned_oxygen = c.electrolysis.as_ref().map(|e|e.planned_oxygen_kg(
-            s.potable_water_kg-c.crew as f64*3.217*dt/SECONDS_PER_DAY,
+            s.potable_water_kg-c.crew as f64*crew_factor*3.217*dt/SECONDS_PER_DAY,
             s.oxygen_reserve_kg,s.hydrogen_kg,dt)*fx(5).scale).unwrap_or(0.0);
         let reactor_request = c.electrolysis.as_ref().map(|e|
             (planned_oxygen*e.electricity_j_kg_oxygen/dt).min(e.power_limit_w)).unwrap_or(0.0);
@@ -1317,11 +1335,11 @@ impl Habitat {
         let oxygen_target = c.oxygen_setpoint_pa * c.volume_m3 * O2 / (R * s.temperature_k);
         let makeup = (oxygen_target - s.oxygen_kg)
             .max(0.0)
-            .min(c.oxygen_makeup_rate_kg_s * dt)
+            .min(c.oxygen_makeup_rate_kg_s * makeup_factor * dt)
             .min(s.oxygen_reserve_kg);
         s.oxygen_kg += makeup;
         s.oxygen_reserve_kg -= makeup;
-        let demand = c.crew as f64 * dt / SECONDS_PER_DAY;
+        let demand = c.crew as f64 * crew_factor * dt / SECONDS_PER_DAY;
         let cycle = if demand > 0.0 {
             demand
                 .min(s.oxygen_kg / 0.895)
@@ -1340,12 +1358,12 @@ impl Habitat {
         s.water_vapor_kg+=crew_vapor;
         s.wastewater_kg += cycle * 4.467-crew_vapor;
         s.dry_waste_kg += cycle * 0.120;
-        let captured = (c.scrubber_rate_kg_s * dt * proc_frac(1,scrubber_process_w) * fx(0).op_fraction * fx(0).scale)
+        let captured = (c.scrubber_rate_kg_s * scrubber_factor * dt * proc_frac(1,scrubber_process_w) * fx(0).op_fraction * fx(0).scale)
             .min(s.co2_kg)
             .min((c.capture_capacity_kg - s.captured_co2_kg).max(0.0));
         s.co2_kg -= captured;
         s.captured_co2_kg += captured;
-        let processed = (c.recycler_rate_kg_s * dt * proc_frac(2,recycler_process_w) * fx(1).op_fraction * fx(1).scale).min(s.wastewater_kg);
+        let processed = (c.recycler_rate_kg_s * recycler_factor * dt * proc_frac(2,recycler_process_w) * fx(1).op_fraction * fx(1).scale).min(s.wastewater_kg);
         // Recovery enters the finite potable tank; overflow stays in the processed
         // stream as brine, never discarded. Default 1e7 kg tanks never bind.
         let recovered = (processed * c.water_recovery_fraction)
@@ -1355,18 +1373,25 @@ impl Habitat {
         s.brine_kg += processed - recovered;
         // Raw product needs the existing powered processing assumption, after wastewater.
         // Products generated below are unavailable here until a later interval.
-        let product_processed = (c.recycler_rate_kg_s*dt*proc_frac(2,recycler_process_w)*fx(1).op_fraction*fx(1).scale-processed).max(0.0).min(sabatier_start.water_kg);
+        let product_processed = (c.recycler_rate_kg_s*recycler_factor*dt*proc_frac(2,recycler_process_w)*fx(1).op_fraction*fx(1).scale-processed).max(0.0).min(sabatier_start.water_kg);
         let product_recovered = (product_processed*c.water_recovery_fraction)
             .min((c.potable_water_capacity_kg - s.potable_water_kg).max(0.0));
         s.sabatier_water_kg = (s.sabatier_water_kg-product_processed).max(0.0);
         s.potable_water_kg = (s.potable_water_kg + product_recovered).min(c.potable_water_capacity_kg);
         s.brine_kg += product_processed-product_recovered;
-        let condensate_processed=(c.recycler_rate_kg_s*dt*proc_frac(2,recycler_process_w)*fx(1).op_fraction*fx(1).scale-processed-product_processed).max(0.0).min(condensate_start);
+        let condensate_processed=(c.recycler_rate_kg_s*recycler_factor*dt*proc_frac(2,recycler_process_w)*fx(1).op_fraction*fx(1).scale-processed-product_processed).max(0.0).min(condensate_start);
         let condensate_recovered=(condensate_processed*c.water_recovery_fraction)
             .min((c.potable_water_capacity_kg - s.potable_water_kg).max(0.0));
         s.condensate_kg=(s.condensate_kg-condensate_processed).max(0.0);
         s.potable_water_kg=(s.potable_water_kg+condensate_recovered).min(c.potable_water_capacity_kg);
         s.brine_kg+=condensate_processed-condensate_recovered;
+        let calibration = cal.map(|k| crate::habitat_calibration::Budget::new(
+            k,
+            cycle,
+            makeup,
+            captured,
+            processed + product_processed + condensate_processed,
+        ));
         let moisture=c.moisture.as_ref().zip(moisture_plan).map(|(m,p)|crate::moisture::Budget::from_power(m,p,proc_delivered(7,moisture_slot_w),crew_vapor,dt));
         let crew_phase=crew_vapor*crate::moisture::REFERENCE_PHASE_J_KG;
         let condensation_heat=moisture.as_ref().map(|m|m.condensation_heat_j).unwrap_or(0.0);
@@ -1406,7 +1431,7 @@ impl Habitat {
         // claims. Newly captured CO2/recycled water/freed reserve space wait one minute.
         let crop=c.crop.as_ref().zip(s.crop.as_mut()).map(|(crop,state)| {
             let capacity=crop.oxygen_capacity_kg.min(c.electrolysis.as_ref().map_or(crop.oxygen_capacity_kg,|e|e.oxygen_capacity_kg));
-            let stocks=crate::crop_process::Stocks {water_kg:s.potable_water_kg.min((crop_start.0-c.crew as f64*3.217*dt/SECONDS_PER_DAY-reactor.as_ref().map_or(0.,|b|b.water_consumed_kg)).max(0.)),co2_kg:s.captured_co2_kg.min((crop_start.1-reduction.as_ref().map_or(0.,|b|b.co2_consumed_kg)).max(0.)),oxygen_headroom_kg:(capacity-s.oxygen_reserve_kg).max(0.).min((capacity-crop_start.2-reactor.as_ref().map_or(0.,|b|b.oxygen_generated_kg)).max(0.))};
+            let stocks=crate::crop_process::Stocks {water_kg:s.potable_water_kg.min((crop_start.0-c.crew as f64*crew_factor*3.217*dt/SECONDS_PER_DAY-reactor.as_ref().map_or(0.,|b|b.water_consumed_kg)).max(0.)),co2_kg:s.captured_co2_kg.min((crop_start.1-reduction.as_ref().map_or(0.,|b|b.co2_consumed_kg)).max(0.)),oxygen_headroom_kg:(capacity-s.oxygen_reserve_kg).max(0.).min((capacity-crop_start.2-reactor.as_ref().map_or(0.,|b|b.oxygen_generated_kg)).max(0.))};
             state.execute(crop,self.last_time,dt,supplied[8],stocks)
         }).transpose()?;
         let crop_debit=crop.as_ref().map_or(0.,|b|b.thermal_debit_j());
@@ -1499,6 +1524,7 @@ impl Habitat {
             leak,
             maintenance,
             construction,
+            calibration,
             sabatier_water_processed_kg: product_processed,
             sabatier_water_recovered_kg: product_recovered,
         };
@@ -1545,6 +1571,13 @@ impl Habitat {
         let mut report=serde_json::json!({"format":"cosmogon-habitat-report","schema_version":1,"habitat":self,"diagnostics":crate::habitat_diagnostics::explain(self),"oxygen_partial_pressure_pa":self.state.oxygen_pa(&self.config),"co2_partial_pressure_pa":self.state.co2_pa(&self.config),"total_pressure_pa":self.state.pressure_pa(&self.config),"data_states":{"crew_rates":"Published nominal reference model (NASA BVAD), not individual measurements","equipment_and_initial_stocks":"User-assumed design inputs","current_stores_and_budgets":"Modelled","exterior_temperature":"Global reduced climate model; local measured weather unavailable","horizontal_irradiance":"Derived from primary-star state and approximate body frame"},"electrolysis_source":self.uses_electrolysis().then(crate::electrolysis::source),"sabatier_source":self.uses_sabatier().then(crate::sabatier::source),"moisture_source":self.uses_moisture().then(crate::moisture::source),"breach_source":self.uses_breach().then(crate::breach::source),"moisture_observation":self.uses_moisture().then(||serde_json::json!({"vapor_pressure_pa":self.state.vapor_pressure_pa(&self.config),"relative_humidity":self.state.relative_humidity(&self.config),"reference_phase_energy_j":self.state.phase_energy_j(),"supersaturated":self.state.relative_humidity(&self.config).map(|v|v>1.0)})),"wall_observation":self.uses_wall().then(||serde_json::json!({"wall_liquid_kg":self.state.wall_liquid_kg,"cumulative_net_condensed_kg":self.totals.wall_condensed_kg,"model":crate::moisture::WALL_MODEL})),"leak_observation":self.uses_leak().then(||serde_json::json!({"leaked_gas":self.totals.leaked_gas,"model":LEAK_MODEL})),"leak_source":self.uses_leak().then(crate::moisture::leak_source),"maintenance_observation":self.uses_maintenance().then(||serde_json::json!({"components":self.state.maintenance,"cumulative_maintenance_hours":self.totals.maintenance_hours,"model":crate::habitat_maintenance::MAINTENANCE_MODEL})),"maintenance_source":self.uses_maintenance().then(crate::habitat_maintenance::source),"construction_observation":self.uses_construction().then(||serde_json::json!({"held_material_kg":self.state.construction_material_kg,"structure_mass_kg":self.state.construction_structure_kg,"cumulative_volume_added_m3":self.totals.constructed_volume_m3,"cumulative_material_used_kg":self.totals.construction_material_used_kg,"live_volume_m3":self.config.volume_m3,"model":crate::habitat_construction::CONSTRUCTION_MODEL})),"construction_source":self.uses_construction().then(crate::habitat_construction::source),"uncertainty":null,"uncertainty_scope":"Input and predictive model uncertainty are not quantified","source":{"url":SOURCE,"version":"NASA BVAD Rev2 February 2022, Table 3-31","equipment":"User-assumed capacities, powers, efficiencies and alert thresholds"},"limits":"Reduced nominal demand and lumped thermal model, not validated mission hardware, local weather, purification quality, medical response or safety certification. Optional reduced humidity budget, passive lumped wall condensation (no ice), nominal proportional structural leak and scheduled equipment wear/maintenance with authored capacity calibration; no greenhouse exchange, seal/inward/rarefied leakage, EVA, radiation or resupply. Continuous cabin construction from held material with an authored bulk ratio is optional and separately sourced; no structural strength, assembly physics, dust, crew labour or vehicle-mediated material delivery."});
         if self.heat.is_some() {report["heat_accounting"]=crate::habitat_heat::habitat_span(self);}
         if self.uses_crop() {report["crop_source"]=crate::crop_process::source();report["data_states"]["crop_operation"] = serde_json::json!("Finite modelled transfers under user-assumed ideal maintained source conditions; not calibrated biology/chamber hardware");report["limits"]=serde_json::json!("Reduced nominal demand and lumped thermal model with optional conserved maintained-reference crop transfers. No independently controlled chamber, calibrated crop physiology, complete diet credit, ice condensation, seal/inward/rarefied leakage, EVA, radiation or resupply. Passive lumped wall condensation and nominal structural leak are optional and separately sourced; scheduled equipment wear/maintenance with authored capacity calibration is optional and separately sourced; crop-specific source/progress/energy assumptions are retained separately in crop_source.");}
+        if self.uses_calibration() {
+            report["calibration_observation"]=serde_json::json!({"factors":self.config.calibration.as_ref().or(self.definition.config.calibration.as_ref()),"last_interval":self.budget.calibration,"model":crate::habitat_calibration::CALIBRATION_MODEL});
+            report["calibration_source"]=crate::habitat_calibration::source();
+            report["source"]["calibration"]=serde_json::json!("Authored calibration multipliers and ± sensitivity bands on the published reference rates (ESTIMATED design inputs); not fitted to measurements");
+            report["data_states"]["life_support_calibration"]=serde_json::json!("Authored calibration factors and ± sensitivity bands on the published reference rates (ESTIMATED design inputs), not measured hardware, fitted parameters or predictive statistics");
+            report["uncertainty_scope"]=serde_json::json!("Life-support calibration bands are authored sensitivity bounds around applied calibrated exchanges, not measured variance or confidence intervals; remaining input and predictive model uncertainty is not quantified");
+        }
         report
     }
 }
@@ -1674,11 +1707,13 @@ pub(crate) fn samples_csv(rows: &[Sample]) -> String {
     let leak_present = rows.iter().any(|r| r.habitat.uses_leak());
     let maintenance_present = rows.iter().any(|r| r.habitat.uses_maintenance());
     let construction_present = rows.iter().any(|r| r.habitat.uses_construction());
+    let calibration_present = rows.iter().any(|r| r.habitat.uses_calibration());
     let mut csv=String::from("simulation_time_s,completed_habitat_time_s,interval_s,temperature_k,total_pressure_pa,oxygen_partial_pressure_pa,co2_partial_pressure_pa,battery_j,oxygen_kg,oxygen_reserve_kg,potable_water_kg,wastewater_kg,brine_kg,food_dry_kg,food_water_kg,dry_waste_kg,captured_co2_kg,environment_available,temperature_domain_supported,horizontal_irradiance_w_m2,exterior_temperature_k,generated_w,requested_w,delivered_w,unserved_w,battery_losses_w,curtailed_w,served_cycle_fraction,metabolic_heat_w,heater_w,radiator_rejection_w,conduction_w,thermal_storage_w,mass_residual_kg,electric_residual_j,thermal_residual_j,total_unserved_j,total_unserved_person_seconds,hydrogen_kg,electrolysis_requested_w,electrolysis_delivered_w,electrolysis_oxygen_generated_kg,electrolysis_hydrogen_generated_kg,electrolysis_water_consumed_kg,electrolysis_electricity_j,electrolysis_reaction_enthalpy_j,electrolysis_waste_heat_j,total_reaction_enthalpy_j,electrolysis_constraints,methane_kg,sabatier_water_kg,sabatier_requested_w,sabatier_delivered_w,sabatier_co2_consumed_kg,sabatier_hydrogen_consumed_kg,sabatier_methane_generated_kg,sabatier_water_generated_kg,sabatier_electricity_j,sabatier_reaction_heat_j,sabatier_total_heat_j,sabatier_water_processed_kg,sabatier_water_recovered_kg,total_sabatier_co2_consumed_kg,total_sabatier_heat_j,total_sabatier_water_processed_kg,sabatier_constraints,water_vapor_kg,condensate_kg,vapor_pressure_pa,relative_humidity,saturation_pressure_pa,reference_phase_energy_j,moisture_requested_w,moisture_delivered_w,crew_vapor_kg,crew_phase_energy_j,condensed_kg,condensation_heat_j,moisture_electricity_j,moisture_constraints,condensate_processed_kg,condensate_recovered_kg,total_crew_vapor_kg,total_condensed_kg,total_condensate_processed_kg,escaped_oxygen_kg,escaped_nitrogen_kg,escaped_co2_kg,escaped_vapor_kg,accounted_mass_kg,breach_initial_pressure_pa,breach_final_pressure_pa,breach_initial_temperature_k,breach_final_temperature_k,breach_initial_rate_kg_s,breach_final_rate_kg_s,breach_integrated_seconds,breach_steps,breach_oxygen_kg,breach_nitrogen_kg,breach_co2_kg,breach_vapor_kg,breach_lumped_cooling_j,breach_structure_energy_change_j,breach_gas_energy_change_j,breach_phase_energy_change_j,breach_outflow_enthalpy_j,breach_energy_residual_j,breach_status,total_breach_enthalpy_j");
     if wall_present {csv.push_str(",wall_liquid_kg,total_wall_condensed_kg");}
     if leak_present {csv.push_str(",leaked_oxygen_kg,leaked_nitrogen_kg,leaked_co2_kg,leaked_vapor_kg,total_leaked_gas_kg");}
     if maintenance_present {csv.push_str(",maintenance_operating_s,maintenance_active_s,worst_equipment_condition,total_maintenance_hours");}
     if construction_present {csv.push_str(",construction_material_kg,construction_requested_w,construction_delivered_w,construction_volume_added_m3,total_constructed_volume_m3");}
+    if calibration_present {csv.push_str(",calibration_crew_cycle_applied,calibration_crew_cycle_low,calibration_crew_cycle_high,calibration_oxygen_makeup_applied,calibration_oxygen_makeup_low,calibration_oxygen_makeup_high,calibration_co2_captured_applied,calibration_co2_captured_low,calibration_co2_captured_high,calibration_water_processed_applied,calibration_water_processed_low,calibration_water_processed_high");}
     csv.push('\n');
     for row in rows {
         let h = &row.habitat;
@@ -1777,6 +1812,15 @@ pub(crate) fn samples_csv(rows: &[Sample]) -> String {
         }
         if construction_present {
             for v in [s.construction_material_kg,b.construction.as_ref().map_or(0.0,|k|k.requested_w),b.construction.as_ref().map_or(0.0,|k|k.delivered_w),b.construction.as_ref().map_or(0.0,|k|k.volume_added_m3),h.totals.constructed_volume_m3] {csv.push(',');csv.push_str(&v.to_string());}
+        }
+        if calibration_present {
+            let cb = b.calibration.as_ref();
+            for v in [
+                cb.map_or(0.0,|k|k.crew_cycle_person_days.applied), cb.map_or(0.0,|k|k.crew_cycle_person_days.low), cb.map_or(0.0,|k|k.crew_cycle_person_days.high),
+                cb.map_or(0.0,|k|k.oxygen_makeup_kg.applied), cb.map_or(0.0,|k|k.oxygen_makeup_kg.low), cb.map_or(0.0,|k|k.oxygen_makeup_kg.high),
+                cb.map_or(0.0,|k|k.co2_captured_kg.applied), cb.map_or(0.0,|k|k.co2_captured_kg.low), cb.map_or(0.0,|k|k.co2_captured_kg.high),
+                cb.map_or(0.0,|k|k.water_processed_kg.applied), cb.map_or(0.0,|k|k.water_processed_kg.low), cb.map_or(0.0,|k|k.water_processed_kg.high),
+            ] {csv.push(',');csv.push_str(&v.to_string());}
         }
         csv.push('\n');
     }
@@ -2368,6 +2412,133 @@ mod tests {
         let error = h.check_config(&small).unwrap_err();
         assert!(error.contains("below held stock"), "{error}");
     }
+    #[test]
+    fn identity_calibration_preserves_physics_and_records_bounds() {
+        let mut control = habitat();
+        let mut calibrated = habitat();
+        calibrated.config.calibration = Some(crate::habitat_calibration::Config::default());
+        assert!(calibrated.uses_calibration());
+        assert!(!control.uses_calibration());
+        for n in 1..=120 {
+            control.step(n as f64 * PERIOD, environment()).unwrap();
+            calibrated.step(n as f64 * PERIOD, environment()).unwrap();
+        }
+        // Identity factors leave every state value and total bit-identical.
+        assert_eq!(control.state, calibrated.state);
+        assert_eq!(control.totals, calibrated.totals);
+        assert!(control.budget.calibration.is_none());
+        assert!(serde_json::to_value(&control.config)
+            .unwrap()
+            .get("calibration")
+            .is_none());
+        assert!(serde_json::to_value(&calibrated.config)
+            .unwrap()
+            .get("calibration")
+            .is_some());
+        let b = calibrated.budget.calibration.as_ref().unwrap();
+        // Identity bands collapse to the applied exchange.
+        assert_eq!(b.crew_cycle_person_days.applied, b.crew_cycle_person_days.low);
+        assert_eq!(b.crew_cycle_person_days.applied, b.crew_cycle_person_days.high);
+        assert!((b.crew_cycle_person_days.applied - 4.0 * PERIOD / SECONDS_PER_DAY).abs() < 1e-12);
+        assert_eq!(b.oxygen_makeup_kg.applied, calibrated.budget.oxygen_makeup_kg);
+        assert_eq!(b.co2_captured_kg.applied, calibrated.budget.co2_captured_kg);
+        assert_eq!(b.water_processed_kg.applied, calibrated.budget.water_processed_kg);
+        calibrated.validate(calibrated.last_time).unwrap();
+        assert!(serde_json::to_value(&calibrated.budget)
+            .unwrap()
+            .get("calibration")
+            .is_some());
+    }
+    #[test]
+    fn raised_crew_demand_draws_faster_and_bands_wrap_applied() {
+        let mut control = habitat();
+        let mut raised = habitat();
+        raised.config.calibration = Some(crate::habitat_calibration::Config {
+            crew_demand: crate::habitat_calibration::Factor {
+                central: 1.5,
+                relative_band: 0.2,
+            },
+            ..Default::default()
+        });
+        for n in 1..=2880 {
+            control.step(n as f64 * PERIOD, environment()).unwrap();
+            raised.step(n as f64 * PERIOD, environment()).unwrap();
+        }
+        // Calibrated crew demand draws proportionally more of every reference store.
+        assert!(raised.state.oxygen_kg < control.state.oxygen_kg);
+        assert!(raised.state.potable_water_kg < control.state.potable_water_kg);
+        assert!(raised.state.food_dry_kg < control.state.food_dry_kg);
+        assert!(raised.state.food_water_kg < control.state.food_water_kg);
+        assert!(raised.budget.metabolic_heat_w > control.budget.metabolic_heat_w);
+        let b = raised.budget.calibration.as_ref().unwrap();
+        assert!((b.crew_cycle_person_days.low - b.crew_cycle_person_days.applied * 0.8).abs() < 1e-12);
+        assert!((b.crew_cycle_person_days.high - b.crew_cycle_person_days.applied * 1.2).abs() < 1e-12);
+        raised.validate(raised.last_time).unwrap();
+        // An out-of-bounds factor is refused before it can be applied.
+        let mut bad = raised.config.clone();
+        bad.calibration.as_mut().unwrap().scrubber.relative_band = 2.0;
+        let error = raised.check_config(&bad).unwrap_err();
+        assert!(error.contains("relative band"), "{error}");
+    }
+    #[test]
+    fn calibrated_processors_scale_capture_and_processing_exchanges() {
+        let mut control = habitat();
+        // Nominal rates outpace nominal crew waste, so bind both processors below the
+        // crew's production to make the authored rate the active constraint.
+        control.config.scrubber_rate_kg_s = 1.0 / SECONDS_PER_DAY;
+        control.config.recycler_rate_kg_s = 5.0 / SECONDS_PER_DAY;
+        let mut boosted = control.clone();
+        boosted.config.calibration = Some(crate::habitat_calibration::Config {
+            scrubber: crate::habitat_calibration::Factor {
+                central: 2.0,
+                relative_band: 0.0,
+            },
+            recycler: crate::habitat_calibration::Factor {
+                central: 2.0,
+                relative_band: 0.0,
+            },
+            ..Default::default()
+        });
+        for n in 1..=2880 {
+            control.step(n as f64 * PERIOD, environment()).unwrap();
+            boosted.step(n as f64 * PERIOD, environment()).unwrap();
+        }
+        assert!(boosted.budget.co2_captured_kg > control.budget.co2_captured_kg);
+        assert!(boosted.budget.water_processed_kg > control.budget.water_processed_kg);
+        let b = boosted.budget.calibration.as_ref().unwrap();
+        // Zero bands keep low = high = applied, and applied equals the budget terms.
+        assert_eq!(b.co2_captured_kg.applied, b.co2_captured_kg.low);
+        assert_eq!(b.co2_captured_kg.applied, boosted.budget.co2_captured_kg);
+        assert_eq!(b.water_processed_kg.applied, boosted.budget.water_processed_kg);
+        boosted.validate(boosted.last_time).unwrap();
+    }
+    #[test]
+    fn calibration_world_is_deterministic_and_csv_tail_is_additive() {
+        let mut a = habitat();
+        a.config.calibration = Some(crate::habitat_calibration::Config::default());
+        let mut b = a.clone();
+        let mut rows = Vec::new();
+        for n in 1..=10 {
+            a.step(n as f64 * PERIOD, environment()).unwrap();
+            b.step(n as f64 * PERIOD, environment()).unwrap();
+            rows.push(Sample {
+                simulation_time_s: n as f64 * PERIOD,
+                habitat: a.clone(),
+            });
+        }
+        assert_eq!(a, b);
+        let csv = samples_csv(&rows);
+        assert_eq!(
+            csv.lines().next().unwrap().split(',').count(),
+            csv.lines().last().unwrap().split(',').count()
+        );
+        assert_eq!(csv.lines().next().unwrap().split(',').count(), 122);
+        assert!(csv
+            .lines()
+            .next()
+            .unwrap()
+            .ends_with("calibration_water_processed_high"));
+    }
 }
 
 #[cfg(test)]
@@ -2792,6 +2963,71 @@ mod integration_tests {
             .unwrap()
             .remove("cosmogon-cabin-construction");
         assert!(save::from_json(&bad.to_string()).is_err());
+    }
+
+    #[test]
+    fn calibration_pin_lifecycle_and_invalid_configuration_refusal() {
+        let (mut u, r) = world();
+        assert!(!save::data_versions(&u).contains_key("cosmogon-life-support-calibration"));
+        let mut d = Definition::at(r, 0.0, 0.0);
+        d.config.crew = 0;
+        d.config.calibration = Some(crate::habitat_calibration::Config {
+            crew_demand: crate::habitat_calibration::Factor {
+                central: 1.5,
+                relative_band: 0.1,
+            },
+            ..Default::default()
+        });
+        u.apply_edit(Edit::CreateHabitat {
+            definition: Box::new(d),
+        })
+        .unwrap();
+        assert_eq!(
+            save::data_versions(&u)["cosmogon-life-support-calibration"],
+            crate::habitat_calibration::CALIBRATION_MODEL
+        );
+        u.advance_by(600.0);
+        let h = &u.habitats[0];
+        assert!(h.uses_calibration());
+        let b = h.budget.calibration.as_ref().unwrap();
+        // Zero crew leaves the applied cycle at zero inside its authored band.
+        assert_eq!(b.crew_cycle_person_days.applied, 0.0);
+        assert_eq!(b.crew_cycle_person_days.low, 0.0);
+        assert_eq!(b.crew_cycle_person_days.high, 0.0);
+        h.validate(u.time).unwrap();
+        let serialized = save::to_json(&u, "Calibration fixture").unwrap();
+        let resumed = save::from_json(&serialized).unwrap();
+        assert_eq!(resumed.habitats, u.habitats);
+        // A mismatched model pin refuses the reopen.
+        let mut bad: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+        bad["header"]["data_versions"]["cosmogon-life-support-calibration"] = "future/2".into();
+        assert!(save::from_json(&bad.to_string()).is_err());
+        // A removed pin refuses the reopen; a tampered band is caught by validation.
+        let mut bad: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+        bad["header"]["data_versions"]
+            .as_object_mut()
+            .unwrap()
+            .remove("cosmogon-life-support-calibration");
+        assert!(save::from_json(&bad.to_string()).is_err());
+        let mut bad: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+        bad["universe"]["habitats"][0]["budget"]["calibration"]["co2_captured_kg"]["high"] =
+            999.0.into();
+        assert!(save::from_json(&bad.to_string()).is_err());
+        // An out-of-bounds calibration factor is refused at authoring time.
+        let mut d = Definition::at(r, 0.0, 0.0);
+        d.config.calibration = Some(crate::habitat_calibration::Config {
+            scrubber: crate::habitat_calibration::Factor {
+                central: 20.0,
+                relative_band: 0.0,
+            },
+            ..Default::default()
+        });
+        let error = u
+            .apply_edit(Edit::CreateHabitat {
+                definition: Box::new(d),
+            })
+            .unwrap_err();
+        assert!(error.contains("CO₂ capture"), "{error}");
     }
 
     #[test]

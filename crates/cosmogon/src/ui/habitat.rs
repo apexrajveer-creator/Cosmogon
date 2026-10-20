@@ -188,6 +188,7 @@ fn config(ui: &mut egui::Ui, c: &mut Config) {
         number(ui,"Recycler load (W)",&mut c.recycler_power_w,0.0,1.0e6);number(ui,"Wastewater processing (kg/s)",&mut c.recycler_rate_kg_s,0.0,100.0);number(ui,"Recovered water fraction (assumed)",&mut c.water_recovery_fraction,0.0,1.0);
         ui.label(egui::RichText::new("Zero equipment power disables that processor. Recovery fraction does not establish contaminant removal or potable-water quality.").small().color(MUTED));
     });
+    egui::CollapsingHeader::new("Life-support calibration").default_open(c.calibration.is_some()).show(ui,|ui|super::habitat_calibration::controls(ui,&mut c.calibration,true));
     egui::CollapsingHeader::new("Finite supply storage").show(ui,|ui| {
         number(ui,"O₂ reserve tank (kg)",&mut c.oxygen_reserve_capacity_kg,0.0,1.0e7);
         number(ui,"Potable water tank (kg)",&mut c.potable_water_capacity_kg,0.0,1.0e7);
@@ -425,6 +426,9 @@ pub fn panel(
                         });
                         ui.label(egui::RichText::new("Staged until Apply. Capacity below held material is refused; held material is never discarded.").small().color(MUTED));
                         ui.add_enabled_ui(!sim.is_reference(),|ui|super::habitat_settlement::controls(ui,&mut form.draft.construction,true));
+                        ui.separator();
+                        ui.label(egui::RichText::new("Life-support calibration").strong());
+                        ui.add_enabled_ui(!sim.is_reference(),|ui|super::habitat_calibration::controls(ui,&mut form.draft.calibration,true));
                     } else if form.settlement_pane==0 {
                         let action=super::habitat_settlement::readings(ui,h,&sim.universe.habitats,!sim.is_reference(),&mut form.settlement);
                         if let Some(action)=action {if !sim.is_reference() {edit=Some(match action {

@@ -30,6 +30,7 @@ pub mod habitability;
 pub mod habitat;
 pub mod habitat_maintenance;
 pub mod habitat_construction;
+pub mod habitat_calibration;
 pub mod habitat_diagnostics;
 pub mod habitat_recording;
 pub mod habitat_pressure;
