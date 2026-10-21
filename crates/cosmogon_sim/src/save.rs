@@ -134,6 +134,7 @@ pub fn data_versions(u: &Universe) -> std::collections::BTreeMap<String, String>
     if u.habitats.iter().any(crate::habitat::Habitat::uses_maintenance) {m.insert("cosmogon-cabin-maintenance".into(),crate::habitat_maintenance::MAINTENANCE_MODEL.into());}
     if u.habitats.iter().any(crate::habitat::Habitat::uses_construction) {m.insert("cosmogon-cabin-construction".into(),crate::habitat_construction::CONSTRUCTION_MODEL.into());}
     if u.habitats.iter().any(crate::habitat::Habitat::uses_calibration) {m.insert("cosmogon-life-support-calibration".into(),crate::habitat_calibration::CALIBRATION_MODEL.into());}
+    if u.habitats.iter().any(crate::habitat::Habitat::uses_radiation) {m.insert("cosmogon-habitat-radiation".into(),crate::habitat_radiation::MODEL.into());}
     if u.habitats.iter().any(|h|!h.stock_transfers.is_empty()) || u.edits.iter().any(|r|matches!(&r.edit, crate::sandbox::Edit::TransferHabitatStock {..})) {m.insert("cosmogon-habitat-stock-transfer".into(),crate::habitat::STOCK_TRANSFER_MODEL.into());}
     if !u.vehicles.is_empty() || u.next_vehicle_id > 0 {
         m.insert("cosmogon-finite-world-vehicle".into(),crate::world_vehicle::MODEL.into());
@@ -219,6 +220,8 @@ pub fn from_json(s: &str) -> Result<Universe, SaveError> {
         && terrain_versions.get("cosmogon-cabin-construction").and_then(Value::as_str)!=Some(crate::habitat_construction::CONSTRUCTION_MODEL) {return Err(SaveError::Model("Missing or mismatched cabin construction version".into()));}
     if (expected.contains_key("cosmogon-life-support-calibration") || terrain_versions.get("cosmogon-life-support-calibration").is_some())
         && terrain_versions.get("cosmogon-life-support-calibration").and_then(Value::as_str)!=Some(crate::habitat_calibration::CALIBRATION_MODEL) {return Err(SaveError::Model("Missing or mismatched life-support calibration version".into()));}
+    if (expected.contains_key("cosmogon-habitat-radiation") || terrain_versions.get("cosmogon-habitat-radiation").is_some())
+        && terrain_versions.get("cosmogon-habitat-radiation").and_then(Value::as_str)!=Some(crate::habitat_radiation::MODEL) {return Err(SaveError::Model("Missing or mismatched habitat radiation version".into()));}
     if (expected.contains_key("cosmogon-habitat-stock-transfer") || terrain_versions.get("cosmogon-habitat-stock-transfer").is_some())
         && terrain_versions.get("cosmogon-habitat-stock-transfer").and_then(Value::as_str)!=Some(crate::habitat::STOCK_TRANSFER_MODEL) {return Err(SaveError::Model("Missing or mismatched habitat stock transfer version".into()));}
     if (expected.contains_key("cosmogon-cabin-heat-accounting") || terrain_versions.get("cosmogon-cabin-heat-accounting").is_some()) && terrain_versions.get("cosmogon-cabin-heat-accounting").and_then(Value::as_str)!=Some(crate::habitat_heat::MODEL) {return Err(SaveError::Model("Missing or mismatched cabin heat accounting version".into()));}
@@ -570,6 +573,47 @@ mod tests {
         let mut tampered: Value = serde_json::from_str(&json).unwrap();
         tampered["header"]["data_versions"]["cosmogon-vehicle-landing"] = serde_json::json!("wrong/9");
         assert!(matches!(from_json(&tampered.to_string()), Err(SaveError::Vehicle(_))));
+    }
+
+    #[test]
+    fn radiation_pin_is_conditional_and_enforced() {
+        let plain = Universe::new(UniverseSettings {
+            scenario: Scenario::SolarSystemLab,
+            ..Default::default()
+        });
+        let header = serde_json::to_value(header_for(&plain, "plain")).unwrap();
+        assert!(header["data_versions"].get("cosmogon-habitat-radiation").is_none());
+
+        let mut world = Universe::new(UniverseSettings {
+            scenario: Scenario::SolarSystemLab,
+            ..Default::default()
+        });
+        let body = world.systems[0].find_body("Mars").unwrap() as u32;
+        let mut d =
+            crate::habitat::Definition::at(crate::BodyRef { system: 0, body }, 0.0, 0.0);
+        d.config.radiation = Some(crate::habitat_radiation::Config::default());
+        world
+            .apply_edit(crate::sandbox::Edit::CreateHabitat {
+                definition: Box::new(d),
+            })
+            .unwrap();
+        let header = serde_json::to_value(header_for(&world, "radiation")).unwrap();
+        assert_eq!(
+            header["data_versions"]["cosmogon-habitat-radiation"].as_str(),
+            Some(crate::habitat_radiation::MODEL)
+        );
+        let json = to_json(&world, "radiation").unwrap();
+        assert!(from_json(&json).is_ok());
+        let mut stripped: Value = serde_json::from_str(&json).unwrap();
+        stripped["header"]["data_versions"]
+            .as_object_mut()
+            .unwrap()
+            .remove("cosmogon-habitat-radiation");
+        assert!(matches!(from_json(&stripped.to_string()), Err(SaveError::Model(_))));
+        let mut tampered: Value = serde_json::from_str(&json).unwrap();
+        tampered["header"]["data_versions"]["cosmogon-habitat-radiation"] =
+            serde_json::json!("wrong/9");
+        assert!(matches!(from_json(&tampered.to_string()), Err(SaveError::Model(_))));
     }
 }
 

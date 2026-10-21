@@ -388,6 +388,7 @@ mod tests {
         Environment {
             irradiance_w_m2: Some(0.0),
             exterior_temperature_k: Some(293.15),
+            exterior_dose_rate_msv_day: None,
         }
     }
     fn experiment() -> Habitat {

@@ -85,6 +85,10 @@ pub struct Config {
     /// bands. Absent legacy definitions stay byte-identical.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub calibration: Option<crate::habitat_calibration::Config>,
+    /// Optional exterior radiation environment and authored shielding dose model.
+    /// Absent definitions record no dose and stay byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radiation: Option<crate::habitat_radiation::Config>,
     /// Finite general storage for the four transferable supply stocks. Absent legacy
     /// definitions keep the historical 1e7 kg general bound byte-exactly.
     #[serde(default = "default_storage_capacity", skip_serializing_if = "is_default_storage_capacity")]
@@ -146,6 +150,7 @@ impl Default for Config {
             maintenance: None,
             construction: None,
             calibration: None,
+            radiation: None,
             oxygen_reserve_capacity_kg: default_storage_capacity(),
             potable_water_capacity_kg: default_storage_capacity(),
             food_dry_capacity_kg: default_storage_capacity(),
@@ -321,6 +326,7 @@ impl Config {
         }
         if let Some(k) = &self.construction {k.validate()?;}
         if let Some(k) = &self.calibration {k.validate()?;}
+        if let Some(k) = &self.radiation {k.validate()?;}
         // Internal oxygen production is gated only by equipment product capacities,
         // so the reserve tank must at least cover every installed oxygen ceiling.
         if let Some(c) = &self.crop {
@@ -587,6 +593,13 @@ pub struct Totals {
     /// Cumulative nominal structural leak by species (breach escapes stay separate).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub leaked_gas: Option<crate::breach::Gas>,
+    /// Cumulative opt-in inward breach mass by species (dry-air receiver assumption).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inflow_gas: Option<crate::breach::Gas>,
+    /// Cumulative imported inward-flow enthalpy (positive; reported as negative
+    /// outflow enthalpy on inward breach budgets).
+    #[serde(default, skip_serializing_if = "zero")]
+    pub inflow_enthalpy_j: f64,
     /// Cumulative component maintenance window time across all components (hours).
     #[serde(default, skip_serializing_if = "zero")]
     pub maintenance_hours: f64,
@@ -596,6 +609,10 @@ pub struct Totals {
     /// Cumulative construction material converted into structure.
     #[serde(default, skip_serializing_if = "zero")]
     pub construction_material_used_kg: f64,
+    /// Cumulative whole-body crew dose from recorded interior dose rates (mSv per
+    /// reference crewmember); zero while radiation is unused.
+    #[serde(default, skip_serializing_if = "zero")]
+    pub cumulative_dose_msv: f64,
 }
 /// Last completed interval; instantaneous estimates are not silently mixed with these.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -645,6 +662,10 @@ pub struct Budget {
     pub construction: Option<crate::habitat_construction::Budget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub calibration: Option<crate::habitat_calibration::Budget>,
+    /// Last interval's modelled exterior/interior/shelter dose rates and hazard band;
+    /// absent when radiation is unused or the environment is unavailable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radiation: Option<crate::habitat_radiation::Budget>,
     #[serde(default, skip_serializing_if = "zero")]
     pub condensate_processed_kg: f64,
     #[serde(default, skip_serializing_if = "zero")]
@@ -658,6 +679,9 @@ pub struct Budget {
 pub struct Environment {
     pub irradiance_w_m2: Option<f64>,
     pub exterior_temperature_k: Option<f64>,
+    /// Exterior whole-body dose rate at the habitat site (mSv/day); None when the
+    /// radiation environment is unavailable or not evaluated for this site.
+    pub exterior_dose_rate_msv_day: Option<f64>,
 }
 pub const STOCK_TRANSFER_MODEL: &str = "cosmogon-habitat-stock-transfer/1";
 /// Retained intra-settlement stock movement evidence on one side of a transfer.
@@ -879,10 +903,11 @@ impl Habitat {
                 return Err(format!("{n} exceeds its storage capacity"));
             }
         }
-        if let Some(g)=s.escaped_gas {
-            g.validate()?;
+        if let Some(g)=s.escaped_gas {g.validate()?;}
+        if s.escaped_gas.is_some() || self.totals.inflow_gas.is_some() {
             let mut original=Self::new(self.id,self.definition.clone(),self.last_time)?.state.mass_kg();
             if self.definition.config.crop.is_none() {if let Some(c)=&s.crop {original+=c.initial_nutrient_equivalent_kg;}}
+            original += self.totals.inflow_gas.map(|g|g.mass_kg()).unwrap_or(0.0);
             if (s.accounted_mass_kg()-original).abs()>1e-8*original.max(1.0) {return Err("Accounted cabin + escaped mass disagrees with original finite inventory".into());}
         }
         let t = &self.totals;
@@ -898,12 +923,14 @@ impl Habitat {
             t.sabatier_co2_consumed_kg,
             t.sabatier_heat_j,
             t.sabatier_water_processed_kg, t.condensate_processed_kg,t.crew_vapor_kg,t.condensed_kg,t.breach_enthalpy_j,
+            t.inflow_enthalpy_j,
             t.maintenance_hours,
         ] {
             bounds(value, 0.0, 1.0e300, "Cumulative habitat budget")?;
         }
         bounds(t.wall_condensed_kg, -1.0e12, 1.0e12, "Cumulative wall exchange")?;
         if let Some(g)=t.leaked_gas {g.validate()?;}
+        if let Some(g)=t.inflow_gas {g.validate()?;}
         if self.alert_bits >= 128 {
             return Err("Unsupported habitat alert bits".into());
         }
@@ -934,11 +961,13 @@ impl Habitat {
             let cabin=self.budget.configuration.as_ref().ok_or("Breach interval lacks cabin configuration")?;
             let c=cabin.breach.as_ref().ok_or("Breach interval lacks breach configuration")?;
             b.validate(c,self.budget.seconds,cabin.volume_m3,cabin.heat_capacity_j_k)?;
-            let escaped=s.escaped_gas.ok_or("Breach interval lacks cumulative escaped ledger")?;
-            for (total,interval) in [(escaped.oxygen_kg,b.escaped.oxygen_kg),(escaped.nitrogen_kg,b.escaped.nitrogen_kg),(escaped.co2_kg,b.escaped.co2_kg),(escaped.vapor_kg,b.escaped.vapor_kg),(t.breach_enthalpy_j,b.outflow_enthalpy_j)] {if total+1e-8*total.max(1.0)<interval {return Err("Breach cumulative history below completed transfer".into());}}
+            let escaped=s.escaped_gas.unwrap_or_default();
+            for (total,interval) in [(escaped.oxygen_kg,b.escaped.oxygen_kg),(escaped.nitrogen_kg,b.escaped.nitrogen_kg),(escaped.co2_kg,b.escaped.co2_kg),(escaped.vapor_kg,b.escaped.vapor_kg),(t.breach_enthalpy_j,b.outflow_enthalpy_j.max(0.0))] {if total+1e-8*total.max(1.0)<interval {return Err("Breach cumulative history below completed transfer".into());}}
+            let inflow=t.inflow_gas.unwrap_or_default();
+            for (total,interval) in [(inflow.oxygen_kg,b.inflow.oxygen_kg),(inflow.nitrogen_kg,b.inflow.nitrogen_kg),(inflow.co2_kg,b.inflow.co2_kg),(inflow.vapor_kg,b.inflow.vapor_kg),(t.inflow_enthalpy_j,(-b.outflow_enthalpy_j).max(0.0))] {if total+1e-8*total.max(1.0)<interval {return Err("Breach cumulative inflow history below completed transfer".into());}}
 
-            for (now,start,out) in [(s.oxygen_kg,b.initial_gas.oxygen_kg,b.escaped.oxygen_kg),(s.nitrogen_kg,b.initial_gas.nitrogen_kg,b.escaped.nitrogen_kg),(s.co2_kg,b.initial_gas.co2_kg,b.escaped.co2_kg),(s.water_vapor_kg,b.initial_gas.vapor_kg,b.escaped.vapor_kg)] {
-                if (now-start+out).abs()>1e-8*start.max(1.0) {return Err("Breach final cabin stocks disagree with retained transfer".into());}
+            for (now,start,out,inn) in [(s.oxygen_kg,b.initial_gas.oxygen_kg,b.escaped.oxygen_kg,b.inflow.oxygen_kg),(s.nitrogen_kg,b.initial_gas.nitrogen_kg,b.escaped.nitrogen_kg,b.inflow.nitrogen_kg),(s.co2_kg,b.initial_gas.co2_kg,b.escaped.co2_kg,b.inflow.co2_kg),(s.water_vapor_kg,b.initial_gas.vapor_kg,b.escaped.vapor_kg,b.inflow.vapor_kg)] {
+                if (now-start+out-inn).abs()>1e-8*start.max(1.0) {return Err("Breach final cabin stocks disagree with retained transfer".into());}
             }
             if s.temperature_k!=b.final_temperature_k {return Err("Breach final temperature disagrees with cabin".into());}
         }
@@ -967,6 +996,12 @@ impl Habitat {
         if let Some(b)=&self.budget.calibration {
             let c=self.budget.configuration.as_ref().and_then(|c|c.calibration.as_ref()).ok_or("Calibration interval lacks its configuration")?;
             b.validate(c)?;
+        }
+        bounds(t.cumulative_dose_msv,0.0,1.0e9,"Cumulative crew dose")?;
+        if let Some(b)=&self.budget.radiation {
+            let c=self.budget.configuration.as_ref().and_then(|c|c.radiation.as_ref()).ok_or("Radiation interval lacks its configuration")?;
+            b.validate(c,self.budget.seconds)?;
+            if t.cumulative_dose_msv + 1.0e-9 < b.interval_dose_msv {return Err("Cumulative crew dose below completed interval transfer".into());}
         }
         if let Some(k)=self.config.construction.as_ref().or(self.definition.config.construction.as_ref()) {
             bounds(s.construction_material_kg,0.0,k.material_capacity_kg,"Construction material")?;
@@ -1139,6 +1174,7 @@ impl Habitat {
     pub fn uses_maintenance(&self)->bool {self.config.maintenance.is_some() || self.definition.config.maintenance.is_some() || self.budget.maintenance.is_some() || self.state.maintenance.is_some() || self.totals.maintenance_hours>0.0}
     pub fn uses_construction(&self)->bool {self.config.construction.is_some() || self.definition.config.construction.is_some() || self.budget.construction.is_some() || self.state.construction_material_kg>0.0 || self.state.construction_structure_kg>0.0 || self.totals.constructed_volume_m3>0.0 || self.totals.construction_material_used_kg>0.0}
     pub fn uses_calibration(&self)->bool {self.config.calibration.is_some() || self.definition.config.calibration.is_some() || self.budget.calibration.is_some()}
+    pub fn uses_radiation(&self)->bool {self.config.radiation.is_some() || self.definition.config.radiation.is_some() || self.budget.radiation.is_some() || self.totals.cumulative_dose_msv>0.0}
     pub fn uses_sabatier(&self) -> bool {
         self.config.sabatier.is_some() || self.definition.config.sabatier.is_some() || self.budget.sabatier.is_some()
             || self.state.methane_kg>0.0 || self.state.sabatier_water_kg>0.0 || self.totals.sabatier_co2_consumed_kg>0.0
@@ -1169,6 +1205,9 @@ impl Habitat {
         };
         bounds(flux, 0.0, 1.0e8, "Local irradiance")?;
         bounds(exterior, 1.0, 5000.0, "Exterior model temperature")?;
+        if let Some(dose) = env.exterior_dose_rate_msv_day {
+            bounds(dose, 0.0, 1.0e4, "Exterior dose rate")?;
+        }
         if !(100.0..=500.0).contains(&self.state.temperature_k) {
             self.budget = Budget {
                 seconds: dt,
@@ -1477,14 +1516,20 @@ impl Habitat {
         let breach=c.breach.as_ref().map(|e|crate::breach::integrate(e,s.cabin_gas(),s.temperature_k,c.volume_m3,c.heat_capacity_j_k,dt));
         let cooling=breach.as_ref().map(|b|b.lumped_cooling_j).unwrap_or(0.0);
         if let Some(b)=&breach {
-            s.oxygen_kg=(s.oxygen_kg-b.escaped.oxygen_kg).max(0.0);
-            s.nitrogen_kg=(s.nitrogen_kg-b.escaped.nitrogen_kg).max(0.0);
-            s.co2_kg=(s.co2_kg-b.escaped.co2_kg).max(0.0);
-            s.water_vapor_kg=(s.water_vapor_kg-b.escaped.vapor_kg).max(0.0);
+            s.oxygen_kg=(s.oxygen_kg-b.escaped.oxygen_kg+b.inflow.oxygen_kg).max(0.0);
+            s.nitrogen_kg=(s.nitrogen_kg-b.escaped.nitrogen_kg+b.inflow.nitrogen_kg).max(0.0);
+            s.co2_kg=(s.co2_kg-b.escaped.co2_kg+b.inflow.co2_kg).max(0.0);
+            s.water_vapor_kg=(s.water_vapor_kg-b.escaped.vapor_kg+b.inflow.vapor_kg).max(0.0);
             s.escaped_gas.get_or_insert_with(Default::default).add(b.escaped);
+            if b.inflow.mass_kg()>0.0 {self.totals.inflow_gas.get_or_insert_with(Default::default).add(b.inflow);}
             s.temperature_k=b.final_temperature_k;
-            self.totals.breach_enthalpy_j+=b.outflow_enthalpy_j;
+            self.totals.breach_enthalpy_j+=b.outflow_enthalpy_j.max(0.0);
+            self.totals.inflow_enthalpy_j+=(-b.outflow_enthalpy_j).max(0.0);
         }
+        // Exterior radiation dose is derived bookkeeping after the existing thermal,
+        // process and breach steps; it changes no mass, power or heat.
+        let radiation=c.radiation.as_ref().and_then(|r|env.exterior_dose_rate_msv_day.map(|d|crate::habitat_radiation::Budget::new(r,d,dt)));
+        if let Some(rb)=&radiation {self.totals.cumulative_dose_msv+=rb.interval_dose_msv;}
         let storage = c.heat_capacity_j_k * (s.temperature_k - old_temperature) / dt;
         let conduction = c.conductance_w_k * (exterior - old_temperature) * phi - net * (1.0 - phi);
         let electrical_residual =
@@ -1525,6 +1570,7 @@ impl Habitat {
             maintenance,
             construction,
             calibration,
+            radiation,
             sabatier_water_processed_kg: product_processed,
             sabatier_water_recovered_kg: product_recovered,
         };
@@ -1557,6 +1603,7 @@ impl Habitat {
             s.temperature_k < c.cold_alert_k || s.temperature_k > c.hot_alert_k,
             self.budget.served_cycle_fraction < 0.999999,
             !(100.0..=500.0).contains(&s.temperature_k),
+            c.radiation.as_ref().is_some_and(|r| self.budget.radiation.as_ref().is_some_and(|b| b.interior_dose_rate_msv_day > r.alert_dose_rate_msv_day)),
         ]
         .into_iter()
         .enumerate()
@@ -1568,9 +1615,9 @@ impl Habitat {
         bits
     }
     pub fn report(&self) -> serde_json::Value {
-        let mut report=serde_json::json!({"format":"cosmogon-habitat-report","schema_version":1,"habitat":self,"diagnostics":crate::habitat_diagnostics::explain(self),"oxygen_partial_pressure_pa":self.state.oxygen_pa(&self.config),"co2_partial_pressure_pa":self.state.co2_pa(&self.config),"total_pressure_pa":self.state.pressure_pa(&self.config),"data_states":{"crew_rates":"Published nominal reference model (NASA BVAD), not individual measurements","equipment_and_initial_stocks":"User-assumed design inputs","current_stores_and_budgets":"Modelled","exterior_temperature":"Global reduced climate model; local measured weather unavailable","horizontal_irradiance":"Derived from primary-star state and approximate body frame"},"electrolysis_source":self.uses_electrolysis().then(crate::electrolysis::source),"sabatier_source":self.uses_sabatier().then(crate::sabatier::source),"moisture_source":self.uses_moisture().then(crate::moisture::source),"breach_source":self.uses_breach().then(crate::breach::source),"moisture_observation":self.uses_moisture().then(||serde_json::json!({"vapor_pressure_pa":self.state.vapor_pressure_pa(&self.config),"relative_humidity":self.state.relative_humidity(&self.config),"reference_phase_energy_j":self.state.phase_energy_j(),"supersaturated":self.state.relative_humidity(&self.config).map(|v|v>1.0)})),"wall_observation":self.uses_wall().then(||serde_json::json!({"wall_liquid_kg":self.state.wall_liquid_kg,"cumulative_net_condensed_kg":self.totals.wall_condensed_kg,"model":crate::moisture::WALL_MODEL})),"leak_observation":self.uses_leak().then(||serde_json::json!({"leaked_gas":self.totals.leaked_gas,"model":LEAK_MODEL})),"leak_source":self.uses_leak().then(crate::moisture::leak_source),"maintenance_observation":self.uses_maintenance().then(||serde_json::json!({"components":self.state.maintenance,"cumulative_maintenance_hours":self.totals.maintenance_hours,"model":crate::habitat_maintenance::MAINTENANCE_MODEL})),"maintenance_source":self.uses_maintenance().then(crate::habitat_maintenance::source),"construction_observation":self.uses_construction().then(||serde_json::json!({"held_material_kg":self.state.construction_material_kg,"structure_mass_kg":self.state.construction_structure_kg,"cumulative_volume_added_m3":self.totals.constructed_volume_m3,"cumulative_material_used_kg":self.totals.construction_material_used_kg,"live_volume_m3":self.config.volume_m3,"model":crate::habitat_construction::CONSTRUCTION_MODEL})),"construction_source":self.uses_construction().then(crate::habitat_construction::source),"uncertainty":null,"uncertainty_scope":"Input and predictive model uncertainty are not quantified","source":{"url":SOURCE,"version":"NASA BVAD Rev2 February 2022, Table 3-31","equipment":"User-assumed capacities, powers, efficiencies and alert thresholds"},"limits":"Reduced nominal demand and lumped thermal model, not validated mission hardware, local weather, purification quality, medical response or safety certification. Optional reduced humidity budget, passive lumped wall condensation (no ice), nominal proportional structural leak and scheduled equipment wear/maintenance with authored capacity calibration; no greenhouse exchange, seal/inward/rarefied leakage, EVA, radiation or resupply. Continuous cabin construction from held material with an authored bulk ratio is optional and separately sourced; no structural strength, assembly physics, dust, crew labour or vehicle-mediated material delivery."});
+        let mut report=serde_json::json!({"format":"cosmogon-habitat-report","schema_version":1,"habitat":self,"diagnostics":crate::habitat_diagnostics::explain(self),"oxygen_partial_pressure_pa":self.state.oxygen_pa(&self.config),"co2_partial_pressure_pa":self.state.co2_pa(&self.config),"total_pressure_pa":self.state.pressure_pa(&self.config),"data_states":{"crew_rates":"Published nominal reference model (NASA BVAD), not individual measurements","equipment_and_initial_stocks":"User-assumed design inputs","current_stores_and_budgets":"Modelled","exterior_temperature":"Global reduced climate model; local measured weather unavailable","horizontal_irradiance":"Derived from primary-star state and approximate body frame"},"electrolysis_source":self.uses_electrolysis().then(crate::electrolysis::source),"sabatier_source":self.uses_sabatier().then(crate::sabatier::source),"moisture_source":self.uses_moisture().then(crate::moisture::source),"breach_source":self.uses_breach().then(crate::breach::source),"moisture_observation":self.uses_moisture().then(||serde_json::json!({"vapor_pressure_pa":self.state.vapor_pressure_pa(&self.config),"relative_humidity":self.state.relative_humidity(&self.config),"reference_phase_energy_j":self.state.phase_energy_j(),"supersaturated":self.state.relative_humidity(&self.config).map(|v|v>1.0)})),"wall_observation":self.uses_wall().then(||serde_json::json!({"wall_liquid_kg":self.state.wall_liquid_kg,"cumulative_net_condensed_kg":self.totals.wall_condensed_kg,"model":crate::moisture::WALL_MODEL})),"leak_observation":self.uses_leak().then(||serde_json::json!({"leaked_gas":self.totals.leaked_gas,"model":LEAK_MODEL})),"leak_source":self.uses_leak().then(crate::moisture::leak_source),"maintenance_observation":self.uses_maintenance().then(||serde_json::json!({"components":self.state.maintenance,"cumulative_maintenance_hours":self.totals.maintenance_hours,"model":crate::habitat_maintenance::MAINTENANCE_MODEL})),"maintenance_source":self.uses_maintenance().then(crate::habitat_maintenance::source),"construction_observation":self.uses_construction().then(||serde_json::json!({"held_material_kg":self.state.construction_material_kg,"structure_mass_kg":self.state.construction_structure_kg,"cumulative_volume_added_m3":self.totals.constructed_volume_m3,"cumulative_material_used_kg":self.totals.construction_material_used_kg,"live_volume_m3":self.config.volume_m3,"model":crate::habitat_construction::CONSTRUCTION_MODEL})),"construction_source":self.uses_construction().then(crate::habitat_construction::source),"uncertainty":null,"uncertainty_scope":"Input and predictive model uncertainty are not quantified","source":{"url":SOURCE,"version":"NASA BVAD Rev2 February 2022, Table 3-31","equipment":"User-assumed capacities, powers, efficiencies and alert thresholds"},"limits":"Reduced nominal demand and lumped thermal model, not validated mission hardware, local weather, purification quality, medical response or safety certification. Optional reduced humidity budget, passive lumped wall condensation (no ice), nominal proportional structural leak and scheduled equipment wear/maintenance with authored capacity calibration; no greenhouse exchange, seal/rarefied leakage, EVA or resupply. Exterior radiation environment, shielding and interior dose are optional and separately sourced; no solar-particle-event forecast, particle transport or activation. Continuous cabin construction from held material with an authored bulk ratio is optional and separately sourced; no structural strength, assembly physics, dust, crew labour or vehicle-mediated material delivery."});
         if self.heat.is_some() {report["heat_accounting"]=crate::habitat_heat::habitat_span(self);}
-        if self.uses_crop() {report["crop_source"]=crate::crop_process::source();report["data_states"]["crop_operation"] = serde_json::json!("Finite modelled transfers under user-assumed ideal maintained source conditions; not calibrated biology/chamber hardware");report["limits"]=serde_json::json!("Reduced nominal demand and lumped thermal model with optional conserved maintained-reference crop transfers. No independently controlled chamber, calibrated crop physiology, complete diet credit, ice condensation, seal/inward/rarefied leakage, EVA, radiation or resupply. Passive lumped wall condensation and nominal structural leak are optional and separately sourced; scheduled equipment wear/maintenance with authored capacity calibration is optional and separately sourced; crop-specific source/progress/energy assumptions are retained separately in crop_source.");}
+        if self.uses_crop() {report["crop_source"]=crate::crop_process::source();report["data_states"]["crop_operation"] = serde_json::json!("Finite modelled transfers under user-assumed ideal maintained source conditions; not calibrated biology/chamber hardware");report["limits"]=serde_json::json!("Reduced nominal demand and lumped thermal model with optional conserved maintained-reference crop transfers. No independently controlled chamber, calibrated crop physiology, complete diet credit, ice condensation, seal/rarefied leakage, EVA or resupply. Passive lumped wall condensation and nominal structural leak are optional and separately sourced; scheduled equipment wear/maintenance with authored capacity calibration is optional and separately sourced; crop-specific source/progress/energy assumptions are retained separately in crop_source.");}
         if self.uses_calibration() {
             report["calibration_observation"]=serde_json::json!({"factors":self.config.calibration.as_ref().or(self.definition.config.calibration.as_ref()),"last_interval":self.budget.calibration,"model":crate::habitat_calibration::CALIBRATION_MODEL});
             report["calibration_source"]=crate::habitat_calibration::source();
@@ -1578,10 +1625,17 @@ impl Habitat {
             report["data_states"]["life_support_calibration"]=serde_json::json!("Authored calibration factors and ± sensitivity bands on the published reference rates (ESTIMATED design inputs), not measured hardware, fitted parameters or predictive statistics");
             report["uncertainty_scope"]=serde_json::json!("Life-support calibration bands are authored sensitivity bounds around applied calibrated exchanges, not measured variance or confidence intervals; remaining input and predictive model uncertainty is not quantified");
         }
+        if self.uses_radiation() {
+            let band=crate::habitat_radiation::HazardBand::of(self.budget.radiation.map(|b|b.interior_dose_rate_msv_day));
+            report["radiation_observation"]=serde_json::json!({"exterior_dose_rate_msv_day":self.budget.radiation.map(|b|b.exterior_dose_rate_msv_day),"interior_dose_rate_msv_day":self.budget.radiation.map(|b|b.interior_dose_rate_msv_day),"storm_shelter_dose_rate_msv_day":self.budget.radiation.map(|b|b.storm_shelter_dose_rate_msv_day),"interval_dose_msv":self.budget.radiation.map(|b|b.interval_dose_msv),"hazard_band":band.label(),"cumulative_dose_msv":self.totals.cumulative_dose_msv,"model":crate::habitat_radiation::MODEL});
+            report["radiation_source"]=crate::habitat_radiation::source();
+            report["source"]["radiation"]=serde_json::json!("Authored exterior radiation environment and authored shielding transmission fractions (ESTIMATED design inputs); not particle transport, fitted measurements or dosimetry");
+            report["data_states"]["radiation"]=serde_json::json!("Modelled exterior/interior dose rates and cumulative dose from authored body/star inputs and authored shielding fractions (ESTIMATED design inputs), not measured dose");
+        }
         report
     }
 }
-pub const ALERTS: [&str; 7] = [
+pub const ALERTS: [&str; 8] = [
     "environment unavailable",
     "electric demand unserved",
     "oxygen below design threshold",
@@ -1589,7 +1643,11 @@ pub const ALERTS: [&str; 7] = [
     "temperature outside design band",
     "nominal crew cycle unserved",
     "temperature outside supported model domain; budgets suspended",
+    "radiation dose rate above design threshold",
 ];
+/// Bit index of the radiation alert; appended after the original seven so existing
+/// alert bit positions never shift.
+pub const RADIATION_ALERT: usize = 7;
 
 impl Universe {
     pub fn habitat_environment(&self, d: &Definition, time: f64) -> Environment {
@@ -1623,16 +1681,24 @@ impl Universe {
         let flux = sys.star.luminosity(time) * SOLAR_LUMINOSITY
             / (4.0 * std::f64::consts::PI * distance * distance)
             * cosine;
+        let dose = crate::habitat_radiation::exterior_dose_rate_msv_day(
+            sys.star.flare_activity_at(time),
+            body.magnetic_field,
+            body.atmosphere.pressure_bar,
+        );
         if !flux.is_finite()
             || flux > 1.0e8
             || !body.temperature.is_finite()
             || !(1.0..=5000.0).contains(&body.temperature)
+            || !dose.is_finite()
+            || dose > 1.0e4
         {
             return Environment::default();
         }
         Environment {
             irradiance_w_m2: Some(flux),
             exterior_temperature_k: Some(body.temperature),
+            exterior_dose_rate_msv_day: Some(dose),
         }
     }
     pub(crate) fn ensure_habitat_task(&mut self) {
@@ -1676,7 +1742,14 @@ impl Universe {
         for (bit, message) in ALERTS.iter().enumerate() {
             if changed & (1 << bit) != 0 {
                 let active = now & (1 << bit) != 0;
-                self.history.push(Event {time,category:if active {Category::Disaster} else {Category::Space},importance:3,title:format!("{}: {}{message}",h.definition.name,if active {""} else {"recovered from "}),detail:format!("Experimental design alert. O₂ {:.1} kPa; CO₂ {:.1} Pa; {:.2} K; unserved {:.1} W. Not medical or safety certification.",h.state.oxygen_pa(&h.config)/1000.0,h.state.co2_pa(&h.config),h.state.temperature_k,h.budget.unserved_w),system:Some(h.definition.body.system),body:Some(h.definition.body.body),civ:None});
+                let detail = if bit == RADIATION_ALERT {
+                    let band = crate::habitat_radiation::HazardBand::of(h.budget.radiation.map(|b|b.interior_dose_rate_msv_day));
+                    let threshold = h.config.radiation.as_ref().map_or(0.0,|r|r.alert_dose_rate_msv_day);
+                    format!("Experimental design alert. Interior dose rate {:.3} mSv/day (band {}), cumulative {:.3} mSv; design threshold {:.3} mSv/day. Authored model, not medical or safety certification.",h.budget.radiation.map_or(0.0,|b|b.interior_dose_rate_msv_day),band.label(),h.totals.cumulative_dose_msv,threshold)
+                } else {
+                    format!("Experimental design alert. O₂ {:.1} kPa; CO₂ {:.1} Pa; {:.2} K; unserved {:.1} W. Not medical or safety certification.",h.state.oxygen_pa(&h.config)/1000.0,h.state.co2_pa(&h.config),h.state.temperature_k,h.budget.unserved_w)
+                };
+                self.history.push(Event {time,category:if active {Category::Disaster} else {Category::Space},importance:3,title:format!("{}: {}{message}",h.definition.name,if active {""} else {"recovered from "}),detail,system:Some(h.definition.body.system),body:Some(h.definition.body.body),civ:None});
             }
         }
         h.alert_bits = now;
@@ -1708,12 +1781,14 @@ pub(crate) fn samples_csv(rows: &[Sample]) -> String {
     let maintenance_present = rows.iter().any(|r| r.habitat.uses_maintenance());
     let construction_present = rows.iter().any(|r| r.habitat.uses_construction());
     let calibration_present = rows.iter().any(|r| r.habitat.uses_calibration());
+    let radiation_present = rows.iter().any(|r| r.habitat.uses_radiation());
     let mut csv=String::from("simulation_time_s,completed_habitat_time_s,interval_s,temperature_k,total_pressure_pa,oxygen_partial_pressure_pa,co2_partial_pressure_pa,battery_j,oxygen_kg,oxygen_reserve_kg,potable_water_kg,wastewater_kg,brine_kg,food_dry_kg,food_water_kg,dry_waste_kg,captured_co2_kg,environment_available,temperature_domain_supported,horizontal_irradiance_w_m2,exterior_temperature_k,generated_w,requested_w,delivered_w,unserved_w,battery_losses_w,curtailed_w,served_cycle_fraction,metabolic_heat_w,heater_w,radiator_rejection_w,conduction_w,thermal_storage_w,mass_residual_kg,electric_residual_j,thermal_residual_j,total_unserved_j,total_unserved_person_seconds,hydrogen_kg,electrolysis_requested_w,electrolysis_delivered_w,electrolysis_oxygen_generated_kg,electrolysis_hydrogen_generated_kg,electrolysis_water_consumed_kg,electrolysis_electricity_j,electrolysis_reaction_enthalpy_j,electrolysis_waste_heat_j,total_reaction_enthalpy_j,electrolysis_constraints,methane_kg,sabatier_water_kg,sabatier_requested_w,sabatier_delivered_w,sabatier_co2_consumed_kg,sabatier_hydrogen_consumed_kg,sabatier_methane_generated_kg,sabatier_water_generated_kg,sabatier_electricity_j,sabatier_reaction_heat_j,sabatier_total_heat_j,sabatier_water_processed_kg,sabatier_water_recovered_kg,total_sabatier_co2_consumed_kg,total_sabatier_heat_j,total_sabatier_water_processed_kg,sabatier_constraints,water_vapor_kg,condensate_kg,vapor_pressure_pa,relative_humidity,saturation_pressure_pa,reference_phase_energy_j,moisture_requested_w,moisture_delivered_w,crew_vapor_kg,crew_phase_energy_j,condensed_kg,condensation_heat_j,moisture_electricity_j,moisture_constraints,condensate_processed_kg,condensate_recovered_kg,total_crew_vapor_kg,total_condensed_kg,total_condensate_processed_kg,escaped_oxygen_kg,escaped_nitrogen_kg,escaped_co2_kg,escaped_vapor_kg,accounted_mass_kg,breach_initial_pressure_pa,breach_final_pressure_pa,breach_initial_temperature_k,breach_final_temperature_k,breach_initial_rate_kg_s,breach_final_rate_kg_s,breach_integrated_seconds,breach_steps,breach_oxygen_kg,breach_nitrogen_kg,breach_co2_kg,breach_vapor_kg,breach_lumped_cooling_j,breach_structure_energy_change_j,breach_gas_energy_change_j,breach_phase_energy_change_j,breach_outflow_enthalpy_j,breach_energy_residual_j,breach_status,total_breach_enthalpy_j");
     if wall_present {csv.push_str(",wall_liquid_kg,total_wall_condensed_kg");}
     if leak_present {csv.push_str(",leaked_oxygen_kg,leaked_nitrogen_kg,leaked_co2_kg,leaked_vapor_kg,total_leaked_gas_kg");}
     if maintenance_present {csv.push_str(",maintenance_operating_s,maintenance_active_s,worst_equipment_condition,total_maintenance_hours");}
     if construction_present {csv.push_str(",construction_material_kg,construction_requested_w,construction_delivered_w,construction_volume_added_m3,total_constructed_volume_m3");}
     if calibration_present {csv.push_str(",calibration_crew_cycle_applied,calibration_crew_cycle_low,calibration_crew_cycle_high,calibration_oxygen_makeup_applied,calibration_oxygen_makeup_low,calibration_oxygen_makeup_high,calibration_co2_captured_applied,calibration_co2_captured_low,calibration_co2_captured_high,calibration_water_processed_applied,calibration_water_processed_low,calibration_water_processed_high");}
+    if radiation_present {csv.push_str(",radiation_exterior_dose_rate_msv_day,radiation_interior_dose_rate_msv_day,radiation_shelter_dose_rate_msv_day,radiation_interval_dose_msv,radiation_cumulative_dose_msv,radiation_hazard_band");}
     csv.push('\n');
     for row in rows {
         let h = &row.habitat;
@@ -1822,6 +1897,17 @@ pub(crate) fn samples_csv(rows: &[Sample]) -> String {
                 cb.map_or(0.0,|k|k.water_processed_kg.applied), cb.map_or(0.0,|k|k.water_processed_kg.low), cb.map_or(0.0,|k|k.water_processed_kg.high),
             ] {csv.push(',');csv.push_str(&v.to_string());}
         }
+        if radiation_present {
+            let rb = b.radiation.as_ref();
+            // Missing interval dose rate leaves empty cells (unavailable, never zero).
+            for v in [rb.map(|r|r.exterior_dose_rate_msv_day),rb.map(|r|r.interior_dose_rate_msv_day),rb.map(|r|r.storm_shelter_dose_rate_msv_day),rb.map(|r|r.interval_dose_msv)] {
+                csv.push(',');
+                if let Some(v) = v {csv.push_str(&v.to_string());}
+            }
+            csv.push(',');csv.push_str(&h.totals.cumulative_dose_msv.to_string());
+            csv.push(',');
+            csv.push_str(crate::habitat_radiation::HazardBand::of(rb.map(|r|r.interior_dose_rate_msv_day)).label());
+        }
         csv.push('\n');
     }
     csv
@@ -1851,7 +1937,7 @@ pub fn export(
         return Err("Observer samples must identify this habitat".into());
     }
     let csv=samples_csv(rows);
-    let mut manifest=serde_json::json!({"format":"cosmogon-habitat-study","schema_version":1,"model":MODEL,"habitat_id":id,"sample_count":rows.len(),"initial_state_fingerprint":crate::research::state_fingerprint(initial)?,"final_state_fingerprint":crate::research::state_fingerprint(final_world)?,"fingerprint_scope":"FNV-1a state identity, not cryptographic integrity","app_version":env!("CARGO_PKG_VERSION"),"simulation_time_coordinate":"seconds since J2000, same coordinate as world","habitat_intervals":"fixed 60 s plus explicit edit-time remainders; samples may follow the last completed interval","source":SOURCE,"model_descriptor":crate::research::PhysicsModelRegistry::get("habitat"),"electrolysis_model_descriptor":h.uses_electrolysis().then(||crate::research::PhysicsModelRegistry::get("electrolysis")),"electrolysis_source":h.report()["electrolysis_source"],"sabatier_model_descriptor":h.uses_sabatier().then(||crate::research::PhysicsModelRegistry::get("sabatier")),"sabatier_source":h.report()["sabatier_source"],"breach_source":h.uses_breach().then(crate::breach::source),"breach_model_descriptor":h.uses_breach().then(||crate::research::PhysicsModelRegistry::get("breach")),"moisture_source":h.uses_moisture().then(crate::moisture::source),"moisture_model_descriptor":h.uses_moisture().then(||crate::research::PhysicsModelRegistry::get("moisture")),"limits":h.report()["limits"]});
+    let mut manifest=serde_json::json!({"format":"cosmogon-habitat-study","schema_version":1,"model":MODEL,"habitat_id":id,"sample_count":rows.len(),"initial_state_fingerprint":crate::research::state_fingerprint(initial)?,"final_state_fingerprint":crate::research::state_fingerprint(final_world)?,"fingerprint_scope":"FNV-1a state identity, not cryptographic integrity","app_version":env!("CARGO_PKG_VERSION"),"simulation_time_coordinate":"seconds since J2000, same coordinate as world","habitat_intervals":"fixed 60 s plus explicit edit-time remainders; samples may follow the last completed interval","source":SOURCE,"model_descriptor":crate::research::PhysicsModelRegistry::get("habitat"),"electrolysis_model_descriptor":h.uses_electrolysis().then(||crate::research::PhysicsModelRegistry::get("electrolysis")),"electrolysis_source":h.report()["electrolysis_source"],"sabatier_model_descriptor":h.uses_sabatier().then(||crate::research::PhysicsModelRegistry::get("sabatier")),"sabatier_source":h.report()["sabatier_source"],"breach_source":h.uses_breach().then(crate::breach::source),"breach_model_descriptor":h.uses_breach().then(||crate::research::PhysicsModelRegistry::get("breach")),"moisture_source":h.uses_moisture().then(crate::moisture::source),"moisture_model_descriptor":h.uses_moisture().then(||crate::research::PhysicsModelRegistry::get("moisture")),"radiation_source":h.uses_radiation().then(crate::habitat_radiation::source),"radiation_model_descriptor":h.uses_radiation().then(||crate::research::PhysicsModelRegistry::get("habitat-radiation")),"limits":h.report()["limits"]});
     if h.heat.is_some() {manifest["heat_accounting_source"]=crate::habitat_heat::source();manifest["heat_accounting_model_descriptor"]=serde_json::to_value(crate::research::PhysicsModelRegistry::get("habitat-heat")).map_err(|e|e.to_string())?;}
     if h.uses_crop() {manifest["crop_source"]=crate::crop_process::source();manifest["crop_model_descriptor"]=serde_json::to_value(crate::research::PhysicsModelRegistry::get("finite-crop")).map_err(|e|e.to_string())?;}
     let mut data=vec![("definition.json",serde_json::to_vec_pretty(&h.definition).map_err(|e|e.to_string())?),("report.json",serde_json::to_vec_pretty(&h.report()).map_err(|e|e.to_string())?),("samples.json",serde_json::to_vec_pretty(rows).map_err(|e|e.to_string())?),("samples.csv",csv.into_bytes()),("initial.cosmo",crate::save::to_json(initial,"Habitat study initial world").map_err(|e|e.to_string())?.into_bytes()),("final.cosmo",crate::save::to_json(final_world,"Habitat study final world").map_err(|e|e.to_string())?.into_bytes()),("manifest.json",serde_json::to_vec_pretty(&manifest).map_err(|e|e.to_string())?)];
@@ -1888,6 +1974,7 @@ mod tests {
         Environment {
             irradiance_w_m2: Some(0.0),
             exterior_temperature_k: Some(210.0),
+            exterior_dose_rate_msv_day: None,
         }
     }
     #[test]
@@ -1998,6 +2085,7 @@ mod tests {
         Environment {
             irradiance_w_m2: Some(0.0),
             exterior_temperature_k: Some(275.15),
+            exterior_dose_rate_msv_day: None,
         }
     }
     #[test]
@@ -2539,6 +2627,64 @@ mod tests {
             .unwrap()
             .ends_with("calibration_water_processed_high"));
     }
+    #[test]
+    fn radiation_budget_applies_authored_law_alerts_and_extends_csv() {
+        let mut on = habitat();
+        on.config.radiation = Some(crate::habitat_radiation::Config::default());
+        let mut off = on.clone();
+        off.config.radiation = None;
+        let env = Environment {
+            irradiance_w_m2: Some(0.0),
+            exterior_temperature_k: Some(210.0),
+            exterior_dose_rate_msv_day: Some(3.0),
+        };
+        on.step(PERIOD, env).unwrap();
+        off.step(PERIOD, env).unwrap();
+        let rb = on.budget.radiation.as_ref().unwrap();
+        assert!((rb.exterior_dose_rate_msv_day - 3.0).abs() < 1e-12);
+        assert!((rb.interior_dose_rate_msv_day - 1.5).abs() < 1e-12);
+        assert!((rb.storm_shelter_dose_rate_msv_day - 0.375).abs() < 1e-12);
+        assert!((rb.interval_dose_msv - 1.5 * PERIOD / 86_400.0).abs() < 1e-12);
+        assert_eq!(
+            rb.hazard_band,
+            crate::habitat_radiation::HazardBand::AboveDesign
+        );
+        let first = on.totals.cumulative_dose_msv;
+        assert!((first - rb.interval_dose_msv).abs() < 1e-12);
+        on.step(2.0 * PERIOD, env).unwrap();
+        assert!((on.totals.cumulative_dose_msv - 2.0 * first).abs() < 1e-12);
+        assert!(on.alerts() & (1u16 << RADIATION_ALERT) != 0);
+        assert!(off.budget.radiation.is_none());
+        assert!(off.alerts() & (1u16 << RADIATION_ALERT) == 0);
+        let report = on.report();
+        assert_eq!(report["radiation_source"], crate::habitat_radiation::source());
+        assert!(!report["radiation_observation"]["cumulative_dose_msv"]
+            .as_f64()
+            .unwrap()
+            .is_sign_negative());
+        assert!(off.report().get("radiation_source").is_none());
+        let rows = |h: &Habitat| {
+            vec![Sample {
+                simulation_time_s: h.last_time,
+                habitat: h.clone(),
+            }]
+        };
+        let csv_on = samples_csv(&rows(&on));
+        let csv_off = samples_csv(&rows(&off));
+        assert!(csv_on
+            .lines()
+            .next()
+            .unwrap()
+            .ends_with("radiation_hazard_band"));
+        assert_eq!(
+            csv_on.lines().next().unwrap().split(',').count(),
+            csv_off.lines().next().unwrap().split(',').count() + 6
+        );
+        assert_eq!(
+            csv_on.lines().next().unwrap().split(',').count(),
+            csv_on.lines().last().unwrap().split(',').count()
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2742,6 +2888,7 @@ mod integration_tests {
         let env = Environment {
             irradiance_w_m2: Some(0.0),
             exterior_temperature_k: Some(210.0),
+            exterior_dose_rate_msv_day: None,
         };
         for k in 1..=60 {
             h.step(k as f64 * 60.0, env).unwrap();

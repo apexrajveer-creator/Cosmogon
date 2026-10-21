@@ -151,6 +151,10 @@ pub struct Diagnostics {
     pub heat: Vec<Term>,
     pub water: Vec<Term>,
     pub air_and_crew: Vec<Term>,
+    /// Absent (never serialized) while radiation is unused, so old studies keep their
+    /// exact derived diagnostics JSON.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub radiation: Vec<Term>,
     pub explanations: Vec<Explanation>,
     pub uncertainty: Option<f64>,
     pub limits: &'static str,
@@ -163,7 +167,7 @@ pub fn explain(h: &Habitat) -> Diagnostics {
         interval_start_s:(b.seconds>0.0).then_some(h.last_time-b.seconds),
         interval_end_s:h.last_time, interval_s:b.seconds, support:supported,
         configuration_matches_current:b.configuration.as_ref()==Some(&h.config),
-        allocations:allocations(h), power:Vec::new(),heat:Vec::new(),water:Vec::new(),air_and_crew:Vec::new(),explanations:Vec::new(), uncertainty:None,
+        allocations:allocations(h), power:Vec::new(),heat:Vec::new(),water:Vec::new(),air_and_crew:Vec::new(),radiation:Vec::new(),explanations:Vec::new(), uncertainty:None,
         limits:"Completed-interval model accounting, not a unique historical cause graph or equipment fault diagnosis. Inputs and equipment are assumptions; uncertainty is unquantified. Numerical residuals test bookkeeping, not hardware calibration or physiological safety. Start inventories, separate thermal requests and measured local weather are not retained here. Heater electricity is already in bus heat. Newly produced reactor water/oxygen cannot be credited to earlier same-interval consumers.",
     };
     if supported != "supported" {
@@ -509,12 +513,16 @@ pub fn explain(h: &Habitat) -> Diagnostics {
     if h.uses_breach() {
         d.heat.insert(3,term("breach_cooling","Breach temperature-equivalent cooling","W",cooling.map(|w|-w),"-budget.breach.lumped_cooling_j / seconds; not full outflow enthalpy"));
         if let Some(sum)=d.heat.iter_mut().find(|t|t.id=="sum") {sum.evidence="bus + losses + metabolic - electrolysis + Sabatier - crew phase + condensation - radiator + conduction - breach equivalent cooling";}
-        if let Some(mass)=d.water.iter_mut().find(|t|t.id=="mass_residual") {mass.label="Accounted cabin + escaped mass residual";mass.evidence="budget.mass_residual_kg; cabin stores plus cumulative escaped gas, unavailable for cabin reuse";}
+        if let Some(mass)=d.water.iter_mut().find(|t|t.id=="mass_residual") {mass.label="Accounted cabin + escaped mass residual";mass.evidence="budget.mass_residual_kg; cabin stores plus cumulative escaped gas and, when engaged, opt-in inward replenishment";}
         if let Some(e)=&b.breach {
             for (id,label,value) in [("breach_oxygen","Cabin O2 escaped",e.escaped.oxygen_kg),("breach_nitrogen","Cabin N2 escaped",e.escaped.nitrogen_kg),("breach_co2","Cabin CO2 escaped",e.escaped.co2_kg),("breach_vapor","Cabin vapor escaped",e.escaped.vapor_kg)] {d.air_and_crew.push(term(id,label,"kg",Some(value),"budget.breach.escaped; resolved finite outward substep"));}
+            if e.inflow.mass_kg()>0.0 {
+                d.air_and_crew.push(term("breach_inflow","Assumed dry air added by inward breach flow","kg",Some(e.inflow.mass_kg()),"budget.breach.inflow; 21% O2 / 79% N2 by mole at authored inward receiver temperature; receiver is an assumption"));
+            }
             d.water.push(term("escaped_vapor","Water outside cabin as escaped vapor","kg",Some(e.escaped.vapor_kg),"budget.breach.escaped.vapor_kg; not available for recycling"));
             for (id,label,value) in [("breach_enthalpy","Breach full outflow enthalpy",e.outflow_enthalpy_j),("breach_structure","Breach structure energy change",e.structure_energy_change_j),("breach_gas","Breach gas internal energy change",e.gas_energy_change_j),("breach_phase","Breach vapor phase energy change",e.phase_energy_change_j),("breach_energy_residual","Breach substep energy residual",e.energy_residual_j)] {d.heat.push(term(id,label,"J",Some(value),"Separate breach substep identity: structure + gas + phase + outflow = residual; not additive watts in main signed sum"));}
-            d.explanations.push(Explanation{id:"breach",text:format!("{}; resolved {:.6} of {:.6} seconds, {} integration steps. Outside pressure, gamma and discharge are assumptions. Main heat debit is temperature-equivalent; full gas/structure/phase/enthalpy identity is separate. Processes/thermal minute precedes breach flow, so fast coupled transients remain approximate.",e.status.label(),e.integrated_seconds,b.seconds,e.integration_steps),evidence:vec!["budget.breach","budget.configuration.breach"]});
+            let inward=if e.inflow.mass_kg()>0.0 {" Inward flow adds assumed dry air (21% O2 / 79% N2 by mole, no vapor) from the receiver at the authored temperature; imported enthalpy is reported as negative outflow enthalpy."} else {""};
+            d.explanations.push(Explanation{id:"breach",text:format!("{}; resolved {:.6} of {:.6} seconds, {} integration steps. Outside pressure, gamma and discharge are assumptions.{} Main heat debit is temperature-equivalent; full gas/structure/phase/enthalpy identity is separate. Processes/thermal minute precedes breach flow, so fast coupled transients remain approximate.",e.status.label(),e.integrated_seconds,b.seconds,e.integration_steps,inward),evidence:vec!["budget.breach","budget.configuration.breach"]});
         }
     }
     if h.uses_wall() {
@@ -575,6 +583,23 @@ pub fn explain(h: &Habitat) -> Diagnostics {
         d.air_and_crew.push(term("crop_oxygen","Conservative crop oxygen to reserve","kg",crop.map(|v|v.oxygen_generated_kg).or_else(||c.crop.is_none().then_some(0.)),"budget.crop.oxygen_generated_kg; available to regulator next interval"));
         d.explanations.push(Explanation{id:"crop",text:crop.map(|v|format!("{}; supported source progress {:.9} to {:.9} days. Maintained chamber conditions and chemical storage are assumptions; no biological survival or diet claim.",v.reason,v.source_progress_before,v.source_progress_after)).unwrap_or("No completed crop transfer evidence".into()),evidence:vec!["budget.crop","budget.configuration.crop","state.crop"]});
     }
+    if h.uses_radiation() {
+        if let Some(rb)=&b.radiation {
+            d.radiation.push(term("exterior_dose_rate","Exterior dose rate","mSv/day",Some(rb.exterior_dose_rate_msv_day),"budget.radiation.exterior_dose_rate_msv_day; authored body/star environment"));
+            d.radiation.push(term("interior_dose_rate","Interior dose rate","mSv/day",Some(rb.interior_dose_rate_msv_day),"budget.radiation.interior_dose_rate_msv_day; exterior × wall transmission"));
+            d.radiation.push(term("shelter_dose_rate","Storm-shelter dose rate","mSv/day",Some(rb.storm_shelter_dose_rate_msv_day),"budget.radiation.storm_shelter_dose_rate_msv_day; interior × shelter transmission"));
+            d.radiation.push(term("interval_dose","Interval crew dose","mSv",Some(rb.interval_dose_msv),"budget.radiation.interval_dose_msv; interior rate × interval seconds / 86400"));
+            d.radiation.push(term("cumulative_dose","Cumulative crew dose","mSv",Some(h.totals.cumulative_dose_msv),"totals.cumulative_dose_msv; summed interval doses"));
+        }
+        let band=crate::habitat_radiation::HazardBand::of(b.radiation.map(|r|r.interior_dose_rate_msv_day));
+        let text=match (&b.radiation,h.config.radiation.as_ref().or(h.definition.config.radiation.as_ref())) {
+            (Some(rb),Some(k))=>format!("Exterior {:.3} mSv/day transmitted to interior {:.3} mSv/day through authored {:.0}% wall transmission (shelter {:.3} mSv/day); interval dose {:.6} mSv, cumulative {:.6} mSv, band {}. Design alert threshold {:.3} mSv/day. Authored reduced exterior law and constant shielding fractions, not measured attenuation or dosimetry.",rb.exterior_dose_rate_msv_day,rb.interior_dose_rate_msv_day,k.wall_transmission*100.0,rb.storm_shelter_dose_rate_msv_day,rb.interval_dose_msv,h.totals.cumulative_dose_msv,band.label(),k.alert_dose_rate_msv_day),
+            (Some(rb),None)=>format!("Interval dose evidence retained without a live configuration: exterior {:.3}, interior {:.3} mSv/day, interval {:.6} mSv, cumulative {:.6} mSv, band {}.",rb.exterior_dose_rate_msv_day,rb.interior_dose_rate_msv_day,rb.interval_dose_msv,h.totals.cumulative_dose_msv,band.label()),
+            (None,Some(k))=>format!("Radiation shielding is configured (wall transmission {:.0}%, alert {:.3} mSv/day) but no completed interval dose is retained; the exterior environment or interval was unavailable. Authored design inputs, not measured attenuation.",k.wall_transmission*100.0,k.alert_dose_rate_msv_day),
+            (None,None)=>"Radiation dose evidence claimed without configuration or interval records".into(),
+        };
+        d.explanations.push(Explanation{id:"radiation",text,evidence:vec!["budget.radiation","budget.configuration.radiation","totals.cumulative_dose_msv"]});
+    }
     let mut note = |id, text: String, evidence: Vec<&'static str>| {
         d.explanations.push(Explanation { id, text, evidence })
     };
@@ -624,7 +649,7 @@ pub fn explain(h: &Habitat) -> Diagnostics {
 pub fn report(h: &Habitat, world_time_s: f64) -> Result<serde_json::Value, String> {
     h.validate(world_time_s)?;
     Ok(
-        serde_json::json!({"format":"cosmogon-habitat-diagnostic-report","schema_version":1,"world_time_s":world_time_s,"time_coordinate":"seconds since J2000; interval end can precede world time","diagnostics":explain(h),"habitat":h,"source":{"crew":SOURCE,"electrolysis":h.uses_electrolysis().then(crate::electrolysis::source),"sabatier":h.uses_sabatier().then(crate::sabatier::source),"moisture":h.uses_moisture().then(crate::moisture::source),"breach":h.uses_breach().then(crate::breach::source),"construction":h.uses_construction().then(crate::habitat_construction::source),"calibration":h.uses_calibration().then(crate::habitat_calibration::source)}}),
+        serde_json::json!({"format":"cosmogon-habitat-diagnostic-report","schema_version":1,"world_time_s":world_time_s,"time_coordinate":"seconds since J2000; interval end can precede world time","diagnostics":explain(h),"habitat":h,"source":{"crew":SOURCE,"electrolysis":h.uses_electrolysis().then(crate::electrolysis::source),"sabatier":h.uses_sabatier().then(crate::sabatier::source),"moisture":h.uses_moisture().then(crate::moisture::source),"breach":h.uses_breach().then(crate::breach::source),"construction":h.uses_construction().then(crate::habitat_construction::source),"calibration":h.uses_calibration().then(crate::habitat_calibration::source),"radiation":h.uses_radiation().then(crate::habitat_radiation::source)}}),
     )
 }
 pub fn from_world(u: &Universe, id: u64) -> Result<serde_json::Value, String> {
@@ -650,6 +675,7 @@ pub fn export(h: &Habitat, world_time_s: f64, path: &Path) -> Result<(), String>
         ("heat", &d.heat),
         ("water", &d.water),
         ("air_and_crew", &d.air_and_crew),
+        ("radiation", &d.radiation),
     ] {
         for t in terms {
             csv.push_str(&format!(
@@ -716,6 +742,7 @@ mod tests {
         Environment {
             irradiance_w_m2: Some(0.0),
             exterior_temperature_k: Some(210.0),
+            exterior_dose_rate_msv_day: None,
         }
     }
     fn value(terms: &[Term], id: &str) -> Option<f64> {

@@ -139,7 +139,7 @@ impl Ledger {
         }
         for (i, v) in self.terms_j.iter().enumerate() {
             if (matches!(i, 0 | 1 | 2 | 4 | 6) && *v < 0.)
-                || (matches!(i, 3 | 5 | 7 | 9) && *v > 0.)
+                || (matches!(i, 3 | 5 | 7) && *v > 0.)
             {
                 return Err("Heat ledger term has an invalid sign".into());
             }
@@ -205,7 +205,7 @@ pub fn span(rows: &[Sample]) -> Result<Span, String> {
         }
         for (i, (now, old)) in l.terms_j.iter().zip(previous.terms_j).enumerate() {
             if (matches!(i, 0 | 1 | 2 | 4 | 6) && *now < old)
-                || (matches!(i, 3 | 5 | 7 | 9) && *now > old)
+                || (matches!(i, 3 | 5 | 7) && *now > old)
             {
                 return Err("Retained heat counters reverse their signed accumulation".into());
             }
@@ -272,6 +272,7 @@ mod tests {
         Environment {
             irradiance_w_m2: Some(0.),
             exterior_temperature_k: Some(t),
+            exterior_dose_rate_msv_day: None,
         }
     }
     fn row(h: &Habitat) -> Sample {
@@ -342,7 +343,8 @@ mod tests {
                 1060.,
                 Environment {
                     irradiance_w_m2: Some(-1.),
-                    exterior_temperature_k: Some(200.)
+                    exterior_temperature_k: Some(200.),
+                    exterior_dose_rate_msv_day: None,
                 }
             )
             .is_err());

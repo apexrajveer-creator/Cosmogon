@@ -23,6 +23,7 @@ mod habitat_humidity;
 mod habitat_breach;
 mod habitat_maintenance;
 mod habitat_calibration;
+mod habitat_radiation;
 mod habitat_settlement;
 mod habitat_crop;
 mod habitat_why;

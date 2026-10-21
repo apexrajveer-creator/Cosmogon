@@ -102,6 +102,7 @@ impl Recording {
         let mut uses_moisture = false;
         let mut uses_breach = false;
         let mut uses_crop = false;
+        let mut uses_radiation = false;
         for row in &rows {
             if !row.simulation_time_s.is_finite()
                 || row.simulation_time_s < initial.time
@@ -117,7 +118,9 @@ impl Recording {
                 );
             }
             row.habitat.validate(row.simulation_time_s)?;
-            if (row.habitat.state.accounted_mass_kg() - mass).abs() > 1e-8 * mass.max(1.0) {
+            let expected =
+                mass + row.habitat.totals.inflow_gas.map(|g| g.mass_kg()).unwrap_or(0.0);
+            if (row.habitat.state.accounted_mass_kg() - expected).abs() > 1e-8 * expected.max(1.0) {
                 return Err("Recorded closed habitat mass disagrees with initial inventory".into());
             }
             uses_electrolysis |= row.habitat.uses_electrolysis();
@@ -125,6 +128,7 @@ impl Recording {
             uses_moisture |= row.habitat.uses_moisture();
             uses_breach |= row.habitat.uses_breach();
             uses_crop |= row.habitat.uses_crop();
+            uses_radiation |= row.habitat.uses_radiation();
         }
         for (used, key, descriptor, expected) in [
             (
@@ -178,6 +182,13 @@ impl Recording {
             if m["crop_source"]!=crate::crop_process::source() || m["crop_model_descriptor"]!=serde_json::to_value(crate::research::PhysicsModelRegistry::get("finite-crop")).map_err(|e|e.to_string())? {return Err("Crop source/model mismatch".into());}
             if read(&path.join("crop.csv"),16*1024*1024)?!=crate::crop_process::samples_csv(&rows) {return Err("Actual crop CSV disagrees with saved observations".into());}
         } else if !m["crop_source"].is_null() || !m["crop_model_descriptor"].is_null() {return Err("Recording declares unused crop process".into());}
+        if uses_radiation {
+            if m["radiation_source"]!=crate::habitat_radiation::source()
+                || m["radiation_model_descriptor"]!=serde_json::to_value(crate::research::PhysicsModelRegistry::get("habitat-radiation")).map_err(|e|e.to_string())?
+            {
+                return Err("Radiation source/model mismatch".into());
+            }
+        } else if !m["radiation_source"].is_null() || !m["radiation_model_descriptor"].is_null() {return Err("Recording declares unused radiation model".into());}
         if definition.record_heat {
             if m["heat_accounting_source"] != crate::habitat_heat::source()
                 || m["heat_accounting_model_descriptor"]
@@ -221,6 +232,7 @@ impl Recording {
             "breach_source",
             "heat_accounting",
             "crop_source",
+            "radiation_source",
         ] {
             if report[key] != expected[key] {
                 return Err(format!(
@@ -264,6 +276,7 @@ impl Recording {
             summary["breach_source"] = m["breach_source"].clone();
         }
         if uses_crop {summary["crop_source"]=m["crop_source"].clone();summary["crop_model_descriptor"]=m["crop_model_descriptor"].clone();}
+        if uses_radiation {summary["radiation_source"]=m["radiation_source"].clone();summary["radiation_model_descriptor"]=m["radiation_model_descriptor"].clone();}
         Ok(Self { rows, summary })
     }
 }

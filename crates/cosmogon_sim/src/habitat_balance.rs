@@ -292,7 +292,7 @@ pub fn explain(r: &Recording, from: usize, to: usize) -> Result<Report, String> 
         world_span_s: b.simulation_time_s - a.simulation_time_s,
         completed_span_s: b.habitat.last_time - a.habitat.last_time,
         stocks: quantities,
-        mass: json!({"cabin_initial_kg":cabin_a,"cabin_final_kg":cabin_b,"cabin_change_kg":cabin_b-cabin_a,"outside_initial_kg":outside_a,"outside_final_kg":outside_b,"outside_change_kg":outside_b-outside_a,"accounted_change_kg":accounted_change,"component_change_sum_kg":stock_sum,"component_sum_residual_kg":stock_sum-accounted_change,"endpoint_accounted_drift_kg":accounted_change,"formula":"accounted cabin/isolated stores + cumulative escaped gas; component change sum - endpoint accounted change","scope":"Absolute endpoint drift retains possible explicit inventory edits and floating-point accumulation; escaped mass is not available to cabin consumers"}),
+        mass: json!({"cabin_initial_kg":cabin_a,"cabin_final_kg":cabin_b,"cabin_change_kg":cabin_b-cabin_a,"outside_initial_kg":outside_a,"outside_final_kg":outside_b,"outside_change_kg":outside_b-outside_a,"accounted_change_kg":accounted_change,"component_change_sum_kg":stock_sum,"component_sum_residual_kg":stock_sum-accounted_change,"endpoint_accounted_drift_kg":accounted_change,"formula":"accounted cabin/isolated stores + cumulative escaped gas; component change sum - endpoint accounted change","scope":"Absolute endpoint drift retains possible explicit inventory edits, opt-in inward breach replenishment and floating-point accumulation; escaped mass is not available to cabin consumers"}),
         electricity: json!({"generated_j":change(0),"battery_withdrawal_j":battery,"delivered_j":change(1),"losses_j":change(2),"curtailed_j":change(3),"unserved_requested_j":change(4),"input_j":input,"output_j":output,"residual_j":input-output,"formula":"delta generated + initial battery - final battery - delta delivered - delta losses - delta curtailed","retained_configuration_constant":same_config,"retained_counters_monotone":monotone,"scope":"Differences of actual cumulative counters; no sampled-power extrapolation or unexplained residual reassignment"}),
         retained_support: json!({"observations_checked":to-from+1,"uncompleted_budget_count":r.rows[from..=to].iter().filter(|s|s.habitat.budget.seconds<=0.).count(),"configurations_equal":same_config,"counter_sequence_monotone":monotone,"sampled_environment_unavailable_count":r.rows[from..=to].iter().filter(|s|s.habitat.budget.seconds>0. && !s.habitat.budget.environment_available).count(),"sampled_temperature_unsupported_count":r.rows[from..=to].iter().filter(|s|s.habitat.budget.seconds>0. && !s.habitat.budget.temperature_domain_supported).count(),"coverage":"Support checks describe stored observations only, not every intermediate step"}),
         thermal: json!({"initial_temperature_k":a.habitat.state.temperature_k,"final_temperature_k":b.habitat.state.temperature_k,"temperature_change_k":temperature_change,"retained_heat_capacity_constant":capacity_constant,"initial_capacity_j_k":a.habitat.config.heat_capacity_j_k,"final_capacity_j_k":b.habitat.config.heat_capacity_j_k,"sensible_change_j":capacity_constant.then_some(a.habitat.config.heat_capacity_j_k*temperature_change),"initial_phase_reference_j":a.habitat.state.phase_energy_j(),"final_phase_reference_j":b.habitat.state.phase_energy_j(),"phase_reference_change_j":b.habitat.state.phase_energy_j()-a.habitat.state.phase_energy_j(),"formula":"C × (final T - initial T), only for constant retained C; phase reference change = vapor change × model reference latent enthalpy","scope":"Endpoint reference storage changes, not absolute thermodynamic energy or a full-span heat closure. Sparse sampled minute heat terms do not supply a complete cumulative ledger"}),
@@ -496,6 +496,7 @@ mod tests {
                     Environment {
                         irradiance_w_m2: Some(0.),
                         exterior_temperature_k: Some(250.),
+                        exterior_dose_rate_msv_day: None,
                     },
                 )
                 .unwrap();
@@ -625,6 +626,7 @@ mod tests {
                     Environment {
                         irradiance_w_m2: Some(0.),
                         exterior_temperature_k: Some(250.),
+                        exterior_dose_rate_msv_day: None,
                     },
                 )
                 .unwrap();

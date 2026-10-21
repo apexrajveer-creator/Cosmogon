@@ -94,7 +94,7 @@ pub(super) fn number(ui: &mut egui::Ui, label: &str, value: &mut f64, min: f64, 
     });
 }
 fn config(ui: &mut egui::Ui, c: &mut Config) {
-    egui::CollapsingHeader::new("Outward cabin breach").default_open(c.breach.is_some()).show(ui,|ui|super::habitat_breach::controls(ui,&mut c.breach,true));
+    egui::CollapsingHeader::new("Cabin breach orifice flow").default_open(c.breach.is_some()).show(ui,|ui|super::habitat_breach::controls(ui,&mut c.breach,true));
     egui::CollapsingHeader::new("Cabin moisture").default_open(c.moisture.is_some()).show(ui,|ui|super::habitat_humidity::controls(ui,&mut c.moisture,true));
     egui::CollapsingHeader::new("Passive wall condensation").default_open(c.wall_condensation.is_some()).show(ui,|ui|super::habitat_humidity::wall_controls(ui,&mut c.wall_condensation,true));
     egui::CollapsingHeader::new("Structural leak").default_open(c.leak.is_some()).show(ui,|ui|super::habitat_humidity::leak_controls(ui,&mut c.leak,true));
@@ -189,6 +189,7 @@ fn config(ui: &mut egui::Ui, c: &mut Config) {
         ui.label(egui::RichText::new("Zero equipment power disables that processor. Recovery fraction does not establish contaminant removal or potable-water quality.").small().color(MUTED));
     });
     egui::CollapsingHeader::new("Life-support calibration").default_open(c.calibration.is_some()).show(ui,|ui|super::habitat_calibration::controls(ui,&mut c.calibration,true));
+    egui::CollapsingHeader::new("Radiation shielding").default_open(c.radiation.is_some()).show(ui,|ui|super::habitat_radiation::controls(ui,&mut c.radiation,true));
     egui::CollapsingHeader::new("Finite supply storage").show(ui,|ui| {
         number(ui,"O₂ reserve tank (kg)",&mut c.oxygen_reserve_capacity_kg,0.0,1.0e7);
         number(ui,"Potable water tank (kg)",&mut c.potable_water_capacity_kg,0.0,1.0e7);

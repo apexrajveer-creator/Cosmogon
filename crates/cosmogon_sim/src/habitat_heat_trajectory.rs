@@ -108,6 +108,7 @@ mod tests {
                     Environment {
                         irradiance_w_m2: Some(0.),
                         exterior_temperature_k: Some(200. + i as f64),
+                        exterior_dose_rate_msv_day: None,
                     }
                 },
             )
@@ -368,6 +369,7 @@ mod tests {
                     Environment {
                         irradiance_w_m2: Some(0.),
                         exterior_temperature_k: Some(220.),
+                        exterior_dose_rate_msv_day: None,
                     }
                 },
             )

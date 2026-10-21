@@ -1129,7 +1129,7 @@ mod tests {
         let d=cosmogon_sim::crop_process::definition_at(cosmogon_sim::BodyRef{system:0,body:0},0.,0.);
         let mut h=cosmogon_sim::habitat::Habitat::new(0,d,1000.).unwrap();
         let first=cosmogon_sim::habitat::Sample{simulation_time_s:1000.,habitat:h.clone()};
-        h.step(1060.,cosmogon_sim::habitat::Environment{irradiance_w_m2:Some(0.),exterior_temperature_k:Some(210.)}).unwrap();
+        h.step(1060.,cosmogon_sim::habitat::Environment{irradiance_w_m2:Some(0.),exterior_temperature_k:Some(210.),exterior_dose_rate_msv_day:None}).unwrap();
         let r=Recording{rows:vec![first,cosmogon_sim::habitat::Sample{simulation_time_s:1060.,habitat:h}],summary:serde_json::json!({"source":"actual installed crop"})};
         let mut study=Study{figure_mode:true,metric:Metric::CropProgress,..Default::default()};
         study.commit(r.clone(),"loaded crop folder".into(),Some(1)).unwrap();study.path="unopened crop folder".into();

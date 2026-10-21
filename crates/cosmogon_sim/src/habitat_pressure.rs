@@ -256,7 +256,8 @@ pub fn explain(
         let c=h.budget.configuration.as_ref().ok_or("Breach substep configuration is unavailable")?;
         let g=b.initial_gas;
         let e=b.escaped;
-        let final_gas=Gas {oxygen_kg:g.oxygen_kg-e.oxygen_kg,nitrogen_kg:g.nitrogen_kg-e.nitrogen_kg,co2_kg:g.co2_kg-e.co2_kg,vapor_kg:g.vapor_kg-e.vapor_kg};
+        let i=b.inflow;
+        let final_gas=Gas {oxygen_kg:g.oxygen_kg-e.oxygen_kg+i.oxygen_kg,nitrogen_kg:g.nitrogen_kg-e.nitrogen_kg+i.nitrogen_kg,co2_kg:g.co2_kg-e.co2_kg+i.co2_kg,vapor_kg:g.vapor_kg-e.vapor_kg+i.vapor_kg};
         let initial=state(g,b.initial_temperature_k,c.volume_m3)?;
         let final_state=state(final_gas,b.final_temperature_k,c.volume_m3)?;
         let change=self::change(&initial,&final_state);
@@ -424,6 +425,7 @@ mod tests {
             Environment {
                 irradiance_w_m2: Some(0.0),
                 exterior_temperature_k: Some(250.0),
+                exterior_dose_rate_msv_day: None,
             },
         )
         .unwrap();
@@ -589,6 +591,7 @@ mod tests {
             Environment {
                 irradiance_w_m2: Some(0.0),
                 exterior_temperature_k: Some(250.0),
+                exterior_dose_rate_msv_day: None,
             },
         )
         .unwrap();

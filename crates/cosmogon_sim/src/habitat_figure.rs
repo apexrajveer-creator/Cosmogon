@@ -559,6 +559,7 @@ mod tests {
                     Environment {
                         irradiance_w_m2: Some(0.),
                         exterior_temperature_k: Some(250.),
+                        exterior_dose_rate_msv_day: None,
                     },
                 )
                 .unwrap();
